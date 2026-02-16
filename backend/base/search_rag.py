@@ -120,8 +120,25 @@ class SearchRagManager:
     def invoke(self, query: str) -> List[Document]:
         results = self.search(query)
         documents = [res.document for res in results if res.document is not None]
+        # Preserve original web search metadata (title, source_type, source/URL)
+        # before the vectorstore round-trip which may lose it during splitting.
+        original_meta = {}
+        for res in results:
+            if res.document is not None:
+                original_meta[res.link] = {
+                    "title": res.title,
+                    "source_type": "web_search",
+                    "source": res.link,
+                }
         self.add_documents(documents=documents)
         retrieved_docs = self.retrieve(query)
+        # Re-apply web search metadata to retrieved docs
+        for doc in retrieved_docs:
+            src = doc.metadata.get("source", "")
+            if src in original_meta:
+                for key, val in original_meta[src].items():
+                    if key not in doc.metadata or not doc.metadata[key]:
+                        doc.metadata[key] = val
         return retrieved_docs
 
     def invoke_hybrid(self, query: str, k: Optional[int] = None) -> List[Document]:
@@ -166,7 +183,7 @@ def format_docs(docs: List[Document]) -> str:
         title = doc.metadata.get("title") if doc.metadata else None
         source = doc.metadata.get("source") if doc.metadata else None
         source_type = doc.metadata.get("source_type") if doc.metadata else None
-        header_parts = [f"[{idx}]"]
+        header_parts = [f"[{idx + 1}]"]
         if source_type:
             header_parts.append(f"({source_type})")
         if title:

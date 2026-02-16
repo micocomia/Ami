@@ -1,8 +1,10 @@
 import os
+import re
 import json
 import logging
 import warnings
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_core.documents import Document
 
@@ -11,6 +13,16 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".json", ".pdf", ".pptx", ".py", ".txt", ".md"}
 SKIP_FILES = {".DS_Store", ".keep", ".keep 2", ".gitkeep", "Thumbs.db"}
 CONTENT_CATEGORIES = {"Syllabus", "Lectures", "Exercises", "References"}
+
+_LECTURE_NUMBER_RE = re.compile(r"[Ll]ec_?(\d+)")
+
+
+def _extract_lecture_number(file_name: str) -> Optional[int]:
+    """Extract lecture number from filename patterns like Lec_1.pdf, MIT11_437F16_Lec3.pdf, MIT6_831S11_lec01.pdf."""
+    match = _LECTURE_NUMBER_RE.search(file_name)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def scan_courses(base_dir: str) -> List[Dict[str, Any]]:
@@ -93,26 +105,72 @@ def _load_json(file_path: str) -> List[Document]:
     return [doc]
 
 
-def _load_with_docling(file_path: str) -> List[Document]:
-    """Use DoclingLoader for PDF and PPTX files."""
-    from langchain_docling import DoclingLoader
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
+_converter = None
 
-    pipeline_options = PdfPipelineOptions(allow_external_plugins=True)
-    converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-        }
+
+def _get_converter():
+    """Return a shared DocumentConverter singleton (avoids expensive re-init per file)."""
+    global _converter
+    if _converter is None:
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+        pipeline_options = PdfPipelineOptions(allow_external_plugins=True)
+        _converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+            }
+        )
+    return _converter
+
+
+def _load_with_docling(file_path: str) -> List[Document]:
+    """Use DoclingLoader for PDF and PPTX files with DOC_CHUNKS mode for page metadata."""
+    from langchain_docling import DoclingLoader
+    from langchain_docling.loader import ExportType
+
+    loader = DoclingLoader(
+        file_path=file_path,
+        converter=_get_converter(),
+        export_type=ExportType.DOC_CHUNKS,
     )
-    loader = DoclingLoader(file_path=file_path, converter=converter)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
             message="Token indices sequence length is longer than the specified maximum sequence length",
         )
         docs = loader.load()
+
+    for doc in docs:
+        # Extract page_number from dl_meta or top-level page_no
+        page_number = doc.metadata.pop("page_no", None)
+        if page_number is None:
+            dl_meta = doc.metadata.get("dl_meta")
+            if isinstance(dl_meta, dict):
+                for item in dl_meta.get("doc_items", []):
+                    for prov in item.get("prov", []):
+                        if "page_no" in prov:
+                            page_number = prov["page_no"]
+                            break
+                    if page_number is not None:
+                        break
+            elif isinstance(dl_meta, str):
+                try:
+                    meta_dict = json.loads(dl_meta)
+                    for item in meta_dict.get("doc_items", []):
+                        for prov in item.get("prov", []):
+                            if "page_no" in prov:
+                                page_number = prov["page_no"]
+                                break
+                        if page_number is not None:
+                            break
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        doc.metadata["page_number"] = page_number
+        # Remove dl_meta — it's a complex structure not useful to store raw
+        doc.metadata.pop("dl_meta", None)
+
     return docs
 
 
@@ -131,6 +189,14 @@ def _load_text(file_path: str) -> List[Document]:
     return [doc]
 
 
+def _load_and_tag(file_path: str, metadata: Dict[str, Any]) -> List[Document]:
+    """Load a single file and attach metadata to all resulting documents."""
+    docs = load_file(file_path)
+    for doc in docs:
+        doc.metadata.update(metadata)
+    return docs
+
+
 def load_course_documents(
     course_dir: str, course_metadata: Dict[str, Any]
 ) -> List[Document]:
@@ -146,6 +212,7 @@ def load_course_documents(
             for fname in sorted(files):
                 file_path = os.path.join(root, fname)
                 docs = load_file(file_path)
+                lecture_number = _extract_lecture_number(fname)
                 for doc in docs:
                     doc.metadata.update({
                         "source_type": "verified_content",
@@ -154,6 +221,7 @@ def load_course_documents(
                         "term": course_metadata["term"],
                         "content_category": category,
                         "file_name": fname,
+                        "lecture_number": lecture_number,
                     })
                 documents.extend(docs)
 
@@ -164,14 +232,52 @@ def load_course_documents(
     return documents
 
 
-def load_all_verified_content(base_dir: str) -> List[Document]:
-    """Top-level function returning flat list of Document objects from all courses."""
-    courses = scan_courses(base_dir)
-    all_documents = []
+def load_all_verified_content(base_dir: str, max_workers: int = 4) -> List[Document]:
+    """Top-level function returning flat list of Document objects from all courses.
 
+    Files are loaded in parallel using a thread pool to speed up Docling conversion.
+    """
+    courses = scan_courses(base_dir)
+
+    # Collect all (file_path, metadata) pairs across every course and category.
+    file_tasks: List[Tuple[str, Dict[str, Any]]] = []
     for course in courses:
-        docs = load_course_documents(course["directory"], course)
-        all_documents.extend(docs)
+        for category in CONTENT_CATEGORIES:
+            category_dir = os.path.join(course["directory"], category)
+            if not os.path.isdir(category_dir):
+                continue
+            for root, _dirs, files in os.walk(category_dir):
+                for fname in sorted(files):
+                    file_path = os.path.join(root, fname)
+                    meta = {
+                        "source_type": "verified_content",
+                        "course_code": course["course_code"],
+                        "course_name": course["course_name"],
+                        "term": course["term"],
+                        "content_category": category,
+                        "file_name": fname,
+                        "lecture_number": _extract_lecture_number(fname),
+                    }
+                    file_tasks.append((file_path, meta))
+
+    if not file_tasks:
+        logger.info("No verified content files found.")
+        return []
+
+    # Process files in parallel.
+    all_documents: List[Document] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_load_and_tag, path, meta): path
+            for path, meta in file_tasks
+        }
+        for future in as_completed(futures):
+            file_path = futures[future]
+            try:
+                docs = future.result()
+                all_documents.extend(docs)
+            except Exception as e:
+                logger.error(f"Failed to load file {file_path}: {e}")
 
     logger.info(f"Total verified content documents loaded: {len(all_documents)}")
     return all_documents

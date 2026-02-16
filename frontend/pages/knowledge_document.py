@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
 from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_learner_profile, get_app_config
-from utils.format import prepare_markdown_document, extract_sources_used
+from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
 from config import use_mock_data, use_search
 from assets.js.doc_reading import doc_reading_auto_scroll_js
@@ -44,22 +44,11 @@ def render_learning_content():
         track_session_learning_start_time()
         learning_content = st.session_state["document_caches"].get(session_uid, "")
 
-        # Source attribution banner
-        sources_used = learning_content.get("sources_used", []) if isinstance(learning_content, dict) else []
-        if sources_used:
-            has_verified = "verified_content" in sources_used
-            has_web = "web_search" in sources_used
-            if has_verified and has_web:
-                st.info("Content sourced from verified course materials, supplemented with web search")
-            elif has_verified:
-                st.info("Content sourced from verified university course materials (MIT OpenCourseWare)")
-            elif has_web:
-                st.info("Content supplemented with web search results")
-
         render_type = "by_section"
         document = learning_content["document"]
+        sources_used = learning_content.get("sources_used", [])
         if render_type == "by_section":
-            render_document_content_by_section(document)
+            render_document_content_by_section(document, sources_used)
         else:
             render_document_content_by_document(document)
 
@@ -264,7 +253,7 @@ def render_content_preparation(goal):
     st.rerun()
     return learning_content
 
-def render_document_content_by_section(document):
+def render_document_content_by_section(document, sources_used=None):
     selected_gid = st.session_state["selected_goal_id"]
     session_id = st.session_state["selected_session_id"]
     if "current_page" not in st.session_state or not isinstance(st.session_state["current_page"], dict):
@@ -281,10 +270,16 @@ def render_document_content_by_section(document):
             start_idx = document.find(title[1], start_idx)
             section_starts.append(start_idx-3)
     section_documents = []
+    references_section = None
     for i in range(len(section_starts)):
         start_idx = section_starts[i]
         end_idx = section_starts[i + 1] if i + 1 < len(section_starts) else len(document)
-        section_documents.append(document[start_idx:end_idx-1].strip())
+        section_text = document[start_idx:end_idx-1].strip()
+        # Extract References section so it can be shown persistently
+        if section_text.startswith("## References"):
+            references_section = section_text
+        else:
+            section_documents.append(section_text)
 
     page_key = f"{selected_gid}-{session_id}"
     params = {}
@@ -326,7 +321,16 @@ def render_document_content_by_section(document):
             save_persistent_state()
         except Exception:
             pass
-    st.markdown(section_documents[current_page])
+    section_md = section_documents[current_page]
+    if sources_used:
+        section_md = inject_citation_tooltips(section_md, sources_used)
+    st.markdown(section_md, unsafe_allow_html=True)
+
+    if references_section:
+        with st.expander("References", expanded=False, icon=":material/menu_book:"):
+            # Skip the "## References" header line and render the body
+            ref_body = "\n".join(references_section.split("\n")[1:]).strip()
+            st.markdown(ref_body)
 
     st.sidebar.header("Document Structure")
     curr_l2 = 0
@@ -336,6 +340,8 @@ def render_document_content_by_section(document):
         level_marks, title_txt = m.group(1), m.group(2).strip()
         level_len = len(level_marks)
         if level_len == 1:
+            continue
+        if level_len == 2 and title_txt == "References":
             continue
         if level_len == 2:
             page_idx_counter += 1

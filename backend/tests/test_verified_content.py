@@ -97,6 +97,24 @@ class TestVerifiedContentLoader:
         assert load_file(ds_store) == []
         assert load_file(keep) == []
 
+    def test_extract_lecture_number(self):
+        from base.verified_content_loader import _extract_lecture_number
+
+        # Pattern: Lec_N.pdf
+        assert _extract_lecture_number("Lec_1.pdf") == 1
+        assert _extract_lecture_number("Lec_12.pdf") == 12
+
+        # Pattern: ...LecN.pdf (no underscore)
+        assert _extract_lecture_number("MIT11_437F16_Lec3.pdf") == 3
+
+        # Pattern: ...lecNN.pdf (lowercase)
+        assert _extract_lecture_number("MIT6_831S11_lec01.pdf") == 1
+
+        # Non-lecture files
+        assert _extract_lecture_number("syllabus.json") is None
+        assert _extract_lecture_number("data.json") is None
+        assert _extract_lecture_number("code.py") is None
+
     def test_load_course_documents_has_metadata(self, tmp_path):
         from base.verified_content_loader import load_course_documents
 
@@ -120,11 +138,43 @@ class TestVerifiedContentLoader:
         docs = load_course_documents(course_dir, metadata)
         assert len(docs) >= 2
 
-        required_keys = {"source_type", "course_code", "course_name", "term", "content_category", "file_name"}
+        required_keys = {"source_type", "course_code", "course_name", "term", "content_category", "file_name", "lecture_number"}
         for doc in docs:
             assert required_keys.issubset(doc.metadata.keys()), f"Missing keys in {doc.metadata}"
             assert doc.metadata["source_type"] == "verified_content"
             assert doc.metadata["course_code"] == "6.0001"
+
+    def test_lecture_number_in_metadata(self, tmp_path):
+        from base.verified_content_loader import load_course_documents
+
+        course_dir = _make_course_dir(str(tmp_path), "6.0001", "intro-cs", "fall-2016")
+        # Lecture file — should get lecture_number
+        _write_text(
+            os.path.join(course_dir, "Lectures", "Lec_8.py"),
+            "# Lecture 8 content",
+        )
+        # Non-lecture file — should get lecture_number: None
+        _write_json(
+            os.path.join(course_dir, "Syllabus", "data.json"),
+            title="Syllabus",
+            content="Course syllabus.",
+        )
+
+        metadata = {
+            "course_code": "6.0001",
+            "course_name": "intro cs",
+            "term": "fall 2016",
+            "directory": course_dir,
+        }
+        docs = load_course_documents(course_dir, metadata)
+
+        lecture_docs = [d for d in docs if d.metadata["file_name"] == "Lec_8.py"]
+        assert len(lecture_docs) == 1
+        assert lecture_docs[0].metadata["lecture_number"] == 8
+
+        syllabus_docs = [d for d in docs if d.metadata["file_name"] == "data.json"]
+        assert len(syllabus_docs) == 1
+        assert syllabus_docs[0].metadata["lecture_number"] is None
 
 
 # ===========================================================================

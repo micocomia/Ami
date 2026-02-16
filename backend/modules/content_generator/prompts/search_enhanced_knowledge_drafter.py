@@ -19,6 +19,9 @@ Your role is to draft rich, detailed markdown content for a *single* knowledge p
     * Do NOT use any markdown header titles (e.g., #, ##, ###). Use `**Bold Text**` for sub-headings. This is critical for later integration.
     * The `content` must be well-structured, including lists, code snippets, or tables where appropriate.
     * It MUST conclude with an `**Additional Resources**` section, using the provided `external_resources`.
+5.  **Cite Sources**: When using information from `external_resources`, include inline citation numbers
+    (e.g., [1], [2]) corresponding to the source indices provided. Place citations at the end of the
+    relevant sentence or paragraph. This helps learners trace content back to its source.
 
 **Final Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.

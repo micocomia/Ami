@@ -369,7 +369,7 @@ python -m pytest backend/tests/test_auth_api.py::TestDeleteAccountEndpoint backe
 
 | Test file | Class / Tests | What it covers |
 |---|---|---|
-| `backend/tests/test_verified_content.py` | `TestVerifiedContentLoader` (6 tests) | Course scanning, file loading (JSON, text, unsupported), metadata assignment |
+| `backend/tests/test_verified_content.py` | `TestVerifiedContentLoader` (8 tests) | Course scanning, file loading (JSON, text, unsupported), metadata assignment, lecture number extraction, lecture number in metadata |
 | `backend/tests/test_verified_content.py` | `TestVerifiedContentManager` (5 tests) | Indexing, retrieval, dedup (skip if already indexed), empty collection, course listing |
 | `backend/tests/test_verified_content.py` | `TestHybridRetrieval` (4 tests) | Verified-first cascade, web fallback, no verified manager fallback, source type preservation |
 
@@ -385,11 +385,11 @@ python -m pytest backend/tests/test_verified_content.py -v
 | 1 | Set a learning goal matching a verified course (e.g., "Introduction to Computer Science and Programming in Python") | Goal is accepted |
 | 2 | Complete onboarding, schedule a learning path | Learning path is created with sessions |
 | 3 | Start a session and wait for content generation | Spinners show stages 1-4. Content is generated |
-| 4 | Observe the **source attribution banner** above the document | Info banner: "Content sourced from verified university course materials (MIT OpenCourseWare)" |
-| 5 | Observe the generated learning document | Content incorporates MIT 6.0001 material. Check that content is substantive and accurate |
+| 4 | Observe the generated learning document | Content incorporates MIT 6.0001 material. Inline `[N]` citations appear in content paragraphs. A **References** section at the bottom of the document lists all sources with details (e.g., "MIT 6.0001 — Lecture 8, p.3 (Lec_8.pdf) — verified course material") |
+| 5 | Verify no old source attribution banner is shown | The blue `st.info(...)` banner above the document should no longer appear |
 | 6 | Set a learning goal NOT in verified content (e.g., "Learn Kubernetes cluster management") | Goal is accepted |
 | 7 | Generate content for a session | Content generated using web search (fallback) |
-| 8 | Observe the **source attribution banner** | Info banner: "Content supplemented with web search results" |
+| 8 | Observe the generated learning document | Inline `[N]` citations appear in content. The **References** section lists web search sources (e.g., "Title (https://example.com) — web search") |
 | 9 | Check backend logs for source attribution | `source_type=verified_content` for step 4, `source_type=web_search` for step 7 |
 
 ---
@@ -406,8 +406,8 @@ python -m pytest backend/tests/test_verified_content.py -v
 | `backend/tests/test_onboarding_api.py` | 34 | Flow 2B (PDF extract), Flow 2D (goal refinement), Flow 2E (skill gap + profile creation + event logging), config + personas endpoints |
 | `backend/tests/test_fslsm_update.py` | 2 | Flow 2A (FSLSM dimension updates — integration test, requires LLM API key) |
 | `backend/tests/test_behavioral_metrics.py` | 7 | Flow 4 (behavioral metrics endpoint: computation, filtering, edge cases) |
-| `backend/tests/test_verified_content.py` | 15 | Flow 5 (verified content loading, indexing, hybrid retrieval, fallback) |
-| **Total** | **133** | |
+| `backend/tests/test_verified_content.py` | 17 | Flow 5 (verified content loading, indexing, hybrid retrieval, fallback, lecture number extraction) |
+| **Total** | **135** | |
 
 ### Running All Tests
 

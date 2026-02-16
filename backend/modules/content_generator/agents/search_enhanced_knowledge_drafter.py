@@ -58,11 +58,28 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
             knowledge_point_name = str(knowledge_point.get('name', '')).strip()
             query = f"{session_title} {knowledge_point_name}".strip()
             docs = self.search_rag_manager.invoke_hybrid(query)
-            # Collect unique source_type values
-            for doc in docs:
-                st = doc.metadata.get("source_type")
-                if st and st not in sources_used:
-                    sources_used.append(st)
+            # Collect detailed source references (ordered by same index as format_docs)
+            for idx, doc in enumerate(docs):
+                meta = doc.metadata or {}
+                st = meta.get("source_type")
+                if st == "verified_content":
+                    ref = {
+                        "source_type": "verified_content",
+                        "course_code": meta.get("course_code", ""),
+                        "course_name": meta.get("course_name", ""),
+                        "lecture_number": meta.get("lecture_number"),
+                        "page_number": meta.get("page_number"),
+                        "file_name": meta.get("file_name", ""),
+                    }
+                elif st == "web_search":
+                    ref = {
+                        "source_type": "web_search",
+                        "title": meta.get("title", ""),
+                        "url": meta.get("source", ""),
+                    }
+                else:
+                    ref = {"source_type": st or "unknown"}
+                sources_used.append(ref)
             context = format_docs(docs)
             if context:
                 ext = data.get("external_resources") or ""

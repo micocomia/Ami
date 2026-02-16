@@ -23,7 +23,7 @@ class KnowledgePoints(BaseModel):
 class KnowledgeDraft(BaseModel):
     title: str
     content: str
-    sources_used: Optional[List[str]] = None
+    sources_used: Optional[List[dict]] = None
 
 
 class DocumentStructure(BaseModel):

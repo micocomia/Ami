@@ -441,6 +441,36 @@ The system supports multiple search providers:
 - **ChromaDB**: Vector storage for document retrieval
 - **Sentence Transformers**: Text embeddings
 
+### Verified Course Content
+
+The system supports loading and indexing verified course materials (lecture slides, syllabi, exercises, reference code) so the AI tutor can ground answers in trusted content.
+
+**Directory structure:**
+
+Place course folders under `resources/verified-course-content/`. Each folder follows the naming pattern:
+
+```
+{course_code}_{course-name}_{term}/
+├── Syllabus/
+├── Lectures/
+├── Exercises/
+└── References/
+```
+
+For example: `6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/`
+
+**File naming — lecture numbers:**
+
+Lecture files should contain `Lec_N` in the filename (e.g. `Lec_1.pdf`, `Lec_12.pdf`) so the system can automatically extract lecture numbers for metadata filtering. The following patterns are recognised:
+
+- `Lec_1.pdf`
+- `MIT11_437F16_Lec3.pdf`
+- `MIT6_831S11_lec01.pdf`
+
+**Supported file types:** `.pdf`, `.pptx`, `.json`, `.txt`, `.py`, `.md`
+
+**Re-indexing:** Deleting the `data/vectorstore/` directory forces a full re-index on the next server startup.
+
 ## Data Flow
 
 1. **Learner Input**: CV upload, learning goals, or direct information
