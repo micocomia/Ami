@@ -1,6 +1,7 @@
 import streamlit as st
 
 from utils.request_api import create_learner_profile, identify_skill_gap, get_app_config
+from utils.format import format_citation
 from utils.state import save_persistent_state
 
 def render_identifying_skill_gap(goal):
@@ -8,9 +9,10 @@ def render_identifying_skill_gap(goal):
         learning_goal = goal["learning_goal"]
         learner_information = st.session_state["learner_information"]
         llm_type = st.session_state["llm_type"]
-        skill_gaps, goal_assessment = identify_skill_gap(learning_goal, learner_information, llm_type)
+        skill_gaps, goal_assessment, retrieved_sources = identify_skill_gap(learning_goal, learner_information, llm_type)
     goal["skill_gaps"] = skill_gaps
     goal["goal_assessment"] = goal_assessment
+    goal["retrieved_sources"] = retrieved_sources or []
     goal["_last_identified_goal"] = goal["learning_goal"]
     # If the goal was auto-refined, update the learning_goal to the refined version
     if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("refined_goal"):
@@ -45,6 +47,20 @@ def render_goal_assessment_banners(goal):
         st.info(
             f"You already master all required skills for this goal. {suggestion}"
         )
+
+
+def render_retrieval_sources_banner(goal):
+    """Show a banner indicating whether the skill analysis used verified course content."""
+    sources = goal.get("retrieved_sources") or []
+    if sources:
+        st.info("Skill analysis was grounded in verified course content.")
+        with st.expander("View sources"):
+            for idx, source in enumerate(sources, start=1):
+                # Normalise to the format expected by format_citation
+                source_ref = dict(source)
+                if "source_type" not in source_ref:
+                    source_ref["source_type"] = "verified_content"
+                st.markdown(format_citation(source_ref, idx))
 
 
 def has_any_gap(skill_gaps):

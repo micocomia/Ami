@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Dict, Optional, Tuple, TypeAlias
+from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 from pydantic import BaseModel, Field
 from base import BaseAgent
 from base.search_rag import SearchRagManager
@@ -80,11 +80,15 @@ def identify_skill_gap_with_llm(
     """
     original_goal = learning_goal
     was_auto_refined = False
+    retrieved_sources: List[Dict[str, Any]] = []
 
     for attempt in range(2):  # max 1 refinement retry
         # Step 1: Map goal to skills (with retrieval if available)
         if not skill_requirements or attempt > 0:
-            mapper = SkillRequirementMapper(llm, search_rag_manager=search_rag_manager)
+            mapper = SkillRequirementMapper(
+                llm, search_rag_manager=search_rag_manager,
+                retrieved_docs_sink=retrieved_sources,
+            )
             effective_requirements = mapper.map_goal_to_skill({"learning_goal": learning_goal})
         else:
             effective_requirements = skill_requirements
@@ -132,12 +136,22 @@ def identify_skill_gap_with_llm(
 
         break  # goal is good enough, or we already refined once
 
-    # Annotate goal_assessment with auto-refinement info
-    if was_auto_refined:
-        goal_assessment["auto_refined"] = True
-        goal_assessment["original_goal"] = original_goal
-        goal_assessment["refined_goal"] = learning_goal
+    # Always explicitly set auto-refinement fields to prevent LLM hallucination
+    goal_assessment["auto_refined"] = was_auto_refined
+    goal_assessment["original_goal"] = original_goal if was_auto_refined else None
+    goal_assessment["refined_goal"] = learning_goal if was_auto_refined else None
 
     # Ensure goal_assessment is included in the result
     skill_gaps["goal_assessment"] = goal_assessment
+
+    # Deduplicate retrieved sources by file_name (or full dict as fallback)
+    seen_keys: set = set()
+    deduped_sources: List[Dict[str, Any]] = []
+    for src in retrieved_sources:
+        key = src.get("file_name") or str(sorted(src.items()))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped_sources.append(src)
+    skill_gaps["retrieved_sources"] = deduped_sources
+
     return skill_gaps, effective_requirements

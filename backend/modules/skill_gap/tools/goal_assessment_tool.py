@@ -47,10 +47,18 @@ def create_goal_assessment_tool(search_rag_manager: Optional[SearchRagManager] =
         # Check vagueness via retrieval
         is_vague = False
         if search_rag_manager is not None and search_rag_manager.verified_content_manager is not None:
-            vcm = search_rag_manager.verified_content_manager
-            docs = vcm.retrieve(learning_goal, k=3)
-            if not docs:
-                is_vague = True
+            # Goals that explicitly reference a course code are inherently specific
+            import re
+            course_code_pattern = re.compile(
+                r'\b\d+\.\d+\b'           # numeric codes like 6.0001
+                r'|[A-Za-z]+\d{3,}'       # alphanumeric codes like DTI5902
+                r'|\d+[A-Za-z]+\d*',      # mixed codes like 6EE100
+            )
+            if not course_code_pattern.search(learning_goal):
+                vcm = search_rag_manager.verified_content_manager
+                docs = vcm.retrieve(learning_goal, k=3)
+                if not docs:
+                    is_vague = True
         # Without verified content, we cannot assess vagueness via retrieval
         # so we leave is_vague=False and let the LLM decide
 

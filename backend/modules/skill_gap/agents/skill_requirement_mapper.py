@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Dict, Optional, TypeAlias
+from typing import Any, Dict, List, Optional, TypeAlias
 
 from pydantic import BaseModel, Field
 from base import BaseAgent
@@ -32,10 +32,13 @@ class SkillRequirementMapper(BaseAgent):
 		self,
 		model: Any,
 		search_rag_manager: Optional[SearchRagManager] = None,
+		retrieved_docs_sink: Optional[List[Dict[str, Any]]] = None,
 	) -> None:
 		tools = None
 		if search_rag_manager is not None:
-			retrieve_tool = create_course_content_retrieval_tool(search_rag_manager)
+			retrieve_tool = create_course_content_retrieval_tool(
+				search_rag_manager, retrieved_docs_sink=retrieved_docs_sink,
+			)
 			tools = [retrieve_tool]
 
 		super().__init__(
