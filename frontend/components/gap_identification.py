@@ -13,8 +13,8 @@ def render_identifying_skill_gap(goal):
     goal["goal_assessment"] = goal_assessment
     goal["_last_identified_goal"] = goal["learning_goal"]
     # If the goal was auto-refined, update the learning_goal to the refined version
-    if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("original_goal"):
-        goal["learning_goal"] = goal.get("learning_goal", learning_goal)
+    if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("refined_goal"):
+        goal["learning_goal"] = goal_assessment["refined_goal"]
     save_persistent_state()
     st.rerun()
     st.toast("Successfully identified skill gaps!")

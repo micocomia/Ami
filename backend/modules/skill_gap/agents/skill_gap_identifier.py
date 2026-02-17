@@ -136,6 +136,7 @@ def identify_skill_gap_with_llm(
     if was_auto_refined:
         goal_assessment["auto_refined"] = True
         goal_assessment["original_goal"] = original_goal
+        goal_assessment["refined_goal"] = learning_goal
 
     # Ensure goal_assessment is included in the result
     skill_gaps["goal_assessment"] = goal_assessment

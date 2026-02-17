@@ -83,6 +83,7 @@ class GoalAssessment(BaseModel):
     suggestion: str = Field(default="", description="Actionable suggestion for the learner.")
     auto_refined: bool = Field(default=False, description="Whether the goal was automatically refined.")
     original_goal: Optional[str] = Field(default=None, description="The original goal before auto-refinement, if refined.")
+    refined_goal: Optional[str] = Field(default=None, description="The refined goal after auto-refinement, if refined.")
 
 
 class SkillGaps(BaseModel):
