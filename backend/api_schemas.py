@@ -200,6 +200,13 @@ class UserStateRequest(BaseModel):
     state: Dict[str, Any]
 
 
+class MasteryEvaluationRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+    quiz_answers: Dict[str, Any]
+
+
 class BehavioralMetricsResponse(BaseModel):
     user_id: str
     goal_id: Optional[int] = None

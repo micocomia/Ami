@@ -489,6 +489,30 @@ def iterative_refine_learning_path(learner_profile, learning_path, max_iteration
     return None
 
 
+def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
+    """Submit quiz answers for mastery evaluation."""
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "quiz_answers": quiz_answers,
+    }
+    response = make_post_request("evaluate-mastery", data)
+    return response if response else None
+
+
+def get_session_mastery_status(user_id, goal_id):
+    """Get mastery status for all sessions in a goal."""
+    url = f"{backend_endpoint}session-mastery-status/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 def get_behavioral_metrics(user_id, goal_id=None):
     """Fetch computed behavioral metrics from the backend."""
     url = f"{backend_endpoint}behavioral-metrics/{user_id}"

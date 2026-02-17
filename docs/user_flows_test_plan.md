@@ -20,6 +20,8 @@
 10. [Flow 3 — User Account Deletion](#flow-3--user-account-deletion)
 11. [Flow 4 — Behavioral Patterns Display (Real Metrics)](#flow-4--behavioral-patterns-display-real-metrics)
 12. [Flow 5 — Knowledge Content with Verified Course Materials](#flow-5--knowledge-content-with-verified-course-materials)
+13. [Flow 6 — FSLSM-Driven Learning Path Adaptations](#flow-6--fslsm-driven-learning-path-adaptations)
+14. [Flow 7 — Mastery Lock and Quiz-Based Mastery Evaluation](#flow-7--mastery-lock-and-quiz-based-mastery-evaluation)
 
 ---
 
@@ -495,6 +497,195 @@ python -m pytest backend/tests/test_verified_content.py -v
 
 ---
 
+## Flow 6 — FSLSM-Driven Learning Path Adaptations
+
+### User Story
+
+> **As a** learner with a specific learning style (FSLSM profile),
+> **I want** the learning path structure to adapt based on my FSLSM dimensions,
+> **so that** sessions include appropriate challenges, reflection time, sequencing, and navigation suited to how I learn best.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_fslsm_overrides.py` | `TestFSLSMOverrides` (12 tests) | Deterministic FSLSM post-processing: active learners get checkpoint challenges, reflective learners get thinking time buffers, sensing learners get application-first sequencing, intuitive learners get theory-first, sequential learners get linear navigation, global learners get free navigation, neutral dimensions use defaults, overrides apply to all sessions, mastery threshold varies by proficiency, empty profile uses defaults, combined dimensions |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_fslsm_overrides.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 6.1 — Active learner (Checkpoint Challenges)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Hands-on Explorer"** persona (processing = -0.7, active) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Navigate to the **Learning Path** page | Session cards are visible |
+| 4 | Observe session cards | Each session card shows a caption: "Contains Checkpoint Challenges" |
+| 5 | Check session data (via debug or API) | `has_checkpoint_challenges` is `True` for all sessions |
+
+#### 6.2 — Reflective learner (Thinking Time buffers)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Reflective Reader"** persona (processing = 0.7, reflective) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Navigate to the **Learning Path** page | Session cards are visible |
+| 4 | Observe session cards | Each session card shows a caption: "Recommended reflection time: 10 min" |
+| 5 | Check session data | `thinking_time_buffer_minutes` is `10` for all sessions |
+
+#### 6.3 — Sensing learner (Application-first sequencing)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Hands-on Explorer"** persona (perception = -0.5, sensing) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Expand a session details card | Session shows "Sequence: Application first" |
+| 4 | Check session data | `session_sequence_hint` is `"application-first"` |
+
+#### 6.4 — Intuitive learner (Theory-first sequencing)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Conceptual Thinker"** persona (perception = 0.7, intuitive) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Expand a session details card | Session shows "Sequence: Theory first" |
+| 4 | Check session data | `session_sequence_hint` is `"theory-first"` |
+
+#### 6.5 — Visual learner (Module Map)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Visual Learner"** persona (input = -0.7, visual) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Navigate to the **Learning Path** page | A **Module Map** (directed graph) appears between the overall information and session cards |
+| 4 | Observe the module map | Nodes represent sessions, colored by status: green (mastered), blue (completed), gray (locked), white (available). Arrows show session order |
+| 5 | Select **"Reflective Reader"** persona (input = 0.7, verbal) | Module map does NOT appear. Instead, a **Narrative Overview** section appears |
+
+#### 6.6 — Verbal learner (Narrative Overview)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Reflective Reader"** persona (input = 0.7, verbal) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Navigate to the **Learning Path** page | A **Narrative Overview** section appears between overall information and session cards |
+| 4 | Observe the narrative overview | Sessions are framed as "chapters" with brief narrative descriptions |
+
+#### 6.7 — Global learner (Free navigation)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Conceptual Thinker"** persona (understanding = 0.7, global) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated |
+| 3 | Navigate to the **Learning Path** page | All sessions are navigable — no locked sessions |
+| 4 | Click on any session (e.g., Session 3 before completing Session 1) | Session opens normally. No lock or restriction |
+| 5 | Check session data | `navigation_mode` is `"free"` for all sessions |
+
+#### 6.8 — Dual progress bars
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Navigate to the **Learning Path** page (any persona) | Overall information section is visible |
+| 2 | Observe progress indicators | Two progress bars are displayed side by side: "Sessions Completed" and "Sessions Mastered" |
+| 3 | Complete a session without passing the quiz | "Sessions Completed" increments but "Sessions Mastered" does not |
+| 4 | Pass the quiz for a session (score >= threshold) | "Sessions Mastered" increments |
+
+---
+
+## Flow 7 — Mastery Lock and Quiz-Based Mastery Evaluation
+
+### User Story
+
+> **As a** sequential learner,
+> **I want** the system to evaluate my mastery via quiz scores and lock subsequent sessions until I demonstrate mastery,
+> **so that** I build a solid foundation before moving to more advanced topics.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_quiz_scorer.py` | `TestComputeQuizScore` (11 tests) | Quiz scoring: perfect score, zero score, partial score, empty answers, None answers skipped, single choice scoring, multiple choice scoring, true/false scoring, short answer case-insensitive matching, empty quiz data |
+| `backend/tests/test_quiz_scorer.py` | `TestGetMasteryThreshold` (5 tests) | Mastery threshold lookup: beginner session (60%), expert session (90%), mixed proficiency uses highest, empty outcomes uses default, missing key uses default |
+| `backend/tests/test_mastery_evaluation.py` | `TestMasteryEvaluation` (7 tests) | End-to-end mastery evaluation: pass (score >= threshold), fail (score < threshold), boundary pass (score == threshold), beginner threshold (60%), expert threshold (90%), unknown proficiency level fallback, empty outcomes fallback |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_mastery_evaluation.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 7.1 — Submit All quiz model
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Navigate to a session's knowledge document (any persona) | Document loads with content and quiz questions |
+| 2 | Observe the quiz section | Questions are displayed without per-question correct/incorrect feedback. Answer inputs are present for each question type (radio buttons for single choice, checkboxes for multiple choice, radio for true/false, text input for short answer) |
+| 3 | Answer some questions (not all) | Answers are stored in `st.session_state["quiz_answers"]`. No immediate feedback is shown |
+| 4 | Click **"Submit Quiz"** | System calls `POST /evaluate-mastery`. Score and mastery result are displayed |
+| 5 | Observe the result (passing score) | Success message: "You scored X%! Mastery achieved (threshold: Y%)." Explanations for each question are shown |
+| 6 | Observe the result (failing score) | Warning message: "You scored X%. Mastery requires Y%." A **"Retake Quiz"** button appears |
+| 7 | Click **"Retake Quiz"** | Answers are cleared. Quiz questions are shown again for re-attempt |
+
+#### 7.2 — Mastery-gated session completion (sequential learner)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Reflective Reader"** persona (understanding = 0.5, slightly sequential → linear navigation) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path generated with `navigation_mode = "linear"` |
+| 3 | Open Session 1's knowledge document | Document and quiz are visible |
+| 4 | Observe the "Complete Session" button BEFORE submitting quiz | Button is **disabled** with info message: "Pass the quiz to unlock session completion" |
+| 5 | Submit the quiz with a passing score | "Complete Session" button becomes **enabled** |
+| 6 | Click **"Complete Session"** | Session is marked as completed and learned |
+| 7 | Navigate back to the **Learning Path** page | Session 1 shows mastery badge (green). Session 2 is now unlocked |
+
+#### 7.3 — Mastery lock on Learning Path page (sequential learner)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select a sequential persona. Complete onboarding, schedule path | Learning path with `navigation_mode = "linear"` |
+| 2 | Navigate to the **Learning Path** page | Session 1 has a "Learning" button (available). Sessions 2+ show a **disabled "Locked"** button with a lock icon |
+| 3 | Observe the locked session card | Caption below the button: "Master the previous session first" |
+| 4 | Click the locked button | Nothing happens (button is disabled) |
+| 5 | Complete and master Session 1 (pass quiz) | Session 2's button changes from "Locked" to "Learning" (unlocked). Sessions 3+ remain locked |
+| 6 | Complete and master all sessions sequentially | All session cards show mastery badges. No sessions are locked |
+
+#### 7.4 — No mastery lock for global learner
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Conceptual Thinker"** persona (understanding = 0.7, global → free navigation) | Persona selected |
+| 2 | Complete onboarding, schedule a learning path | Learning path with `navigation_mode = "free"` |
+| 3 | Navigate to the **Learning Path** page | All sessions show "Learning" buttons — none are locked |
+| 4 | Open Session 3 without completing Sessions 1 or 2 | Session opens normally |
+| 5 | Observe "Complete Session" in the knowledge document | Button is always enabled (not gated behind quiz mastery) |
+
+#### 7.5 — Mastery score badges
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Complete a quiz for a session with a passing score | Navigate to the Learning Path page |
+| 2 | Observe the session card | Green badge: "Mastered: X%" |
+| 3 | Complete a quiz for another session with a failing score | Navigate to the Learning Path page |
+| 4 | Observe the session card | Warning badge: "Quiz score: X% (need Y%)" |
+| 5 | Session with no quiz attempted | No mastery badge shown |
+
+#### 7.6 — Proficiency-based mastery thresholds
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Observe Session 1 (beginner-level skills) | Mastery threshold is 60% |
+| 2 | Score 60% on Session 1's quiz | Mastery achieved (60 >= 60) |
+| 3 | Observe a later session (advanced-level skills) | Mastery threshold is 80% |
+| 4 | Score 70% on that session's quiz | Mastery NOT achieved (70 < 80). Must retake |
+| 5 | Retake and score 85% | Mastery achieved (85 >= 80) |
+
+---
+
 ## Test Coverage Summary
 
 ### Backend Test Files
@@ -511,7 +702,10 @@ python -m pytest backend/tests/test_verified_content.py -v
 | `backend/tests/test_fslsm_update.py` | 2 | Flow 2A (FSLSM dimension updates — integration test, requires LLM API key) |
 | `backend/tests/test_behavioral_metrics.py` | 7 | Flow 4 (behavioral metrics endpoint: computation, filtering, edge cases) |
 | `backend/tests/test_verified_content.py` | 17 | Flow 5 (verified content loading, indexing, hybrid retrieval, fallback, lecture number extraction) |
-| **Total** | **178** | |
+| `backend/tests/test_quiz_scorer.py` | 16 | Flow 7 (quiz scoring: all question types, edge cases, mastery threshold lookup by proficiency) |
+| `backend/tests/test_fslsm_overrides.py` | 12 | Flow 6 (FSLSM post-processing: checkpoint challenges, thinking time, sequencing hints, navigation mode, mastery thresholds, combined dimensions) |
+| `backend/tests/test_mastery_evaluation.py` | 7 | Flow 7 (mastery evaluation: pass/fail, boundary, proficiency-based thresholds, fallback defaults) |
+| **Total** | **213** | |
 
 ### Running All Tests
 
@@ -524,6 +718,9 @@ python -m pytest backend/tests/test_auth_api.py backend/tests/test_onboarding_ap
 
 # New agentic skill gap tests:
 python -m pytest backend/tests/test_skill_gap_tools.py backend/tests/test_skill_gap_schemas.py backend/tests/test_skill_gap_orchestrator.py -v
+
+# FSLSM and mastery evaluation tests:
+python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_fslsm_overrides.py backend/tests/test_mastery_evaluation.py -v
 
 # All tests:
 python -m pytest backend/tests/ -v

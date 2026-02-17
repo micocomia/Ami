@@ -174,33 +174,123 @@ def render_learning_path():
 
     else:
         render_overall_information(goal)
+        render_module_map(goal)
+        render_narrative_overview(goal)
         render_path_feedback_section(goal)
         render_learning_sessions(goal)
 
 
 def render_overall_information(goal):
     with st.container(border=True):
-        st.write("#### 🎯 Current Goal")
+        st.write("#### Current Goal")
         st.text_area("In-progress Goal", value=goal["learning_goal"], disabled=True, help="Change this in the Goal Management section.")
         learned_sessions = sum(1 for s in goal["learning_path"] if s["if_learned"])
         total_sessions = len(goal["learning_path"])
         if total_sessions == 0:
             st.warning("No learning sessions found.")
-            progress = 0
-        else:
-            progress = int((learned_sessions / total_sessions) * 100)
-        st.write("#### 📊 Overall Progress")
-        with st.container():
-            st.progress(progress)
-            st.write(f"{learned_sessions}/{total_sessions} sessions completed ({progress}%)")
+            return
 
-            if learned_sessions == total_sessions:
-                st.success("🎉 Congratulations! All sessions are complete.")
-                st.balloons()
-            else:
-                st.info("🚀 Keep going! You’re making great progress.")
+        # Mastery count
+        mastered_count = sum(
+            1 for i in range(total_sessions)
+            if st.session_state.get("mastery_status", {}).get(
+                f"{st.session_state['selected_goal_id']}-{i}", {}
+            ).get("is_mastered", False)
+            or goal["learning_path"][i].get("is_mastered", False)
+        )
+
+        st.write("#### Overall Progress")
+        col1, col2 = st.columns(2)
+        with col1:
+            completion_pct = int((learned_sessions / total_sessions) * 100)
+            st.progress(completion_pct)
+            st.write(f"{learned_sessions}/{total_sessions} sessions completed ({completion_pct}%)")
+        with col2:
+            mastery_pct = int((mastered_count / total_sessions) * 100)
+            st.progress(mastery_pct)
+            st.write(f"{mastered_count}/{total_sessions} sessions mastered ({mastery_pct}%)")
+
+        if learned_sessions == total_sessions:
+            st.success("Congratulations! All sessions are complete.")
+            st.balloons()
+        else:
+            st.info("Keep going! You're making great progress.")
         with st.expander("View Skill Details", expanded=False):
             render_skill_info(goal["learner_profile"])
+
+def _is_session_locked(goal, sid):
+    """Check if a session is locked due to mastery lock (sequential learners).
+
+    For linear navigation mode: session N is locked unless session N-1 is mastered.
+    Session 0 is always unlocked.
+    For free navigation mode: nothing is locked.
+    """
+    session = goal["learning_path"][sid]
+    nav_mode = session.get("navigation_mode", "linear")
+
+    if nav_mode == "free":
+        return False
+    if sid == 0:
+        return False
+
+    # Check if previous session is mastered
+    prev_session = goal["learning_path"][sid - 1]
+    prev_uid = f"{st.session_state['selected_goal_id']}-{sid - 1}"
+    prev_mastery = st.session_state.get("mastery_status", {}).get(prev_uid, {})
+
+    return not prev_mastery.get("is_mastered", False) and not prev_session.get("is_mastered", False)
+
+
+def render_module_map(goal):
+    """Visual map of the learning path for visual learners (fslsm_input <= -0.3)."""
+    fslsm_dims = goal.get("learner_profile", {}).get(
+        "learning_preferences", {}
+    ).get("fslsm_dimensions", {})
+
+    if fslsm_dims.get("fslsm_input", 0) > -0.3:
+        return  # Only for visual learners
+
+    st.write("#### Module Map")
+    with st.container(border=True):
+        num_sessions = len(goal["learning_path"])
+        cols_per_row = min(num_sessions, 5)
+        cols = st.columns(cols_per_row)
+        for i, session in enumerate(goal["learning_path"]):
+            col_idx = i % cols_per_row
+            with cols[col_idx]:
+                if session.get("is_mastered") or session["if_learned"]:
+                    color = "#5ecc6b"
+                elif _is_session_locked(goal, i):
+                    color = "#999"
+                else:
+                    color = "#fc7474"
+                st.markdown(
+                    f"<div style='text-align:center; padding:8px; border:2px solid {color}; "
+                    f"border-radius:8px; margin:4px;'>"
+                    f"<b>S{i+1}</b><br><small>{session['title'][:30]}</small></div>",
+                    unsafe_allow_html=True
+                )
+
+
+def render_narrative_overview(goal):
+    """Narrative-style learning journey for verbal learners (fslsm_input >= 0.3)."""
+    fslsm_dims = goal.get("learner_profile", {}).get(
+        "learning_preferences", {}
+    ).get("fslsm_dimensions", {})
+
+    if fslsm_dims.get("fslsm_input", 0) < 0.3:
+        return  # Only for verbal learners
+
+    st.write("#### Your Learning Journey")
+    with st.container(border=True):
+        for i, session in enumerate(goal["learning_path"]):
+            if session["if_learned"]:
+                prefix = "You've completed"
+            else:
+                prefix = "Next, you'll explore"
+            abstract_preview = session["abstract"][:120]
+            st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {abstract_preview}...")
+
 
 def render_path_feedback_section(goal):
     goal_id = st.session_state["selected_goal_id"]
@@ -356,7 +446,7 @@ def render_learning_sessions(goal):
                 st.rerun()
     save_persistent_state()
     columns_spec = 2
-    num_columns = math.ceil(len(goal["learning_path"]) / columns_spec)  
+    num_columns = math.ceil(len(goal["learning_path"]) / columns_spec)
     columns_list = [st.columns(columns_spec, gap="large") for _ in range(num_columns)]
     for sid, session in enumerate(goal["learning_path"]):
         session_column = columns_list[sid // columns_spec]
@@ -372,6 +462,31 @@ def render_learning_sessions(goal):
                     for skill_outcome in session["desired_outcome_when_completed"]:
                         st.write(f"- {skill_outcome['name']} (`{skill_outcome['level']}`)")
 
+                    # Sequence hint from perception dimension
+                    seq_hint = session.get("session_sequence_hint")
+                    if seq_hint == "application-first":
+                        st.caption("Content order: Application -> Example -> Theory")
+                    elif seq_hint == "theory-first":
+                        st.caption("Content order: Theory-first / Conceptual exploration")
+
+                # Mastery score badge
+                session_uid = f"{st.session_state['selected_goal_id']}-{sid}"
+                mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
+                if mastery_info.get("score") is not None:
+                    score = mastery_info["score"]
+                    threshold = mastery_info.get("threshold", 70)
+                    if mastery_info.get("is_mastered"):
+                        st.markdown(f"**Mastery: {score:.0f}%** :white_check_mark:")
+                    else:
+                        st.markdown(f"**Quiz Score: {score:.0f}%** (need {threshold:.0f}%) :warning:")
+
+                # FSLSM indicators
+                if session.get("has_checkpoint_challenges"):
+                    st.caption("Contains Checkpoint Challenges")
+                buffer = session.get("thinking_time_buffer_minutes", 0)
+                if buffer > 0:
+                    st.caption(f"Recommended reflection time: {buffer} min before next session")
+
                 col1, col2 = st.columns([5, 3])
                 with col1:
                     if_learned_key = f"if_learned_{session['id']}"
@@ -383,8 +498,17 @@ def render_learning_sessions(goal):
                     if session_if_learned != old_if_learned:
                         st.rerun()
 
+                locked = _is_session_locked(goal, sid)
+
                 with col2:
-                    if not session["if_learned"]:
+                    if locked:
+                        st.button(
+                            "Locked", key=f"locked_{session['id']}",
+                            use_container_width=True, disabled=True,
+                            icon=":material/lock:",
+                        )
+                        st.caption("Master the previous session first")
+                    elif not session["if_learned"]:
                         start_key = f"start_{session['id']}_{session['if_learned']}"
                         if st.button("Learning", key=start_key, use_container_width=True, type="primary", icon=":material/local_library:"):
                             st.session_state["selected_session_id"] = sid

@@ -29,6 +29,8 @@ PERSIST_KEYS = [
     "path_feedback_cache",
     "if_simulating_feedback",
     "if_refining_path",
+    "quiz_answers",
+    "mastery_status",
 ]
 
 # Minimum interval between HTTP saves (seconds)
@@ -174,6 +176,11 @@ def initialize_session_state():
 
     if 'learned_skills_history' not in st.session_state:
         st.session_state['learned_skills_history'] = {}
+
+    if "quiz_answers" not in st.session_state:
+        st.session_state["quiz_answers"] = {}
+    if "mastery_status" not in st.session_state:
+        st.session_state["mastery_status"] = {}
 
     # Only load from the backend once per session.  Subsequent reruns keep
     # the in-memory session_state as the source of truth; periodic

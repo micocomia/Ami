@@ -272,6 +272,94 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
     }
 
 
+@app.post("/evaluate-mastery")
+async def evaluate_mastery(request: MasteryEvaluationRequest):
+    """Evaluate quiz answers, compute score, and determine mastery status."""
+    from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
+
+    state = store.get_user_state(request.user_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="No state found for this user_id")
+
+    goals = state.get("goals", [])
+    goal = None
+    for g in goals:
+        if isinstance(g, dict) and g.get("id") == request.goal_id:
+            goal = g
+            break
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    learning_path = goal.get("learning_path", [])
+    if request.session_index < 0 or request.session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = learning_path[request.session_index]
+
+    # Retrieve cached quiz data
+    session_uid = f"{request.goal_id}-{request.session_index}"
+    doc_caches = state.get("document_caches", {})
+    cached = doc_caches.get(session_uid, {})
+    quiz_data = cached.get("quizzes")
+    if not quiz_data:
+        raise HTTPException(status_code=404, detail="No quiz data found for this session")
+
+    # Score
+    correct, total, score_pct = compute_quiz_score(quiz_data, request.quiz_answers)
+
+    # Determine threshold
+    threshold = get_mastery_threshold_for_session(
+        session, APP_CONFIG["mastery_threshold_by_proficiency"],
+        default=APP_CONFIG["mastery_threshold_default"],
+    )
+
+    is_mastered = score_pct >= threshold
+
+    # Update session in state
+    session["mastery_score"] = round(score_pct, 1)
+    session["is_mastered"] = is_mastered
+    session["mastery_threshold"] = threshold
+    store.put_user_state(request.user_id, state)
+
+    return {
+        "score_percentage": round(score_pct, 1),
+        "is_mastered": is_mastered,
+        "threshold": threshold,
+        "correct_count": correct,
+        "total_count": total,
+        "session_id": session.get("id", ""),
+    }
+
+
+@app.get("/session-mastery-status/{user_id}")
+async def session_mastery_status(user_id: str, goal_id: int):
+    """Return mastery status for all sessions in a goal."""
+    state = store.get_user_state(user_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="No state found for this user_id")
+
+    goals = state.get("goals", [])
+    goal = None
+    for g in goals:
+        if isinstance(g, dict) and g.get("id") == goal_id:
+            goal = g
+            break
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    result = []
+    for session in goal.get("learning_path", []):
+        result.append({
+            "session_id": session.get("id", ""),
+            "is_mastered": session.get("is_mastered", False),
+            "mastery_score": session.get("mastery_score"),
+            "mastery_threshold": session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"]),
+            "if_learned": session.get("if_learned", False),
+        })
+
+    return result
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -391,6 +479,14 @@ APP_CONFIG = {
     "default_method_name": "genmentor",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
+    "mastery_threshold_default": 70,
+    "mastery_threshold_by_proficiency": {
+        "beginner": 60,
+        "intermediate": 70,
+        "advanced": 80,
+        "expert": 90,
+    },
+    "fslsm_activation_threshold": 0.3,
     "fslsm_thresholds": {
         "perception": {
             "low_threshold": -0.3,
