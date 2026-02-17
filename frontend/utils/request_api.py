@@ -266,7 +266,9 @@ def identify_skill_gap(
     if goal_id is not None:
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
-    return response.get("skill_gaps") if response else None
+    if not response:
+        return None, None
+    return response.get("skill_gaps"), response.get("goal_assessment")
 
 
 def create_learner_profile(

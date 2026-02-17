@@ -14,9 +14,12 @@
 4. [Flow 2C — Setting a Learning Goal](#flow-2c--setting-a-learning-goal)
 5. [Flow 2D — Refining a Learning Goal](#flow-2d--refining-a-learning-goal)
 6. [Flow 2E — Determining Skill Gap & Identifying Current Level](#flow-2e--determining-skill-gap--identifying-current-level)
-7. [Flow 3 — User Account Deletion](#flow-3--user-account-deletion)
-8. [Flow 4 — Behavioral Patterns Display (Real Metrics)](#flow-4--behavioral-patterns-display-real-metrics)
-9. [Flow 5 — Knowledge Content with Verified Course Materials](#flow-5--knowledge-content-with-verified-course-materials)
+7. [Flow 2F — Retrieval-Grounded Skill Gap Identification](#flow-2f--retrieval-grounded-skill-gap-identification)
+8. [Flow 2G — Automatic Goal Refinement](#flow-2g--automatic-goal-refinement)
+9. [Flow 2H — All Skills Mastered Handling](#flow-2h--all-skills-mastered-handling)
+10. [Flow 3 — User Account Deletion](#flow-3--user-account-deletion)
+11. [Flow 4 — Behavioral Patterns Display (Real Metrics)](#flow-4--behavioral-patterns-display-real-metrics)
+12. [Flow 5 — Knowledge Content with Verified Course Materials](#flow-5--knowledge-content-with-verified-course-materials)
 
 ---
 
@@ -191,31 +194,32 @@ python -m pytest backend/tests/test_user_state.py backend/tests/test_onboarding_
 ### User Story
 
 > **As a** learner setting up my learning goal,
-> **I want to** use AI to refine and improve my initial goal description,
-> **so that** my goal is clearer, more actionable, and better suited for generating an effective learning path.
+> **I want** the AI to automatically refine my vague goal during skill gap identification,
+> **so that** my goal is clearer, more actionable, and better suited for generating an effective learning path — without me having to click a separate button.
+
+> **Note:** As of the agentic skill gap update, AI refinement is now **automatic** during skill gap identification. The manual "AI Refinement" button has been removed from onboarding. The backend `/refine-learning-goal` endpoint still exists for potential use in goal management as a fallback.
 
 ### Backend Test Scripts
 
 | Test file | Class / Tests | What it covers |
 |---|---|---|
 | `backend/tests/test_onboarding_api.py` | `TestRefineGoalEndpoint` (4 tests) | `POST /refine-learning-goal` — success (mocked LLM), verifies `learner_information` is forwarded, works with empty learner info, LLM failure returns 500 |
+| `backend/tests/test_skill_gap_orchestrator.py` | `TestAutoRefinementLoop` (5 tests) | Auto-refinement loop: vague goal triggers refinement, non-vague does not, all-mastered does not, max 1 refinement, auto-refinement info in response |
 
 **Run command:**
 ```bash
-python -m pytest backend/tests/test_onboarding_api.py::TestRefineGoalEndpoint -v
+python -m pytest backend/tests/test_onboarding_api.py::TestRefineGoalEndpoint backend/tests/test_skill_gap_orchestrator.py -v
 ```
 
 ### Streamlit Frontend Test Steps
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | On the Onboarding page, observe the area below the learning goal input | The **"✨ AI Refinement"** button is visible to the right of the hint text |
-| 2 | Enter a vague goal (e.g., "learn about HR stuff") | Input field shows the goal |
-| 3 | Click **"✨ AI Refinement"** | Button becomes disabled. Hint text appears: "✨ Refining learning goal...". After a few seconds, the goal input updates with a refined, more specific version (e.g., "Develop comprehensive HR management competencies including talent acquisition, employee relations, compensation and benefits administration, and HRIS systems management") |
-| 4 | Observe the refined goal | Toast: "Refined Learning goal successfully." Goal input now contains the AI-refined version |
-| 5 | Try clicking **"✨ AI Refinement"** again | The button should be re-enabled. You can refine again to iterate further |
-| 6 | Edit the refined goal manually, then click **"Begin Learning"** | The manually edited version of the refined goal is used (not the original) |
-| 7 | Click **"✨ AI Refinement"** with no learner information filled | Refinement should still work but may be less personalized |
+| 1 | On the Onboarding page, observe the area below the learning goal input | Hint text explains that the system will automatically refine goals if needed. No manual "AI Refinement" button is present |
+| 2 | Enter a vague goal (e.g., "learn about HR stuff") and click **"Begin Learning"** | App navigates to Skill Gap page. The system auto-refines the goal during identification |
+| 3 | Observe the Skill Gap page after identification | If the goal was auto-refined, an info banner appears: "Your goal was automatically refined for better results." showing the original and refined goals |
+| 4 | Enter a specific goal (e.g., "Learn Python for data analysis with Pandas and Matplotlib") | No auto-refinement occurs. No banner is shown |
+| 5 | The goal management page still has a manual refinement button as fallback | The "AI Refinement" button in goal management still works for manual refinement |
 
 ---
 
@@ -260,6 +264,103 @@ python -m pytest backend/tests/test_onboarding_api.py backend/tests/test_store_a
 | 12 | Click **"Schedule Learning Path"** | Spinner: "Creating your profile ...". After completion, toast: "Your profile has been created!". App navigates to the **Learning Path** page. Onboarding is marked as complete (`if_complete_onboarding = True`) |
 | 13 | Navigate to **My Profile** page | The created learner profile should show: cognitive status (overall progress, mastered skills, in-progress skills), learning preferences (FSLSM dimensions matching your persona), behavioral patterns |
 | 14 | Navigate to **Dashboard** page | Radar chart shows 5-level radial axis: Unlearned (0), Beginner (1), Intermediate (2), Advanced (3), Expert (4). Required and current level traces are plotted correctly |
+
+---
+
+## Flow 2F — Retrieval-Grounded Skill Gap Identification
+
+### User Story
+
+> **As a** learner whose goal matches verified course content,
+> **I want** the skill gap identification to be grounded in actual course material (syllabus and lectures),
+> **so that** the identified skills are relevant to my actual course rather than generic LLM knowledge.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_skill_gap_tools.py` | `TestCourseContentRetrievalTool` (6 tests) | Retrieval tool: returns formatted docs, filters by category, filters by lecture_number, no results message, no VCM fallback, combined filtering |
+| `backend/tests/test_skill_gap_schemas.py` | `TestGoalAssessmentSchema` (4 tests) | GoalAssessment defaults, all fields, SkillGaps with/without goal_assessment |
+| `backend/tests/test_onboarding_api.py` | `TestIdentifySkillGapEndpoint` (6 tests) | Skill gap endpoint including goal_assessment in response, search_rag_manager passed |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_skill_gap_tools.py::TestCourseContentRetrievalTool backend/tests/test_skill_gap_schemas.py backend/tests/test_onboarding_api.py::TestIdentifySkillGapEndpoint -v
+```
+
+### Streamlit Frontend Test Steps
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Set a learning goal matching a verified course (e.g., "Introduction to Computer Science and Programming in Python") | Goal is accepted |
+| 2 | Click **"Begin Learning"** and wait for skill gap identification | Skills identified are grounded in the course syllabus (e.g., "Variables and Types", "Control Flow", "Functions") |
+| 3 | Set a goal referencing specific content (e.g., "topics from lecture 3") | Skills are grounded in that specific lecture's content |
+| 4 | Set a goal NOT matching any verified course (e.g., "Learn Kubernetes cluster management") | Skills are still identified using LLM knowledge (fallback). No error occurs |
+
+---
+
+## Flow 2G — Automatic Goal Refinement
+
+### User Story
+
+> **As a** learner who enters a vague learning goal,
+> **I want** the system to automatically detect the vagueness and refine my goal,
+> **so that** I get better skill gap results without needing to manually edit my goal.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_skill_gap_orchestrator.py` | `TestAutoRefinementLoop` (5 tests) | Vague goal triggers auto-refinement, non-vague does not, all-mastered does not, max 1 refinement, auto-refinement info in response |
+| `backend/tests/test_skill_gap_tools.py` | `TestGoalAssessmentTool` (7 tests) | Vagueness detection via retrieval, all-mastered detection, suggestions |
+| `backend/tests/test_skill_gap_tools.py` | `TestGoalRefinementTool` (4 tests) | Refinement output, was_refined flag, unchanged detection, empty learner info |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_skill_gap_orchestrator.py backend/tests/test_skill_gap_tools.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Enter a vague goal (e.g., "learn stuff") and click **"Begin Learning"** | System auto-refines the goal. Skill Gap page shows info banner: "Your goal was automatically refined for better results." with original and refined goals |
+| 2 | Verify the refined goal produces better skill gaps | Skill gaps are more specific and relevant than what the vague goal would have produced |
+| 3 | Enter a goal that is still vague after refinement | Warning banner: "Your goal may be too vague to produce optimal results." with suggestion to make the goal more specific |
+| 4 | Enter a specific goal (e.g., "Learn Python for data analysis with Pandas and Matplotlib") | No refinement needed, no banner shown. Skills are identified directly |
+
+---
+
+## Flow 2H — All Skills Mastered Handling
+
+### User Story
+
+> **As a** learner who already masters all required skills for my goal,
+> **I want** the system to tell me and block scheduling a redundant learning path,
+> **so that** I can change my goal to something more challenging or adjust my self-assessed skill levels.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_skill_gap_tools.py` | `TestGoalAssessmentTool` (7 tests) | All-mastered detection from skill_gaps, suggestion text |
+| `backend/tests/test_skill_gap_orchestrator.py` | `TestAutoRefinementLoop::test_all_mastered_goal_no_refinement` | All-mastered goals are not auto-refined |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_skill_gap_tools.py::TestGoalAssessmentTool backend/tests/test_skill_gap_orchestrator.py::TestAutoRefinementLoop::test_all_mastered_goal_no_refinement -v
+```
+
+### Streamlit Frontend Test Steps
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Set up a scenario where the learner is an expert in all required skills (e.g., expert persona with a beginner-level goal) | Skill gap identification completes |
+| 2 | Observe the Skill Gap page | Info banner: "You already master all required skills for this goal." with suggestion. **"Schedule Learning Path"** button is **disabled** |
+| 3 | Click **"Edit Goal"** button | Navigates back to onboarding to change the goal |
+| 4 | Manually lower a skill's **Current Level** via the pill selector (create a gap) | **"Schedule Learning Path"** button becomes **enabled** |
+| 5 | Raise the current level back (remove the gap) | **"Schedule Learning Path"** button becomes **disabled** again |
+| 6 | In goal management dialog, same behavior applies | Schedule button disabled when no gaps, enabled when gaps exist |
 
 ---
 
@@ -403,11 +504,14 @@ python -m pytest backend/tests/test_verified_content.py -v
 | `backend/tests/test_store_and_auth.py` | 33 | Flow 1 (auth store/JWT), Flow 2A-2E (profile/event persistence), Flow 3 (data deletion) |
 | `backend/tests/test_user_state.py` | 19 | Flow 2A (persona persistence), Flow 2B (resume text persistence), Flow 2C (goal persistence) |
 | `backend/tests/test_auth_api.py` | 23 | Flow 1 (register/login/me endpoints), Flow 3 (delete account endpoint + lifecycle) |
-| `backend/tests/test_onboarding_api.py` | 34 | Flow 2B (PDF extract), Flow 2D (goal refinement), Flow 2E (skill gap + profile creation + event logging), config + personas endpoints |
+| `backend/tests/test_onboarding_api.py` | 36 | Flow 2B (PDF extract), Flow 2D (goal refinement), Flow 2E (skill gap + profile creation + event logging), Flow 2F (goal_assessment in response, search_rag_manager wiring), config + personas endpoints |
+| `backend/tests/test_skill_gap_tools.py` | 17 | Flow 2F (course content retrieval tool), Flow 2G (goal assessment tool, goal refinement tool) |
+| `backend/tests/test_skill_gap_schemas.py` | 4 | Flow 2F (GoalAssessment schema, SkillGaps with goal_assessment) |
+| `backend/tests/test_skill_gap_orchestrator.py` | 5 | Flow 2G (auto-refinement loop: vague triggers refinement, non-vague/all-mastered do not, max 1 retry, response includes assessment) |
 | `backend/tests/test_fslsm_update.py` | 2 | Flow 2A (FSLSM dimension updates — integration test, requires LLM API key) |
 | `backend/tests/test_behavioral_metrics.py` | 7 | Flow 4 (behavioral metrics endpoint: computation, filtering, edge cases) |
 | `backend/tests/test_verified_content.py` | 17 | Flow 5 (verified content loading, indexing, hybrid retrieval, fallback, lecture number extraction) |
-| **Total** | **135** | |
+| **Total** | **178** | |
 
 ### Running All Tests
 
@@ -417,6 +521,9 @@ python -m pytest backend/tests/test_store_and_auth.py backend/tests/test_user_st
 
 # API endpoint tests (requires full backend dependencies — langchain, etc.):
 python -m pytest backend/tests/test_auth_api.py backend/tests/test_onboarding_api.py backend/tests/test_behavioral_metrics.py -v
+
+# New agentic skill gap tests:
+python -m pytest backend/tests/test_skill_gap_tools.py backend/tests/test_skill_gap_schemas.py backend/tests/test_skill_gap_orchestrator.py -v
 
 # All tests:
 python -m pytest backend/tests/ -v

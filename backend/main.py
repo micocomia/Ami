@@ -494,7 +494,8 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         if not isinstance(skill_requirements, dict):
             skill_requirements = None
         skill_gaps, skill_requirements = identify_skill_gap_with_llm(
-            llm, learning_goal, learner_information, skill_requirements
+            llm, learning_goal, learner_information, skill_requirements,
+            search_rag_manager=search_rag_manager,
         )
         results = {**skill_gaps, **skill_requirements}
         return results

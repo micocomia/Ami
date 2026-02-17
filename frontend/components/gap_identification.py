@@ -8,13 +8,48 @@ def render_identifying_skill_gap(goal):
         learning_goal = goal["learning_goal"]
         learner_information = st.session_state["learner_information"]
         llm_type = st.session_state["llm_type"]
-        skill_gaps = identify_skill_gap(learning_goal, learner_information, llm_type)
+        skill_gaps, goal_assessment = identify_skill_gap(learning_goal, learner_information, llm_type)
     goal["skill_gaps"] = skill_gaps
+    goal["goal_assessment"] = goal_assessment
     goal["_last_identified_goal"] = goal["learning_goal"]
+    # If the goal was auto-refined, update the learning_goal to the refined version
+    if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("original_goal"):
+        goal["learning_goal"] = goal.get("learning_goal", learning_goal)
     save_persistent_state()
     st.rerun()
-    st.toast("🎉 Successfully identify skill gaps!")
+    st.toast("Successfully identified skill gaps!")
     return skill_gaps
+
+
+def render_goal_assessment_banners(goal):
+    """Show info/warning banners based on goal_assessment."""
+    assessment = goal.get("goal_assessment")
+    if not assessment:
+        return
+
+    if assessment.get("auto_refined"):
+        original = assessment.get("original_goal", "")
+        st.info(
+            f"Your goal was automatically refined for better results.\n\n"
+            f"**Original goal:** {original}\n\n"
+            f"**Refined goal:** {goal.get('learning_goal', '')}"
+        )
+    elif assessment.get("is_vague"):
+        suggestion = assessment.get("suggestion", "Consider making your goal more specific.")
+        st.warning(
+            f"Your goal may be too vague to produce optimal results. {suggestion}"
+        )
+
+    if assessment.get("all_mastered"):
+        suggestion = assessment.get("suggestion", "Consider setting a more advanced goal.")
+        st.info(
+            f"You already master all required skills for this goal. {suggestion}"
+        )
+
+
+def has_any_gap(skill_gaps):
+    """Return True if at least one skill gap exists."""
+    return any(g.get("is_gap", False) for g in (skill_gaps or []))
 
 
 def render_identified_skill_gap(goal, method_name="genmentor"):
@@ -113,4 +148,3 @@ def render_identified_skill_gap(goal, method_name="genmentor"):
                 except Exception:
                     pass
                 st.rerun()
-
