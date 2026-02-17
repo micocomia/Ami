@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 
 
@@ -75,8 +75,20 @@ class SkillGap(BaseModel):
         return self
 
 
+class GoalAssessment(BaseModel):
+    """Assessment of the learning goal's quality and actionability."""
+
+    is_vague: bool = Field(default=False, description="Whether the goal is too vague to produce good skill mappings.")
+    all_mastered: bool = Field(default=False, description="Whether the learner already masters all required skills.")
+    suggestion: str = Field(default="", description="Actionable suggestion for the learner.")
+    auto_refined: bool = Field(default=False, description="Whether the goal was automatically refined.")
+    original_goal: Optional[str] = Field(default=None, description="The original goal before auto-refinement, if refined.")
+    refined_goal: Optional[str] = Field(default=None, description="The refined goal after auto-refinement, if refined.")
+
+
 class SkillGaps(BaseModel):
     skill_gaps: List[SkillGap]
+    goal_assessment: Optional[GoalAssessment] = Field(default=None)
 
     @field_validator("skill_gaps")
     @classmethod

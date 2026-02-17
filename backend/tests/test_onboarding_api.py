@@ -88,7 +88,14 @@ MOCK_SKILL_GAPS_RESULT = {
             "reason": "Strong background from MBA program",
             "level_confidence": "high",
         },
-    ]
+    ],
+    "goal_assessment": {
+        "is_vague": False,
+        "all_mastered": False,
+        "suggestion": "",
+        "auto_refined": False,
+        "original_goal": None,
+    },
 }
 
 MOCK_SKILL_REQUIREMENTS = {
@@ -304,6 +311,36 @@ class TestIdentifySkillGapEndpoint:
             "skill_requirements": '{"HRIS Management": "intermediate"}',
         })
         assert resp.status_code == 200
+
+    @patch("main.identify_skill_gap_with_llm")
+    @patch("main.get_llm")
+    def test_identify_skill_gap_response_includes_goal_assessment(self, mock_get_llm, mock_identify, client):
+        """Response should include the goal_assessment field."""
+        mock_get_llm.return_value = MagicMock()
+        mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
+
+        resp = client.post("/identify-skill-gap-with-info", json={
+            "learning_goal": "Become an HR Manager",
+            "learner_information": "MBA grad",
+        })
+        data = resp.json()
+        assert "goal_assessment" in data
+        assert data["goal_assessment"]["is_vague"] is False
+
+    @patch("main.identify_skill_gap_with_llm")
+    @patch("main.get_llm")
+    def test_identify_skill_gap_called_with_search_rag_manager(self, mock_get_llm, mock_identify, client):
+        """identify_skill_gap_with_llm should receive search_rag_manager kwarg."""
+        mock_get_llm.return_value = MagicMock()
+        mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
+
+        client.post("/identify-skill-gap-with-info", json={
+            "learning_goal": "Become an HR Manager",
+            "learner_information": "MBA grad",
+        })
+
+        _, kwargs = mock_identify.call_args
+        assert "search_rag_manager" in kwargs
 
     @patch("main.get_llm")
     def test_identify_skill_gap_llm_failure(self, mock_get_llm, client):

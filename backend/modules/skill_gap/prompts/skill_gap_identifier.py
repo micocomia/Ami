@@ -19,7 +19,12 @@ skill_gaps_output_format = """
             "reason": "Learner's experience directly matches this skill requirement.",
             "level_confidence": "high"
         }
-    ]
+    ],
+    "goal_assessment": {
+        "is_vague": false,
+        "all_mastered": false,
+        "suggestion": ""
+    }
 }
 """.strip()
 
@@ -45,11 +50,18 @@ Your role is to compare a learner's profile against a set of required skills (pr
     * `expert` (Extended Abstract): Can generalize and transfer knowledge to new contexts.
     For example, a resume showing "built multiple independent scripts" suggests `intermediate`, while "architected an integrated system" suggests `advanced`, and "published a reusable framework adopted by other teams" suggests `expert`.
 
+**Goal Assessment (if assess_goal_quality tool is available)**:
+After identifying all skill gaps, use the `assess_goal_quality` tool to evaluate the goal.
+Pass the learning goal and the skill_gaps list. Include the tool's result in the `goal_assessment` field of your output.
+Make at most **1 tool call** for this assessment.
+
 **Final Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.
 Do NOT include any other text or markdown tags (e.g., ```json) around the final JSON output.
 
 SKILL_GAPS_OUTPUT_FORMAT
+
+The `goal_assessment` field is optional. If you did not use the assess_goal_quality tool, omit it or set it to null.
 """.strip().replace("SKILL_GAPS_OUTPUT_FORMAT", skill_gaps_output_format)
 
 skill_gap_identifier_task_prompt = """

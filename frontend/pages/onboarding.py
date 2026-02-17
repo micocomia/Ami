@@ -1,23 +1,13 @@
 import streamlit as st
 
-from components.goal_refinement import render_goal_refinement
 from utils.pdf import extract_text_from_pdf
 from utils.state import save_persistent_state, reset_to_add_goal
 from components.topbar import render_topbar
 from utils.request_api import get_personas
 
 
-def on_refine_click():
-    st.session_state["if_refining_learning_goal"] = True
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
-
-
 def _init_onboarding_state():
     """Ensure required session_state keys exist to avoid KeyErrors."""
-    st.session_state.setdefault("if_refining_learning_goal", False)
     st.session_state.setdefault("learner_persona", "")
     st.session_state.setdefault("learner_information_text", "")
     st.session_state.setdefault("learner_information", "")
@@ -137,12 +127,6 @@ def render_onboard():
     _inject_page_css()
 
     goal = st.session_state["to_add_goal"]
-    if "refined_learning_goal" not in st.session_state:
-        st.session_state["refined_learning_goal"] = goal["learning_goal"]
-        try:
-            save_persistent_state()
-        except Exception:
-            pass
 
     PERSONAS = get_personas()
 
@@ -167,24 +151,16 @@ def render_onboard():
             value=goal["learning_goal"],
             placeholder="eg : learn english, python, data .....",
             label_visibility="collapsed",
-            disabled=st.session_state["if_refining_learning_goal"],
         )
         goal["learning_goal"] = learning_goal
 
-        # Hint + Adjust Preference button
-        hint_col, pref_col = st.columns([4, 1])
-        with hint_col:
-            st.markdown(
-                '<p class="hint-text">'
-                "💡 Enter any topic you want to learn, and the system will automatically "
-                "generate personalized content for you."
-                "</p>",
-                unsafe_allow_html=True,
-            )
-            if st.session_state["if_refining_learning_goal"]:
-                st.write("**✨ Refining learning goal...**")
-        with pref_col:
-            render_goal_refinement(goal, pref_col, hint_col)
+        st.markdown(
+            '<p class="hint-text">'
+            "Enter any topic you want to learn. The system will automatically "
+            "refine your goal if needed and generate personalized content for you."
+            "</p>",
+            unsafe_allow_html=True,
+        )
         try:
             save_persistent_state()
         except Exception:
