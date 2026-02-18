@@ -22,6 +22,8 @@
 12. [Flow 5 — Knowledge Content with Verified Course Materials](#flow-5--knowledge-content-with-verified-course-materials)
 13. [Flow 6 — FSLSM-Driven Learning Path Adaptations](#flow-6--fslsm-driven-learning-path-adaptations)
 14. [Flow 7 — Mastery Lock and Quiz-Based Mastery Evaluation](#flow-7--mastery-lock-and-quiz-based-mastery-evaluation)
+15. [Flow 8 — Agentic Learning Plan Generation](#flow-8--agentic-learning-plan-generation)
+16. [Flow 9 — Adaptive Plan Regeneration](#flow-9--adaptive-plan-regeneration)
 
 ---
 
@@ -686,6 +688,136 @@ python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_mastery_ev
 
 ---
 
+## Flow 8 — Agentic Learning Plan Generation
+
+### User Story
+
+> **As a** learner who has completed skill gap identification,
+> **I want** the system to automatically generate a high-quality learning path grounded in real course content, evaluate it, and refine it if needed — without any manual intervention,
+> **so that** I receive a well-structured, personalized learning plan that I can trust is grounded in verified materials and has been quality-checked.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_agentic_learning_plan.py` | `TestDeduplicateSources` (2 tests) | Source deduplication: removes duplicates by page_content, preserves unique sources |
+| `backend/tests/test_agentic_learning_plan.py` | `TestLearningPathSchedulerInit` (2 tests) | Scheduler initialization: creates with RAG tools when search_rag_manager provided, creates without tools when no RAG |
+| `backend/tests/test_agentic_learning_plan.py` | `TestAgenticMetadataStructure` (1 test) | Verifies agentic orchestration returns required metadata keys (iterations, evaluation, retrieved_sources) |
+| `backend/tests/test_plan_quality_gate.py` | `TestEvaluatePlanQuality` (7 tests) | Deterministic quality gate: passes positive feedback, fails on negative keywords, extracts issues list, handles non-dict input, fails on high suggestion count (list and dict variants), extracts feedback summary |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_agentic_learning_plan.py backend/tests/test_plan_quality_gate.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 8.1 — Plan grounded in syllabus content (course code in goal)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Set a learning goal referencing a verified course (e.g., "Learn DTI5902 topics" or "Introduction to Computer Science and Programming in Python") | Goal is accepted |
+| 2 | Complete onboarding and click **"Schedule Learning Path"** | Spinner appears: "Generating your personalized learning plan..." |
+| 3 | Wait for plan generation to complete | Learning path page loads with session cards |
+| 4 | Observe the **Retrieved Sources** banner below the learning path header | A collapsible section "Course Content Sources" lists the verified documents used to ground the plan (e.g., syllabus, specific lectures). Each source shows course code, document name, and content category |
+| 5 | Check session topics | Session topics should align with the actual course syllabus/lecture progression rather than generic LLM knowledge |
+
+#### 8.2 — Auto-refinement with quality evaluation (no user intervention)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Schedule a learning path (any goal) | Plan generation runs automatically |
+| 2 | Observe the process | No "Refine Plan" or "Simulate Feedback" buttons appear — refinement is fully automatic |
+| 3 | Check the **Plan Quality** section on the Learning Path page | Quality evaluation results are displayed (see 8.3) |
+| 4 | Verify old buttons are gone | No "Simulate Feedback", "Refine Path", or "Auto-Refine" buttons exist on the page |
+
+#### 8.3 — Quality evaluation display (scores, pass/fail)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | After plan generation, observe the **Plan Quality** section on the Learning Path page | Read-only quality display is visible |
+| 2 | Check quality status | Shows either "PASS" (green) or "NEEDS REVIEW" (orange) based on the automated learner simulation evaluation |
+| 3 | Check feedback summary | Three scores are displayed: Progression, Engagement, Personalization — each showing the simulation's assessment |
+| 4 | Check refinement count | Shows "Refinement iterations: N" (1 = passed first try, 2-3 = required refinement) |
+| 5 | If quality is "NEEDS REVIEW" | An issues list is displayed below the scores explaining what could be improved |
+
+#### 8.4 — Retrieved sources shown for plan sessions
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Set a goal NOT matching any verified course (e.g., "Learn Kubernetes cluster management") | Goal is accepted |
+| 2 | Schedule a learning path | Plan generates using LLM knowledge (no retrieval) |
+| 3 | Check the Retrieved Sources section | Section either shows "No course content sources available" or is not displayed |
+| 4 | Plan quality section still displays | Quality evaluation runs regardless of whether retrieval was used |
+
+---
+
+## Flow 9 — Adaptive Plan Regeneration
+
+### User Story
+
+> **As a** learner whose learning preferences have changed or who has failed to achieve mastery in a session,
+> **I want** the system to detect these changes and suggest adapting my learning path,
+> **so that** my plan stays aligned with my evolving needs while preserving the progress I've already made.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `backend/tests/test_plan_regeneration.py` | `TestComputeFSLSMDeltas` (2 tests) | FSLSM delta computation: correct absolute deltas across dimensions, handles missing dimensions (defaults to 0.0) |
+| `backend/tests/test_plan_regeneration.py` | `TestCountMasteryFailures` (2 tests) | Mastery failure counting: counts only non-mastered sessions, handles empty results |
+| `backend/tests/test_plan_regeneration.py` | `TestDecideRegeneration` (9 tests) | Decision logic: keep on minor change (delta < 0.3), adjust_future on moderate change (delta in [0.3, 0.5)), regenerate on major shift (delta >= 0.5), regenerate on sign flip (e.g., -0.8 → 0.3), adjust on single mastery failure, regenerate on multiple mastery failures, preserves learned sessions, mastery failure suggests reinforcement, keep when all mastery on track |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_plan_regeneration.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 9.1 — Preference change triggers adaptation suggestion
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Complete onboarding with one persona (e.g., "Hands-on Explorer") and schedule a learning path | Learning path is generated |
+| 2 | Change persona to a significantly different one (e.g., switch from "Hands-on Explorer" to "Conceptual Thinker") | FSLSM dimensions shift significantly (e.g., processing: -0.7 → 0.3, delta = 1.0) |
+| 3 | Navigate to the **Learning Path** page | An adaptation suggestion banner appears: "Your learning preferences have changed significantly." with an **"Adapt Learning Path"** button |
+| 4 | Click **"Adapt Learning Path"** | System calls `/adapt-learning-path`. Spinner shows while processing |
+| 5 | Observe the result | Decision is displayed: "Your learning path has been regenerated to better match your needs." (REGENERATE due to large delta). Reasoning is shown |
+| 6 | Verify learned sessions are preserved | Any previously completed sessions remain marked as learned and their content is unchanged |
+
+#### 9.2 — Mastery failure triggers reinforcement suggestion
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Navigate to a session, generate content, and take the quiz | Quiz is submitted |
+| 2 | Score significantly below the mastery threshold (e.g., 30% when threshold is 70%) | Mastery evaluation returns `plan_adaptation_suggested: true` |
+| 3 | Navigate to the **Learning Path** page | An adaptation suggestion banner appears: "Your quiz results suggest your learning path may need adjustment." with an **"Adapt Learning Path"** button |
+| 4 | Click **"Adapt Learning Path"** | System processes the adaptation |
+| 5 | Observe the result | Decision shows "ADJUST_FUTURE" — future sessions adjusted to reinforce weak areas. Reasoning explains the mastery failure |
+
+#### 9.3 — Agent decides keep/adjust/regenerate with reasoning
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Make a minor preference change (e.g., same persona, small FSLSM tweak with delta < 0.3) | Change is minor |
+| 2 | Trigger adaptation | Decision: **KEEP** — "Your current plan is still on track." No changes made |
+| 3 | Make a moderate preference change (delta between 0.3 and 0.5 on one dimension) | Change is moderate |
+| 4 | Trigger adaptation | Decision: **ADJUST_FUTURE** — "Future sessions have been adjusted based on your progress." Shows which sessions were affected |
+| 5 | Make a major preference change (delta >= 0.5 on any dimension, or sign flip) | Change is significant |
+| 6 | Trigger adaptation | Decision: **REGENERATE** — "Your learning path has been regenerated to better match your needs." Full reasoning shown |
+
+#### 9.4 — Learned sessions preserved during regeneration
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Complete and master Sessions 1 and 2 of a learning path | Sessions 1 and 2 are marked as learned with mastery badges |
+| 2 | Trigger a REGENERATE adaptation (large preference change) | Plan is regenerated |
+| 3 | Observe the regenerated learning path | Sessions 1 and 2 retain their "learned" status, mastery scores, and content. Only future (unlearned) sessions are regenerated |
+| 4 | Verify session count | Total session count may change, but learned sessions are never removed or modified |
+
+---
+
 ## Test Coverage Summary
 
 ### Backend Test Files
@@ -705,7 +837,10 @@ python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_mastery_ev
 | `backend/tests/test_quiz_scorer.py` | 16 | Flow 7 (quiz scoring: all question types, edge cases, mastery threshold lookup by proficiency) |
 | `backend/tests/test_fslsm_overrides.py` | 12 | Flow 6 (FSLSM post-processing: checkpoint challenges, thinking time, sequencing hints, navigation mode, mastery thresholds, combined dimensions) |
 | `backend/tests/test_mastery_evaluation.py` | 7 | Flow 7 (mastery evaluation: pass/fail, boundary, proficiency-based thresholds, fallback defaults) |
-| **Total** | **213** | |
+| `backend/tests/test_agentic_learning_plan.py` | 8 | Flow 8 (agentic plan generation: source dedup, scheduler init with/without RAG, metadata structure, retrieval integration) |
+| `backend/tests/test_plan_quality_gate.py` | 7 | Flow 8 (deterministic quality gate: positive/negative feedback, issue extraction, non-dict handling, suggestion count threshold) |
+| `backend/tests/test_plan_regeneration.py` | 13 | Flow 9 (adaptive regeneration: FSLSM delta computation, mastery failure counting, keep/adjust/regenerate decisions, learned session preservation) |
+| **Total** | **241** | |
 
 ### Running All Tests
 
@@ -721,6 +856,9 @@ python -m pytest backend/tests/test_skill_gap_tools.py backend/tests/test_skill_
 
 # FSLSM and mastery evaluation tests:
 python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_fslsm_overrides.py backend/tests/test_mastery_evaluation.py -v
+
+# Agentic learning plan and adaptive regeneration tests:
+python -m pytest backend/tests/test_agentic_learning_plan.py backend/tests/test_plan_quality_gate.py backend/tests/test_plan_regeneration.py -v
 
 # All tests:
 python -m pytest backend/tests/ -v
