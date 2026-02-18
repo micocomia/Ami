@@ -427,7 +427,9 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
             raise HTTPException(status_code=404, detail="Goal not found")
 
         current_plan = {"learning_path": goal.get("learning_path", [])}
-        old_profile = store.get_profile(request.user_id, request.goal_id) or {}
+        # old_profile: use snapshot (pre-update) if available; fall back to current store
+        old_profile = store.get_profile_snapshot(request.user_id, request.goal_id) or \
+                      store.get_profile(request.user_id, request.goal_id) or {}
 
         # Extract FSLSM dimensions
         old_fslsm = (
@@ -466,6 +468,7 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
         }
 
         if decision.action == "keep":
+            store.delete_profile_snapshot(request.user_id, request.goal_id)
             return {**result_plan, "agent_metadata": agent_metadata}
 
         if decision.action == "adjust_future":
@@ -513,6 +516,7 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
         agent_metadata["evaluation_feedback"] = sim_feedback
         agent_metadata["evaluation"] = _evaluate_plan_quality(sim_feedback)
 
+        store.delete_profile_snapshot(request.user_id, request.goal_id)
         return {**result_plan, "agent_metadata": agent_metadata}
 
     except HTTPException:
@@ -856,6 +860,9 @@ async def update_learner_profile(request: LearnerProfileUpdateRequest):
                 session_information = ast.literal_eval(session_information)
             except Exception:
                 pass
+        # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
+        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
+            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
         learner_profile = update_learner_profile_with_llm(
             llm,
             learner_profile,
@@ -933,6 +940,9 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
                 learner_information = ast.literal_eval(learner_information)
             except Exception:
                 learner_information = {"raw": learner_information}
+        # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
+        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
+            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
         learner_profile = update_learning_preferences_with_llm(
             llm,
             learner_profile,

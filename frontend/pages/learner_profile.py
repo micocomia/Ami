@@ -1,6 +1,6 @@
 import math
 import streamlit as st
-from utils.request_api import create_learner_profile, update_learning_preferences, save_learner_profile, auth_delete_user, get_app_config, get_behavioral_metrics
+from utils.request_api import create_learner_profile, get_learner_profile, update_learning_preferences, auth_delete_user, get_app_config, get_behavioral_metrics
 from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
@@ -22,9 +22,23 @@ def render_learner_profile():
             render_learner_profile_info(goal)
         except Exception as e:
             st.error("An error occurred while rendering the learner profile.")
-            # re generate the learner profile
+            # Try to retrieve the existing stored profile first to avoid overwriting FSLSM/mastery data.
+            # Only create a new one if the backend has no record for this goal.
             with st.spinner("Re-prepare your profile ..."):
-                learner_profile = create_learner_profile(goal["learning_goal"], st.session_state["learner_information"], goal["skill_gaps"], st.session_state["llm_type"], user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+                user_id = st.session_state.get("userId")
+                goal_id = st.session_state.get("selected_goal_id")
+                learner_profile = None
+                if user_id is not None and goal_id is not None:
+                    learner_profile = get_learner_profile(user_id, goal_id)
+                if learner_profile is None:
+                    learner_profile = create_learner_profile(
+                        goal["learning_goal"],
+                        st.session_state["learner_information"],
+                        goal["skill_gaps"],
+                        st.session_state["llm_type"],
+                        user_id=user_id,
+                        goal_id=goal_id,
+                    )
             goal["learner_profile"] = learner_profile
             try:
                 save_persistent_state()
@@ -138,8 +152,18 @@ def render_cognitive_status(goal):
     # Cognitive Status
     st.markdown("#### 🧠 Cognitive Status")
     st.write("**Overall Progress:**")
-    st.progress(learner_profile["cognitive_status"]["overall_progress"])
-    st.markdown(f"<p class='progress-indicator'>{learner_profile['cognitive_status']['overall_progress']}% completed</p>", unsafe_allow_html=True)
+    raw_progress = learner_profile["cognitive_status"]["overall_progress"]
+    try:
+        progress_val = float(raw_progress)
+    except (TypeError, ValueError):
+        progress_val = 0.0
+    # st.progress requires float in [0.0, 1.0]; profiles store 0-100 percentages as floats.
+    # Normalize any value > 1 (i.e. 0-100 range) down to 0.0-1.0.
+    if progress_val > 1.0:
+        progress_val = progress_val / 100.0
+    progress_val = max(0.0, min(1.0, progress_val))
+    st.progress(progress_val)
+    st.markdown(f"<p class='progress-indicator'>{raw_progress}% completed</p>", unsafe_allow_html=True)
     render_skill_info(learner_profile)
 
 def render_learning_preferences(goal):
@@ -342,17 +366,14 @@ def update_learner_profile_with_additional_info(goal):
     old_profile = goal.get("learner_profile", {})
     user_id = st.session_state.get("userId")
     goal_id = st.session_state.get("selected_goal_id")
-    # Don't pass user_id/goal_id here — avoid persisting to the profile store
-    # immediately, so the adapt-learning-path endpoint can still read the OLD
-    # profile for FSLSM delta comparison.
-    new_learner_profile = update_learning_preferences(old_profile, additional_info)
+    # Pass user_id/goal_id so the backend saves immediately and captures a
+    # pre-update snapshot for adapt-learning-path delta comparison.
+    new_learner_profile = update_learning_preferences(old_profile, additional_info, user_id=user_id, goal_id=goal_id)
     if new_learner_profile is not None:
         # Detect significant FSLSM preference changes
         if _has_significant_fslsm_change(old_profile, new_learner_profile):
             st.session_state[f"adaptation_suggested_{goal_id}"] = True
-        else:
-            # No adaptation needed — persist the updated profile to the store now
-            save_learner_profile(user_id, goal_id, new_learner_profile)
+        # Profile is already persisted to the backend by update_learning_preferences.
 
         goal["learner_profile"] = new_learner_profile
         # Push updated learning_preferences to all other goals immediately

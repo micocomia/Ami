@@ -686,6 +686,18 @@ def sync_profile(user_id, goal_id):
     return None
 
 
+def get_learner_profile(user_id, goal_id):
+    """Retrieve an existing learner profile from the backend store. Returns None if not found."""
+    url = f"{backend_endpoint}profile/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("learner_profile")
+    except Exception:
+        pass
+    return None
+
+
 def save_learner_profile(user_id, goal_id, learner_profile):
     """Persist a learner profile to the backend store without triggering an LLM call."""
     backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"

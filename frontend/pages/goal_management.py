@@ -6,6 +6,7 @@ from components.gap_identification import (
     render_identified_skill_gap,
     render_identifying_skill_gap,
     render_goal_assessment_banners,
+    render_skill_gap_summary,
     has_any_gap,
 )
 from utils.state import add_new_goal, change_selected_goal_id, get_new_goal_uid, index_goal_by_id, reset_to_add_goal, save_persistent_state
@@ -100,11 +101,6 @@ def render_existing_goals():
                 col_right.button("Current Active Goal", type="primary", key=f"active_{goal['id']}", use_container_width=True)
             else:
                 if col_right.button("Set as Active Goal", key=f"set_{goal['id']}", help="Mark this goal as your active learning goal."):
-                    st.session_state.selected_goal_id = goal["id"]
-                    try:
-                        save_persistent_state()
-                    except Exception:
-                        pass
                     change_selected_goal_id(goal["id"])
                     try:
                         save_persistent_state()
@@ -183,7 +179,7 @@ def render_skill_gap_dialog():
     skill_gaps = to_add_goal.get("skill_gaps", [])
     num_skills = len(skill_gaps)
     num_gaps = sum(1 for skill in skill_gaps if skill["is_gap"])
-    st.info(f"There are {num_skills} skills in total, with {num_gaps} skill gaps identified.")
+    render_skill_gap_summary(num_skills, num_gaps)
     if not skill_gaps:
         st.session_state["if_show_skill_gap_results_in_dialog"] = True
         try:
@@ -210,9 +206,17 @@ def render_skill_gap_dialog():
         if st.button("Schedule Learning Path", type="primary", disabled=schedule_disabled):
             if skill_gaps and not to_add_goal.get("learner_profile"):
                 with st.spinner('Creating your profile ...'):
-                    learner_profile = create_learner_profile(to_add_goal["learning_goal"], st.session_state["learner_information"], skill_gaps, user_id=st.session_state.get("userId"), goal_id=get_new_goal_uid())
+                    new_goal_uid = get_new_goal_uid()
+                    learner_profile = create_learner_profile(to_add_goal["learning_goal"], st.session_state["learner_information"], skill_gaps, user_id=st.session_state.get("userId"), goal_id=new_goal_uid)
                     if learner_profile is None:
                         st.rerun()
+                    # Sync mastered skills from existing goals into the newly created profile
+                    from utils.request_api import sync_profile
+                    user_id_for_sync = st.session_state.get("userId")
+                    if user_id_for_sync:
+                        merged = sync_profile(user_id_for_sync, new_goal_uid)
+                        if merged:
+                            learner_profile = merged
                     to_add_goal["learner_profile"] = learner_profile
                     st.toast("Your profile has been created!")
             new_goal_id = add_new_goal(**to_add_goal)

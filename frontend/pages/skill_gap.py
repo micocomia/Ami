@@ -6,6 +6,7 @@ from components.gap_identification import (
     render_goal_assessment_banners,
     render_retrieval_sources_banner,
     render_bias_audit_banners,
+    render_skill_gap_summary,
     has_any_gap,
 )
 from utils.state import add_new_goal, get_new_goal_uid, save_persistent_state
@@ -48,7 +49,7 @@ def render_skill_gap():
 
             num_skills = len(skill_gaps)
             num_gaps = sum(1 for skill in skill_gaps if skill["is_gap"])
-            st.info(f"There are {num_skills} skills in total, with {num_gaps} skill gaps identified.")
+            render_skill_gap_summary(num_skills, num_gaps)
             render_identified_skill_gap(goal)
 
             # Dynamic gap-check: disable Schedule when no gaps exist
