@@ -143,7 +143,8 @@ adaptive_learner_profiler_task_prompt_update = adaptive_learner_profiler_task_pr
 adaptive_learner_profiler_task_prompt_update_cognitive = """
 Task B-Cognitive: Cognitive Status Update
 
-Update ONLY the cognitive_status section of the learner's profile based on session completion and quiz results.
+Update the cognitive_status section of the learner's profile based on session completion and quiz results.
+Also update learner_information to reflect newly mastered skills or significant progress milestones.
 
 - Learner's Previous Profile: {learner_profile}
 - Have Learned Session Information: {session_information}
@@ -153,6 +154,7 @@ RULES:
 - Only update cognitive_status (overall_progress, mastered_skills, in_progress_skills).
 - If if_learned is True and the desired_outcome level meets or exceeds the required level, move the skill to mastered_skills.
 - Recalculate overall_progress based on the updated skill statuses.
+- Update learner_information to briefly note any newly mastered skills or significant progress (e.g., append "Has now mastered Python Basics." if the learner just mastered that skill). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to cognitive progress.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
@@ -161,7 +163,8 @@ adaptive_learner_profiler_task_prompt_update_cognitive = adaptive_learner_profil
 adaptive_learner_profiler_task_prompt_update_preferences = """
 Task B-Preferences: Learning Preferences Update
 
-Update ONLY the learning_preferences section of the learner's profile based on the learner's feedback and interactions.
+Update the learning_preferences section of the learner's profile based on the learner's feedback and interactions.
+Also update learner_information if the learner's preferred learning style has shifted significantly (e.g., from verbal to visual).
 
 - Learner's Previous Profile: {learner_profile}
 - Learner Feedback / Interactions: {learner_interactions}
@@ -172,6 +175,7 @@ RULES:
 - Only update learning_preferences (fslsm_dimensions, additional_notes).
 - Adjust FSLSM dimension values based on the learner's stated preferences and feedback.
 - You may also update behavioral_patterns if the feedback includes relevant behavioral information.
+- If a significant shift in learning style has occurred (e.g., fslsm_input shifted from verbal to visual), update learner_information to reflect this change (e.g., "Now prefers visual learning materials over text-based content."). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to the preference change.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """

@@ -4,6 +4,28 @@ from utils.request_api import create_learner_profile, identify_skill_gap, audit_
 from utils.format import format_citation
 from utils.state import save_persistent_state
 
+_LEVEL_DESCRIPTIONS = {
+    "unlearned":     "No prior exposure — you haven't encountered this skill yet.",
+    "beginner":      "Basic awareness — you can follow guided examples but still need support.",
+    "intermediate":  "Working knowledge — you can apply this skill independently in common scenarios.",
+    "advanced":      "Deep proficiency — you can tackle complex problems and guide others.",
+    "expert":        "Mastery — you can innovate and define best practices in this area.",
+}
+
+
+def render_skill_gap_summary(num_skills: int, num_gaps: int) -> None:
+    """Render the skill-count summary, a review instruction, and a level-description reference."""
+    st.info(
+        f"**{num_skills} skills identified · {num_gaps} skill gap{'s' if num_gaps != 1 else ''}**  \n"
+        "Review each skill below. Adjust the **Current Level** if it doesn't match your "
+        "actual knowledge, and toggle **Mark as Gap** to correct any mis-classifications. "
+        "Only skills marked as gaps will be included in your learning path."
+    )
+    with st.expander("What do the proficiency levels mean?"):
+        for level, description in _LEVEL_DESCRIPTIONS.items():
+            st.markdown(f"- **{level.capitalize()}** — {description}")
+
+
 def render_identifying_skill_gap(goal):
     with st.spinner('Identifying Skill Gap ...'):
         learning_goal = goal["learning_goal"]

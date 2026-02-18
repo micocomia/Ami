@@ -228,18 +228,20 @@ def change_selected_goal_id(new_goal_id):
     st.session_state["learning_path"] = goals[goal_id_idx]["learning_path"]
     st.session_state["selected_session_id"] = 0
     st.session_state["selected_point_id"] = 0
-    # status
-    st.session_state["is_learner_profile_ready"] = True if st.session_state["learner_profile"] else False
     st.session_state["is_learning_path_ready"] = True if st.session_state["learning_path"] else False
     st.session_state["is_skill_gap_ready"] = True if st.session_state["skill_gaps"] else False
-    # Sync profile with shared fields from other goals
+    # Always fetch goal's profile from backend (source of truth) and sync shared fields.
+    # This ensures FSLSM/mastery changes made on other goals are reflected immediately,
+    # and prevents stale or empty in-memory profiles from being shown.
     from utils.request_api import sync_profile
     user_id = st.session_state.get("userId")
-    if user_id and goals[goal_id_idx].get("learner_profile"):
+    if user_id:
         merged = sync_profile(user_id, new_goal_id)
         if merged:
             goals[goal_id_idx]["learner_profile"] = merged
             st.session_state["learner_profile"] = merged
+    # Update ready flag AFTER sync (reflects backend-fetched profile)
+    st.session_state["is_learner_profile_ready"] = True if st.session_state["learner_profile"] else False
     # persist change
     try:
         save_persistent_state()
@@ -315,8 +317,19 @@ def propagate_profile_fields_to_other_goals(
             if new_prefs:
                 target_profile["learning_preferences"] = new_prefs
                 changed = True
+            # learner_information is shared across all goals — always propagate it
+            # so the text description stays in sync with FSLSM vectors and mastery
+            new_learner_info = source_profile.get("learner_information", "")
+            if new_learner_info:
+                target_profile["learner_information"] = new_learner_info
+                changed = True
 
         if sync_mastered_skills:
+            # learner_information is shared — propagate it when cognitive status changes too
+            new_learner_info = source_profile.get("learner_information", "")
+            if new_learner_info and not sync_preferences:  # avoid double-write if both flags set
+                target_profile["learner_information"] = new_learner_info
+                changed = True
             source_mastered = source_profile.get("cognitive_status", {}).get("mastered_skills", [])
             if source_mastered:
                 target_cs = target_profile.setdefault("cognitive_status", {})
@@ -335,6 +348,12 @@ def propagate_profile_fields_to_other_goals(
                         if new_idx > existing_idx:
                             merged[name] = skill
                 target_cs["mastered_skills"] = list(merged.values())
+                # Remove newly mastered skills from in_progress_skills to keep state consistent
+                mastered_names = set(merged.keys())
+                in_progress = target_cs.get("in_progress_skills", [])
+                target_cs["in_progress_skills"] = [
+                    s for s in in_progress if s.get("name") not in mastered_names
+                ]
                 changed = True
 
         if changed:
