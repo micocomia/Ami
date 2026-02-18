@@ -15,11 +15,13 @@
 3. [Flow 3 — User Account Deletion](#flow-3--user-account-deletion)
 4. [Flow 4 — Behavioral Patterns Display (Real Metrics)](#flow-4--behavioral-patterns-display-real-metrics)
 5. [Flow 5 — Knowledge Content with Verified Course Materials](#flow-5--knowledge-content-with-verified-course-materials)
-6. [Flow 6 — FSLSM-Driven Learning Path Adaptations](#flow-6--fslsm-driven-learning-path-adaptations)
+6. [Flow 6 — FSLSM-Driven Learning Path and Content Adaptations](#flow-6--fslsm-driven-learning-path-and-content-adaptations)
 7. [Flow 7 — Mastery Lock and Quiz-Based Mastery Evaluation](#flow-7--mastery-lock-and-quiz-based-mastery-evaluation)
 8. [Flow 8 — Agentic Learning Plan Generation](#flow-8--agentic-learning-plan-generation)
 9. [Flow 9 — Adaptive Plan Regeneration](#flow-9--adaptive-plan-regeneration)
 10. [Flow 10 — Cross-Goal Profile Sync](#flow-10--cross-goal-profile-sync)
+11. [Flow 11 — Audio-Visual Adaptive Content Delivery](#flow-11--audio-visual-adaptive-content-delivery)
+12. [Flow 12 — SOLO Taxonomy Quiz Evaluation](#flow-12--solo-taxonomy-quiz-evaluation)
 
 ---
 
@@ -292,23 +294,24 @@ python -m pytest backend/tests/test_verified_content.py -v
 
 ---
 
-## Flow 6 — FSLSM-Driven Learning Path Adaptations
+## Flow 6 — FSLSM-Driven Learning Path and Content Adaptations
 
 ### User Story
 
 > **As a** learner with a specific learning style (FSLSM profile),
-> **I want** the learning path structure to adapt based on my FSLSM dimensions,
-> **so that** sessions include appropriate challenges, reflection time, sequencing, and navigation suited to how I learn best.
+> **I want** the learning path structure and the content of each session to adapt based on my FSLSM dimensions,
+> **so that** sessions include appropriate challenges, reflection time, sequencing, navigation, and content formatting suited to how I learn best.
 
 ### Backend Test Scripts
 
 | Test file | Class / Tests | What it covers |
 |---|---|---|
 | `test_fslsm_overrides.py` | `TestFSLSMOverrides` (12 tests) | Deterministic FSLSM post-processing: checkpoint challenges, thinking time buffers, sequencing hints, navigation mode, mastery thresholds, combined dimensions, neutral defaults |
+| `test_adaptive_content_delivery.py` | `TestFSLSMHints` (16 tests) | Processing, perception, and understanding dimension hint injection into content prompts |
 
 **Run command:**
 ```bash
-python -m pytest backend/tests/test_fslsm_overrides.py -v
+python -m pytest backend/tests/test_fslsm_overrides.py backend/tests/test_adaptive_content_delivery.py -v
 ```
 
 ### Streamlit Frontend Test Steps
@@ -350,6 +353,19 @@ python -m pytest backend/tests/test_fslsm_overrides.py -v
 | 1 | Navigate to the **Learning Path** page (any persona) | Two progress bars: "Sessions Completed" and "Sessions Mastered" |
 | 2 | Complete a session without passing quiz | "Sessions Completed" increments, "Sessions Mastered" does not |
 | 3 | Pass the quiz | "Sessions Mastered" increments |
+
+#### 6.6 — FSLSM content-level hints (Sprint 3 — tight integration)
+
+> These affect the **document content**, not path structure. All changes appear in the rendered markdown.
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Hands-on Explorer"** (processing = -0.7, active). Generate session content | Document contains a **🔧 Try It First** challenge block before the main explanation |
+| 2 | Select **"Reflective Reader"** (processing = 0.7, reflective). Generate session content | Document contains a **🤔 Reflection Pause** deep-thinking question |
+| 3 | Select **"Hands-on Explorer"** (perception = -0.5, sensing). Generate session content | Content begins with a concrete example before introducing theory |
+| 4 | Select **"Conceptual Thinker"** (perception = 0.7, intuitive). Generate session content | Content begins with the abstract principle, then moves to examples |
+| 5 | Select **"Reflective Reader"** (understanding = 0.5, sequential). Generate session content | Document sections follow strict linear order with explicit "Next, …" transitions |
+| 6 | Select **"Conceptual Thinker"** (understanding = 0.7, global). Generate session content | Document opens with a **🗺️ Big Picture** overview section and cross-references between concepts |
 
 ---
 
@@ -422,6 +438,25 @@ python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_mastery_ev
 | 1 | Score 60% on a beginner-level session | Mastery achieved (threshold: 60%) |
 | 2 | Score 70% on an advanced-level session | Mastery NOT achieved (threshold: 80%). Must retake |
 | 3 | Retake and score 85% | Mastery achieved (85 >= 80) |
+
+#### 7.6 — Semantic short-answer evaluation (Sprint 3)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Submit a short-answer response that is correct but differently worded (e.g., "A programming language" for "Python") | Marked correct. Feedback explains why the answer is accepted |
+| 2 | Submit a response with entirely wrong meaning | Marked incorrect. Feedback explains the expected concept |
+| 3 | Click **"View Explanations"** after submission | Each short-answer shows expected answer plus the semantic evaluation feedback in green (correct) or red (incorrect) |
+
+#### 7.7 — SOLO-aligned quiz mix per proficiency (Sprint 3)
+
+> See also Flow 12 for full SOLO quiz evaluation details.
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Navigate to a **beginner**-level session quiz | Quiz contains: 4 single-choice + 1 true/false. No multiple-choice, short-answer, or open-ended questions |
+| 2 | Navigate to an **intermediate**-level session quiz | Quiz contains: 2 single-choice + 2 multiple-choice + 1 true/false |
+| 3 | Navigate to an **advanced**-level session quiz | Quiz contains: 1 single-choice + 1 multiple-choice + 2 short-answer + 1 open-ended |
+| 4 | Navigate to an **expert**-level session quiz | Quiz contains: 1 multiple-choice + 1 short-answer + 3 open-ended |
 
 ---
 
@@ -558,6 +593,150 @@ python -m pytest backend/tests/test_profile_sync.py -v
 
 ---
 
+## Flow 11 — Audio-Visual Adaptive Content Delivery
+
+### User Story
+
+> **As a** visual or auditory learner,
+> **I want** the learning content to be delivered in a format that matches my sensory preference (diagrams and videos for visual learners; podcast-style dialogue and an audio player for auditory learners),
+> **so that** I absorb information more effectively through my preferred modality.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `test_adaptive_content_delivery.py` | `TestMediaResourceFinder` (6 tests) | YouTube video ID extraction, thumbnail URL, Wikipedia image retrieval, deduplication, exception handling |
+| `test_adaptive_content_delivery.py` | `TestVisualFormattingHints` (5 tests) | Hint injection for strong/moderate visual learners, no-op for standard and auditory |
+| `test_adaptive_content_delivery.py` | `TestPodcastStyleConverter` (4 tests) | Rich-text narrative rewrite (moderate auditory), Host-Expert dialogue (strong auditory) |
+| `test_adaptive_content_delivery.py` | `TestTTSGenerator` (6 tests) | Markdown stripping, dialogue turn parsing, dual-voice MP3 generation, audio URL format |
+| `test_adaptive_content_delivery.py` | `TestContentFormatField` (4 tests) | `content_format` value: standard / visual_enhanced / podcast |
+| `test_adaptive_content_delivery.py` | `TestAudioURL` (4 tests) | `audio_url` present for strong auditory, absent otherwise |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_adaptive_content_delivery.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 11.1 — Strong visual learner (fslsm_input ≤ -0.7)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Visual Learner"** persona, complete onboarding, generate session content | Stage 3 spinner completes. Info banner: "📊 This content includes visual resources (diagrams, videos, images) for visual learners." |
+| 2 | Read through the document sections | Document contains Mermaid diagrams and/or tables in the body. A "📺 Visual Learning Resources" section appears with YouTube thumbnails and Wikipedia image links |
+| 3 | Click a YouTube thumbnail link | Opens YouTube video in a new tab |
+
+#### 11.2 — Moderate visual learner (-0.7 to -0.3)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select a persona with input score around -0.5. Generate session content | Info banner shown. Document may contain a table or diagram. One YouTube video link in resources section |
+
+#### 11.3 — Standard learner (-0.3 to +0.3)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Balanced Learner"** persona. Generate session content | No info banner displayed. Document format unchanged. No audio player |
+
+#### 11.4 — Moderate auditory learner (+0.3 to +0.7)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select a persona with input score around +0.5. Generate session content | Info banner: "🎙️ This content has been adapted into a podcast-style format for auditory learners." |
+| 2 | Read the document | Document is written in a rich first-person narrative with analogies and vivid metaphors. No audio player (TTS not triggered at this level) |
+
+#### 11.5 — Strong auditory learner (fslsm_input ≥ +0.7)
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Select **"Reflective Reader"** persona (input = 0.7). Generate session content | Info banner: "🎙️ This content has been adapted into a podcast-style format for auditory learners." |
+| 2 | Observe the audio player below the banner | An audio player (`st.audio`) is displayed. Clicking play streams the dual-voice MP3 |
+| 3 | Read the document | Document begins with "# 🎧 [Podcast] …" title. Body shows alternating `**[HOST]**:` and `**[EXPERT]**:` dialogue turns |
+| 4 | Navigate to the next document section | Audio player remains accessible (shown above the section content) |
+
+#### 11.6 — TTS failure fallback
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Backend TTS generation fails (e.g., network error). Generate content for strong auditory learner | Info banner still shown. No audio player displayed (audio_url absent). Podcast-format text still rendered |
+
+---
+
+## Flow 12 — SOLO Taxonomy Quiz Evaluation
+
+### User Story
+
+> **As a** learner completing a session quiz,
+> **I want** the quiz question types to match my proficiency level and receive qualitative SOLO-taxonomy feedback on my open-ended and short-answer responses,
+> **so that** I understand not just whether I was right or wrong, but the depth of my understanding.
+
+### Backend Test Scripts
+
+| Test file | Class / Tests | What it covers |
+|---|---|---|
+| `test_quiz_mix.py` | `TestQuizMixByProficiency` (6 tests) | Graduated question counts for beginner / intermediate / advanced / expert / mixed proficiency / empty outcomes |
+| `test_solo_evaluator.py` | `TestSOLOEvaluation` (6 tests) | SOLO level classification, fractional score, qualitative feedback for all 5 levels |
+| `test_quiz_scorer.py` | `TestHybridScoring` (4 tests) | Open-ended fractional scores + LLM short-answer results merged with deterministic scoring |
+
+**Run command:**
+```bash
+python -m pytest backend/tests/test_quiz_mix.py backend/tests/test_solo_evaluator.py backend/tests/test_quiz_scorer.py -v
+```
+
+### Streamlit Frontend Test Steps
+
+#### 12.1 — Graduated question mix
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Complete onboarding with a **beginner**-level goal. Generate session content, reach the quiz | Quiz shows exactly 4 single-choice + 1 true/false. No short-answer or open-ended questions visible |
+| 2 | Complete onboarding with an **expert**-level goal. Reach the quiz | Quiz shows 1 multiple-choice + 1 short-answer + 3 open-ended. No single-choice or true/false |
+| 3 | Complete onboarding with an **intermediate**-level goal. Reach the quiz | Quiz shows 2 single-choice + 2 multiple-choice + 1 true/false |
+| 4 | Complete onboarding with an **advanced**-level goal. Reach the quiz | Quiz shows 1 single-choice + 1 multiple-choice + 2 short-answer + 1 open-ended |
+
+#### 12.2 — Open-ended question rendering
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Reach an expert or advanced session quiz with open-ended questions | Each open-ended question shows: question text, caption "Write a detailed response demonstrating your understanding.", large text area (150 px tall) |
+| 2 | Type a multi-paragraph response into the text area | Text area accepts all input. Content preserved on next rerun |
+| 3 | Leave an open-ended answer blank and click **"Submit Quiz"** | Blank answer treated as no response (prestructural) — scored 0 |
+
+#### 12.3 — SOLO-level feedback after submission
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Submit quiz with open-ended responses | Spinner: "Evaluating your responses…" for ~3–8 seconds (LLM evaluation) |
+| 2 | After result, click **"View Explanations"** | Open-ended section shows: rubric text, example answer, SOLO level in color-coded text, percentage score, qualitative feedback |
+| 3 | Submit a response demonstrating Extended Abstract thinking | Green "Extended Abstract" label, score 100% |
+| 4 | Submit a response mentioning only one relevant concept | Orange "Unistructural" label, score 25% |
+| 5 | Submit a completely irrelevant or blank response | Red "Prestructural" label, score 0% |
+| 6 | Submit a response integrating multiple concepts | Blue "Relational" label, score 75% |
+
+#### 12.4 — Short-answer semantic evaluation
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Answer a short-answer question with a correct but differently worded response | After submission, "View Explanations" shows green ✓ with semantic feedback |
+| 2 | Answer with completely wrong meaning | Red ✗ with explanation of expected concept |
+
+#### 12.5 — Mastery score with open-ended
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Expert session: answer all questions well (Relational-level open-ended) | Score includes fractional SOLO score. Mastery achieved if total ≥ threshold |
+| 2 | Expert session: answer open-ended at Prestructural level | Open-ended contributes 0 to score. Overall score drops proportionally |
+
+#### 12.6 — Backward compatibility
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Load a cached quiz generated before Sprint 3 (4 question types only, no open_ended key) | Quiz renders normally. No errors. Open-ended section not displayed |
+| 2 | Submit the legacy quiz | Scoring works. `open_ended_feedback` absent (empty list). No UI errors |
+
+---
+
 ## Test Coverage Summary
 
 ### Backend Test Files
@@ -574,23 +753,29 @@ python -m pytest backend/tests/test_profile_sync.py -v
 | `test_fslsm_update.py` | 2 | Flow 2 (FSLSM dimension updates — integration test, requires LLM API key) |
 | `test_behavioral_metrics.py` | 7 | Flow 4 (behavioral metrics) |
 | `test_verified_content.py` | 17 | Flow 5 (verified content loading, indexing, retrieval) |
-| `test_quiz_scorer.py` | 16 | Flow 7 (quiz scoring, mastery thresholds) |
-| `test_fslsm_overrides.py` | 12 | Flow 6 (FSLSM post-processing) |
+| `test_fslsm_overrides.py` | 12 | Flow 6 (FSLSM path-level adaptations) |
+| `test_quiz_scorer.py` | 16 | Flow 7, Flow 12 (quiz scoring, mastery thresholds, hybrid SOLO scoring) |
 | `test_mastery_evaluation.py` | 7 | Flow 7 (mastery evaluation) |
 | `test_agentic_learning_plan.py` | 5 | Flow 8 (agentic plan generation) |
 | `test_plan_quality_gate.py` | 7 | Flow 8 (quality gate) |
 | `test_plan_regeneration.py` | 13 | Flow 9 (adaptive regeneration) |
 | `test_profile_sync.py` | 10 | Flow 10 (cross-goal profile sync) |
-| **Total** | **248** | |
+| `test_adaptive_content_delivery.py` | 45 | Flow 6 (FSLSM content hints), Flow 11 (audio-visual delivery) |
+| `test_solo_evaluator.py` | 6 | Flow 12 (SOLO level classification, semantic short-answer evaluation) |
+| `test_quiz_mix.py` | 6 | Flow 12 (graduated question mix by proficiency) |
+| **Total** | **315** | |
 
 ### Running All Tests
 
 ```bash
-# All tests (no LLM API key required except test_fslsm_update.py):
+# All tests (no LLM API key required except test_fslsm_update.py and test_solo_evaluator.py):
 python -m pytest backend/tests/ -v
 
-# Integration test only (requires LLM API key):
-python -m pytest backend/tests/test_fslsm_update.py -v
+# Sprint 3 tests only (audio-visual delivery + SOLO quizzes):
+python -m pytest backend/tests/test_adaptive_content_delivery.py backend/tests/test_quiz_mix.py backend/tests/test_solo_evaluator.py -v
+
+# Integration tests only (require LLM API key):
+python -m pytest backend/tests/test_fslsm_update.py backend/tests/test_solo_evaluator.py -v
 ```
 
 ---

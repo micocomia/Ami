@@ -477,7 +477,7 @@ def reschedule_learning_path(learning_path, learner_profile, session_count, othe
     return response.get("rescheduled_learning_path") if response else None
 
 # @st.cache_resource
-def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, llm_type=None, method_name=None):
+def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count=0, llm_type=None, method_name=None):
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
     method_name = method_name or cfg["default_method_name"]
@@ -488,6 +488,7 @@ def generate_document_quizzes(learner_profile, learning_document, single_choice_
         "multiple_choice_count": multiple_choice_count,
         "true_false_count": true_false_count,
         "short_answer_count": short_answer_count,
+        "open_ended_count": open_ended_count,
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
@@ -556,10 +557,14 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
         "method_name": str(method_name),
     }
     response = make_post_request("integrate-learning-document", data, "./assets/data_example/learning_document.json")
-    if output_markdown:
-        return response.get("learning_document") if response else None
-    else:
-        return response.get("learning_document") if response else None
+    if not response:
+        return None
+    # Return enriched dict including audio-visual metadata from Sprint 3 backend
+    return {
+        "learning_document": response.get("learning_document"),
+        "content_format": response.get("content_format", "standard"),
+        "audio_url": response.get("audio_url"),
+    }
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
     """Submit quiz answers for mastery evaluation."""
@@ -597,6 +602,30 @@ def get_behavioral_metrics(user_id, goal_id=None):
     except Exception:
         pass
     return None
+
+
+def get_quiz_mix(user_id, goal_id, session_index):
+    """Get SOLO-aligned question type counts for a session from the backend.
+
+    Returns a dict with keys: single_choice_count, multiple_choice_count,
+    true_false_count, short_answer_count, open_ended_count.
+    Falls back to a standard beginner mix if the endpoint is unavailable.
+    """
+    url = f"{backend_endpoint}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    # Fallback: standard mix (same as previous hardcoded behaviour)
+    return {
+        "single_choice_count": 3,
+        "multiple_choice_count": 1,
+        "true_false_count": 1,
+        "short_answer_count": 1,
+        "open_ended_count": 0,
+    }
 
 
 def get_user_state(backend_ep, user_id):
