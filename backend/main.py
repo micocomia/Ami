@@ -1164,6 +1164,9 @@ async def explore_knowledge_points(request: KnowledgePointExplorationRequest):
 
 @app.post("/draft-knowledge-point")
 async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1171,14 +1174,28 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     knowledge_points = request.knowledge_points
     knowledge_point = request.knowledge_point
     use_search = request.use_search
+    fslsm_input = _get_fslsm_input(learner_profile)
+    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
+    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+    visual_hints = _visual_formatting_hints(fslsm_input)
+    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
     try:
-        knowledge_draft = draft_knowledge_point_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search)
+        knowledge_draft = draft_knowledge_point_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
+            use_search,
+            visual_formatting_hints=visual_hints,
+            processing_perception_hints=proc_perc_hints,
+            search_rag_manager=search_rag_manager,
+        )
         return {"knowledge_draft": knowledge_draft}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/draft-knowledge-points")
 async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1186,14 +1203,29 @@ async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
     knowledge_points = request.knowledge_points
     use_search = request.use_search
     allow_parallel = request.allow_parallel
+    fslsm_input = _get_fslsm_input(learner_profile)
+    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
+    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+    visual_hints = _visual_formatting_hints(fslsm_input)
+    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
     try:
-        knowledge_drafts = draft_knowledge_points_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search)
+        knowledge_drafts = draft_knowledge_points_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points,
+            allow_parallel, use_search,
+            visual_formatting_hints=visual_hints,
+            processing_perception_hints=proc_perc_hints,
+            search_rag_manager=search_rag_manager,
+        )
         return {"knowledge_drafts": knowledge_drafts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/integrate-learning-document")
 async def integrate_learning_document(request: LearningDocumentIntegrationRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _understanding_hints,
+        _FSLSM_STRONG, _FSLSM_MODERATE,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1201,9 +1233,77 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
     knowledge_points = request.knowledge_points
     knowledge_drafts = request.knowledge_drafts
     output_markdown = request.output_markdown
+    fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
+    fslsm_input = _get_fslsm_input(learner_profile)
+    und_hints = _understanding_hints(fslsm_understanding)
+
+    # Audio-visual pipeline requires a rendered markdown string to operate on.
+    # When any adaptation applies, force output_markdown=True so the integrator
+    # returns a string rather than a raw document_structure dict.
+    needs_av = fslsm_input <= -_FSLSM_MODERATE or fslsm_input >= _FSLSM_MODERATE
+    effective_output_markdown = True if needs_av else output_markdown
+
+    # Find media resources for visual learners before integration
+    media_resources = []
+    if fslsm_input <= -_FSLSM_MODERATE:
+        from modules.content_generator.agents.media_resource_finder import find_media_resources
+        _search_runner = getattr(search_rag_manager, "search_runner", None)
+        if _search_runner is None:
+            try:
+                from config.loader import default_config
+                from base.searcher_factory import SearchRunner
+                _search_runner = SearchRunner.from_config(default_config)
+            except Exception:
+                pass
+        if _search_runner is not None:
+            max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
+            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+            try:
+                media_resources = find_media_resources(
+                    _search_runner,
+                    knowledge_points,
+                    max_videos=max_videos,
+                    max_images=max_images,
+                )
+            except Exception:
+                media_resources = []
+
     try:
-        learning_document = integrate_learning_document_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown)
-        return {"learning_document": learning_document}
+        learning_document = integrate_learning_document_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts,
+            effective_output_markdown,
+            understanding_hints=und_hints,
+            media_resources=media_resources if media_resources else None,
+        )
+
+        # Determine content format and apply audio-visual adaptations
+        content_format = "standard"
+        audio_url = None
+
+        if fslsm_input <= -_FSLSM_MODERATE:
+            content_format = "visual_enhanced"
+
+        if fslsm_input >= _FSLSM_MODERATE:
+            from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
+            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
+            learning_document = convert_to_podcast_with_llm(llm, learning_document, learner_profile, mode=mode)
+            content_format = "podcast"
+
+            if fslsm_input >= _FSLSM_STRONG:
+                from modules.content_generator.agents.tts_generator import generate_tts_audio
+                try:
+                    audio_url = generate_tts_audio(learning_document)
+                except Exception:
+                    audio_url = None
+
+        return {
+            "learning_document": learning_document,
+            "content_format": content_format,
+            "audio_url": audio_url,
+            # Tells the frontend whether learning_document is already a rendered
+            # markdown string (True) or still a raw document_structure dict (False).
+            "document_is_markdown": needs_av,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

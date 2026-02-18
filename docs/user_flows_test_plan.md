@@ -2,8 +2,6 @@
 
 > **Purpose:** This document lists each user flow's **user story**, the **backend test script** that covers it, and the **Streamlit frontend test steps** to manually verify the flow end-to-end.
 >
-> **How to use:** Copy this into a Google Doc so your team can check off steps and leave comments on possible bugs.
->
 > **Prerequisites for most flows:** Log in or register (see Flow 1). Complete onboarding by selecting a persona, entering a learning goal, and clicking "Begin Learning" (see Flow 2). These setup steps are not repeated in every flow.
 
 ---

@@ -564,6 +564,7 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
         "learning_document": response.get("learning_document"),
         "content_format": response.get("content_format", "standard"),
         "audio_url": response.get("audio_url"),
+        "document_is_markdown": response.get("document_is_markdown", False),
     }
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):

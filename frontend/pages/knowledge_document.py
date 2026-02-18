@@ -258,7 +258,11 @@ def render_content_preparation(goal):
     document_structure = integration_result["learning_document"]
     content_format = integration_result.get("content_format", "standard")
     audio_url = integration_result.get("audio_url")
-    learning_document = prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
+    if integration_result.get("document_is_markdown", False):
+        # Backend already rendered the markdown (audio-visual pipeline ran server-side)
+        learning_document = document_structure
+    else:
+        learning_document = prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
     if learning_document is None:
         st.error("Failed to integrate knowledge document.")
         return
