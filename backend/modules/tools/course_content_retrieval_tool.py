@@ -33,7 +33,7 @@ class RetrieveCourseContentInput(BaseModel):
         default=None,
         description="Filter by specific lecture number. Only applies when content_category='Lectures'.",
     )
-    k: int = Field(default=5, description="Number of results to retrieve.")
+    k: int = Field(default=8, description="Number of results to retrieve.")
 
 
 def create_course_content_retrieval_tool(
@@ -55,12 +55,12 @@ def create_course_content_retrieval_tool(
         course_name: Optional[str] = None,
         content_category: Optional[str] = None,
         lecture_number: Optional[int] = None,
-        k: int = 5,
+        k: int = 8,
     ) -> str:
         """Retrieve verified course content (syllabus, lectures) relevant to a query.
 
         Use this to ground skill requirements in actual course material.
-        Query the syllabus first for broad coverage, then specific lectures if needed.
+        Retrieve lectures for topic-level content; use syllabus only if you need broad course structure.
 
         Args:
             query: The search query.
@@ -77,7 +77,7 @@ def create_course_content_retrieval_tool(
             return "No verified course content available. Proceed using your own knowledge."
 
         vcm = search_rag_manager.verified_content_manager
-        docs = vcm.retrieve(query, k=k * 3)  # over-fetch for filtering
+        docs = vcm.retrieve(query, k=k * 4)  # over-fetch for filtering
 
         if course_code:
             docs = [

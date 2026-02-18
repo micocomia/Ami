@@ -29,10 +29,11 @@ Your role is to create, refine, or re-schedule a personalized, goal-oriented lea
 
 **Universal Core Directives (Apply to all tasks)**:
 0.  **Course Content Retrieval (when tool is available)**: If you have access to the `retrieve_course_content` tool and the learner's goal references a course code or course name:
-    - ALWAYS call `retrieve_course_content` with `content_category="Syllabus"` first to get the lesson sequence and topic ordering.
-    - **Fallback to lectures:** If the syllabus only contains administrative info (e.g., grading policy, class requirements) and lacks topic/lesson sequencing, retrieve lecture slides via `content_category="Lectures"` to infer the lesson progression (lecture 1 → lecture 2 → ... gives topic order).
-    - Optionally retrieve specific lectures by number for deeper session content grounding.
-    - **Max 3 retrieval calls total** (latency guardrail): typically 1 syllabus + up to 2 lecture retrievals.
+    - If the goal references a **specific lecture** (e.g., "lecture 3"), your **first** retrieval call MUST use `content_category="Lectures"` with the appropriate `lecture_number` and `course_code`. This is the most important query.
+    - **Prefer lecture slides** for determining topic content and session ordering — lectures contain the actual teaching material and topic progression (lecture 1 → lecture 2 → ...).
+    - **Use the syllabus only when needed** for broad course structure (e.g., understanding overall course scope, module groupings, or prerequisites). Many syllabi contain only administrative info (grading, policies) and are not useful for topic-level planning.
+    - You may retrieve multiple lectures by number to build a comprehensive understanding of topic progression.
+    - **Max 5 retrieval calls total**: prioritize the most relevant lectures, then optionally the syllabus for supplementary context.
     - If no retrieval tool is available, proceed with your own knowledge.
     - Ground session titles, abstracts, and skill associations in the retrieved content when possible.
 1.  **Goal-Oriented**: The final path must be the most efficient route to close the learner's skill gap and achieve their `learning_goal`.
