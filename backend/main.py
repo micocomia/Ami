@@ -23,9 +23,13 @@ from fastapi.responses import JSONResponse
 from modules.skill_gap import *
 from modules.learner_profiler import *
 from modules.learning_plan_generator import *
-from modules.learning_plan_generator.agents.learning_path_scheduler import refine_learning_path_with_llm
+from modules.learning_plan_generator.agents.learning_path_scheduler import (
+    schedule_learning_path_agentic,
+    _evaluate_plan_quality,
+)
+from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
 from modules.content_generator import *
-from modules.learner_simulator import simulate_path_feedback_with_llm, simulate_content_feedback_with_llm
+from modules.learner_simulator import simulate_content_feedback_with_llm
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
 from api_schemas import *
 from config import load_config
@@ -321,6 +325,9 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     session["mastery_threshold"] = threshold
     store.put_user_state(request.user_id, state)
 
+    # Flag adaptation suggestion if score is significantly below threshold
+    plan_adaptation_suggested = (not is_mastered) and (score_pct < threshold * 0.8)
+
     return {
         "score_percentage": round(score_pct, 1),
         "is_mastered": is_mastered,
@@ -328,6 +335,7 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
         "correct_count": correct,
         "total_count": total,
         "session_id": session.get("id", ""),
+        "plan_adaptation_suggested": plan_adaptation_suggested,
     }
 
 
@@ -358,6 +366,132 @@ async def session_mastery_status(user_id: str, goal_id: int):
         })
 
     return result
+
+
+class AdaptLearningPathRequest(BaseRequest):
+    """Request for adaptive plan regeneration."""
+    user_id: str
+    goal_id: int
+    new_learner_profile: str
+
+
+@app.post("/adapt-learning-path")
+async def adapt_learning_path(request: AdaptLearningPathRequest):
+    """Detect preference/mastery changes and adapt the learning path accordingly."""
+    from modules.tools.plan_regeneration_tool import (
+        compute_fslsm_deltas,
+        decide_regeneration,
+    )
+
+    llm = get_llm(request.model_provider, request.model_name)
+
+    try:
+        new_profile = request.new_learner_profile
+        if isinstance(new_profile, str) and new_profile.strip():
+            new_profile = ast.literal_eval(new_profile)
+        if not isinstance(new_profile, dict):
+            new_profile = {}
+
+        # Load current state and previous profile
+        state = store.get_user_state(request.user_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="No state found for this user_id")
+
+        goals = state.get("goals", [])
+        goal = None
+        for g in goals:
+            if isinstance(g, dict) and g.get("id") == request.goal_id:
+                goal = g
+                break
+        if goal is None:
+            raise HTTPException(status_code=404, detail="Goal not found")
+
+        current_plan = {"learning_path": goal.get("learning_path", [])}
+        old_profile = store.get_profile(request.user_id, request.goal_id) or {}
+
+        # Extract FSLSM dimensions
+        old_fslsm = (
+            old_profile
+            .get("learning_preferences", {})
+            .get("fslsm_dimensions", {})
+        )
+        new_fslsm = (
+            new_profile
+            .get("learning_preferences", {})
+            .get("fslsm_dimensions", {})
+        )
+
+        # Gather mastery results from the learning path
+        mastery_results = []
+        for i, session in enumerate(current_plan.get("learning_path", [])):
+            if session.get("mastery_score") is not None:
+                mastery_results.append({
+                    "session_index": i,
+                    "session_id": session.get("id", ""),
+                    "score": session.get("mastery_score"),
+                    "is_mastered": session.get("is_mastered", False),
+                    "threshold": session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"]),
+                })
+
+        # Deterministic decision
+        decision = decide_regeneration(
+            current_plan, old_fslsm, new_fslsm, mastery_results,
+        )
+
+        result_plan = current_plan
+        agent_metadata = {
+            "decision": decision.model_dump(),
+            "fslsm_deltas": compute_fslsm_deltas(old_fslsm, new_fslsm),
+            "mastery_results": mastery_results,
+        }
+
+        if decision.action == "keep":
+            return {**result_plan, "agent_metadata": agent_metadata}
+
+        if decision.action == "adjust_future":
+            # Reschedule only future sessions
+            result_plan, retrieved_sources = reschedule_learning_path_with_llm(
+                llm,
+                current_plan.get("learning_path", []),
+                new_profile,
+                other_feedback=f"Adaptation reason: {decision.reason}",
+                search_rag_manager=search_rag_manager,
+            )
+            agent_metadata["retrieved_sources"] = retrieved_sources
+
+        elif decision.action == "regenerate":
+            # Full agentic regeneration preserving learned sessions
+            plan, regen_metadata = schedule_learning_path_agentic(
+                llm, new_profile,
+                search_rag_manager=search_rag_manager,
+            )
+            # Preserve learned sessions from original plan
+            learned = [
+                s for s in current_plan.get("learning_path", [])
+                if s.get("if_learned", False)
+            ]
+            new_sessions = [
+                s for s in plan.get("learning_path", [])
+                if not s.get("if_learned", False)
+            ]
+            result_plan = {"learning_path": learned + new_sessions}
+            agent_metadata.update(regen_metadata)
+
+        # Run a single evaluation pass on the adapted plan
+        sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
+        sim_feedback = sim_tool.invoke({
+            "learning_path": result_plan.get("learning_path", []),
+            "learner_profile": new_profile,
+        })
+        agent_metadata["evaluation_feedback"] = sim_feedback
+        agent_metadata["evaluation"] = _evaluate_plan_quality(sim_feedback)
+
+        return {**result_plan, "agent_metadata": agent_metadata}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 app.add_middleware(
@@ -486,32 +620,32 @@ APP_CONFIG = {
         "advanced": 80,
         "expert": 90,
     },
-    "fslsm_activation_threshold": 0.3,
+    "fslsm_activation_threshold": 0.7,
     "fslsm_thresholds": {
         "perception": {
-            "low_threshold": -0.3,
-            "high_threshold": 0.3,
+            "low_threshold": -0.7,
+            "high_threshold": 0.7,
             "low_label": "Concrete examples and practical applications",
             "high_label": "Conceptual and theoretical explanations",
             "neutral_label": "A mix of practical and conceptual content",
         },
         "understanding": {
-            "low_threshold": -0.3,
-            "high_threshold": 0.3,
+            "low_threshold": -0.7,
+            "high_threshold": 0.7,
             "low_label": "presented in step-by-step sequences",
             "high_label": "with big-picture overviews first",
             "neutral_label": "balancing sequential detail and big-picture context",
         },
         "processing": {
-            "low_threshold": -0.3,
-            "high_threshold": 0.3,
+            "low_threshold": -0.7,
+            "high_threshold": 0.7,
             "low_label": "Hands-on and interactive activities",
             "high_label": "Reading and observation-based learning",
             "neutral_label": "A balance of interactive and reflective activities",
         },
         "input": {
-            "low_threshold": -0.3,
-            "high_threshold": 0.3,
+            "low_threshold": -0.7,
+            "high_threshold": 0.7,
             "low_label": "with diagrams, charts, and videos",
             "high_label": "with text-based materials and lectures",
             "neutral_label": "using both visual and verbal materials",
@@ -676,8 +810,11 @@ async def schedule_learning_path(request: LearningPathSchedulingRequest):
             learner_profile = ast.literal_eval(learner_profile)
         if not isinstance(learner_profile, dict):
             learner_profile = {}
-        learning_path = schedule_learning_path_with_llm(llm, learner_profile, session_count)
-        return learning_path
+        learning_path, retrieved_sources = schedule_learning_path_with_llm(
+            llm, learner_profile, session_count,
+            search_rag_manager=search_rag_manager,
+        )
+        return {**learning_path, "retrieved_sources": retrieved_sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -700,12 +837,43 @@ async def reschedule_learning_path(request: LearningPathReschedulingRequest):
                 other_feedback = ast.literal_eval(other_feedback)
             except Exception:
                 pass
-        learning_path = reschedule_learning_path_with_llm(
-            llm, learning_path, learner_profile, session_count, other_feedback
+        learning_path_result, retrieved_sources = reschedule_learning_path_with_llm(
+            llm, learning_path, learner_profile, session_count, other_feedback,
+            search_rag_manager=search_rag_manager,
         )
-        return learning_path
+        return {**learning_path_result, "retrieved_sources": retrieved_sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class AgenticLearningPathRequest(BaseRequest):
+    """Request for agentic learning path generation with auto-refinement."""
+    learner_profile: str
+    session_count: int = 0
+
+
+@app.post("/schedule-learning-path-agentic")
+async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRequest):
+    """Agentic learning path generation with retrieval, simulation, and auto-refinement."""
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    session_count = request.session_count
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            learner_profile = ast.literal_eval(learner_profile)
+        if not isinstance(learner_profile, dict):
+            learner_profile = {}
+        plan, agent_metadata = schedule_learning_path_agentic(
+            llm, learner_profile, session_count,
+            search_rag_manager=search_rag_manager,
+        )
+        return {
+            **plan,
+            "agent_metadata": agent_metadata,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/explore-knowledge-points")
 async def explore_knowledge_points(request: KnowledgePointExplorationRequest):
@@ -802,21 +970,6 @@ async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/simulate-path-feedback")
-async def simulate_path_feedback(request: LearningPathFeedbackRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            learner_profile = ast.literal_eval(learner_profile)
-        if isinstance(learning_path, str) and learning_path.strip():
-            learning_path = ast.literal_eval(learning_path)
-        feedback = simulate_path_feedback_with_llm(llm, learner_profile, learning_path)
-        return {"feedback": feedback}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/simulate-content-feedback")
 async def simulate_content_feedback(request: LearningContentFeedbackRequest):
     llm = get_llm(request.model_provider, request.model_name)
@@ -832,53 +985,6 @@ async def simulate_content_feedback(request: LearningContentFeedbackRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/refine-learning-path")
-async def refine_learning_path(request: LearningPathRefinementRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learning_path = request.learning_path
-    feedback = request.feedback
-    try:
-        if isinstance(learning_path, str) and learning_path.strip():
-            learning_path = ast.literal_eval(learning_path)
-        if isinstance(feedback, str) and feedback.strip():
-            feedback = ast.literal_eval(feedback)
-        refined_path = refine_learning_path_with_llm(llm, learning_path, feedback)
-        return {"refined_learning_path": refined_path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/iterative-refine-path")
-async def iterative_refine_path(request: IterativeRefinementRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    max_iterations = min(request.max_iterations, 5)  # Cap at 5 iterations
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            learner_profile = ast.literal_eval(learner_profile)
-        if isinstance(learning_path, str) and learning_path.strip():
-            learning_path = ast.literal_eval(learning_path)
-
-        iterations = []
-        current_path = learning_path
-
-        for i in range(max_iterations):
-            # Simulate feedback for current path
-            feedback = simulate_path_feedback_with_llm(llm, learner_profile, current_path)
-            iterations.append({
-                "iteration": i + 1,
-                "feedback": feedback
-            })
-            # Refine path based on feedback
-            refined_result = refine_learning_path_with_llm(llm, current_path, feedback)
-            current_path = refined_result.get("learning_path", current_path)
-
-        return {
-            "final_learning_path": current_path,
-            "iterations": iterations
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     server_cfg = app_config.get("server", {})

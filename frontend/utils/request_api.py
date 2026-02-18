@@ -115,7 +115,9 @@ API_NAMES = {
     "create_profile": "create-learner-profile-with-info",
     "update_profile": "update-learner-profile",
     "schedule_path": "schedule-learning-path",
+    "schedule_path_agentic": "schedule-learning-path-agentic",
     "reschedule_path": "reschedule-learning-path",
+    "adapt_path": "adapt-learning-path",
     "explore_knowledge_perspectives": "explore-knowledge-perspectives",
     "draft_knowledge_perspective": "draft-knowledge-perspective",
     "draft_point_perspectives": "draft-point-perspectives",
@@ -126,9 +128,6 @@ API_NAMES = {
     "draft_knowledge_points": "draft-knowledge-points",
     "integrate_learning_document": "integrate-learning-document",
     "generate_document_quizzes": "generate-document-quizzes",
-    "simulate_path_feedback": "simulate-path-feedback",
-    "refine_path": "refine-learning-path",
-    "iterative_refine_path": "iterative-refine-path",
 }
 
 
@@ -334,7 +333,56 @@ def schedule_learning_path(learner_profile, session_count=None, llm_type=None, m
     }
 
     response = make_post_request(API_NAMES["schedule_path"], data)
-    return response.get("learning_path") if response else None
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "retrieved_sources": response.get("retrieved_sources", []),
+        }
+    return None
+
+
+def schedule_learning_path_agentic(learner_profile, session_count=None, llm_type=None, method_name=None):
+    """Call the agentic learning path endpoint with auto-refinement."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    try:
+        session_count_int = int(session_count) if session_count is not None else cfg["default_session_count"]
+    except Exception:
+        session_count_int = cfg["default_session_count"]
+
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_count": session_count_int,
+    }
+
+    response = make_post_request(API_NAMES["schedule_path_agentic"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
+
+def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, method_name=None):
+    """Call the adaptive plan regeneration endpoint."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "new_learner_profile": str(new_learner_profile),
+    }
+    response = make_post_request(API_NAMES["adapt_path"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
 
 def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type=None, method_name=None):
     cfg = get_app_config()
@@ -440,54 +488,6 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
         return response.get("learning_document") if response else None
     else:
         return response.get("learning_document") if response else None
-
-def simulate_path_feedback(learner_profile, learning_path, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["simulate_path_feedback"], data)
-    return response.get("feedback") if response else None
-
-def refine_learning_path_with_feedback(learning_path, feedback, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learning_path": str(learning_path),
-        "feedback": str(feedback),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["refine_path"], data)
-    return response.get("refined_learning_path") if response else None
-
-def iterative_refine_learning_path(learner_profile, learning_path, max_iterations=None, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    if max_iterations is None:
-        max_iterations = cfg["max_refinement_iterations"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "max_iterations": max_iterations,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["iterative_refine_path"], data)
-    if response:
-        return {
-            "final_learning_path": response.get("final_learning_path"),
-            "iterations": response.get("iterations", [])
-        }
-    return None
-
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
     """Submit quiz answers for mastery evaluation."""

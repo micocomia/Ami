@@ -1,9 +1,10 @@
-from typing import Any, Dict, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import json
 
 from pydantic import BaseModel, Field
 
 from base import BaseAgent
+from base.search_rag import SearchRagManager
 from modules.learning_plan_generator.schemas import LearningPath
 from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_system_prompt,
@@ -11,6 +12,8 @@ from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_task_prompt_reschedule,
     learning_path_scheduler_task_prompt_session,
 )
+from modules.tools.course_content_retrieval_tool import create_course_content_retrieval_tool
+from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
 from utils.quiz_scorer import get_mastery_threshold_for_session
 
 
@@ -24,7 +27,7 @@ _DEFAULT_THRESHOLD_MAP = {
     "expert": 90,
 }
 
-_FSLSM_ACTIVATION_THRESHOLD = 0.3
+_FSLSM_ACTIVATION_THRESHOLD = 0.7
 
 
 def _parse_profile(profile: Any) -> Dict[str, Any]:
@@ -130,10 +133,23 @@ class LearningPathScheduler(BaseAgent):
 
     name: str = "LearningPathScheduler"
 
-    def __init__(self, model: Any) -> None:
+    def __init__(
+        self,
+        model: Any,
+        search_rag_manager: Optional[SearchRagManager] = None,
+        retrieved_docs_sink: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        tools = None
+        if search_rag_manager is not None:
+            retrieve_tool = create_course_content_retrieval_tool(
+                search_rag_manager, retrieved_docs_sink=retrieved_docs_sink,
+            )
+            tools = [retrieve_tool]
+
         super().__init__(
             model=model,
             system_prompt=learning_path_scheduler_system_prompt,
+            tools=tools,
             jsonalize_output=True,
         )
 
@@ -175,19 +191,98 @@ class LearningPathScheduler(BaseAgent):
         return _apply_fslsm_overrides(result, profile)
 
 
+def _dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove duplicate retrieved source metadata dicts."""
+    seen = set()
+    deduped = []
+    for src in sources:
+        key = json.dumps(src, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(src)
+    return deduped
+
+
+# ---------------------------------------------------------------------------
+# Deterministic quality gate for learner simulation feedback
+# ---------------------------------------------------------------------------
+
+_NEGATIVE_KEYWORDS = [
+    "needs improvement", "poor", "weak", "lacking", "insufficient",
+    "missing", "not aligned", "not personalized", "disengaging",
+    "too easy", "too difficult", "repetitive", "monotonous",
+    "no progression", "confusing", "unclear",
+]
+
+
+def _evaluate_plan_quality(simulation_feedback: Any) -> Dict[str, Any]:
+    """Deterministic quality gate on learner simulation feedback.
+
+    Parses the simulation feedback (progression, engagement, personalization)
+    and checks for negative signals (keyword-based heuristic + suggestion count).
+    Returns: {"pass": bool, "issues": [...], "feedback_summary": {...}}
+    """
+    if not isinstance(simulation_feedback, dict):
+        return {"pass": True, "issues": [], "feedback_summary": {}}
+
+    feedback_text = json.dumps(simulation_feedback, default=str).lower()
+    issues = []
+
+    for keyword in _NEGATIVE_KEYWORDS:
+        if keyword in feedback_text:
+            issues.append(keyword)
+
+    # Check suggestion count — more than 3 distinct suggestions is a concern
+    suggestions = simulation_feedback.get("suggestions", [])
+    if isinstance(suggestions, list) and len(suggestions) > 3:
+        issues.append(f"high_suggestion_count ({len(suggestions)})")
+    elif isinstance(suggestions, dict):
+        total = sum(
+            len(v) if isinstance(v, list) else (1 if v else 0)
+            for v in suggestions.values()
+        )
+        if total > 3:
+            issues.append(f"high_suggestion_count ({total})")
+
+    feedback_summary = {}
+    for key in ("progression", "engagement", "personalization"):
+        val = simulation_feedback.get(key)
+        if val is not None:
+            feedback_summary[key] = val
+
+    return {
+        "pass": len(issues) == 0,
+        "issues": issues,
+        "feedback_summary": feedback_summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Convenience helpers
+# ---------------------------------------------------------------------------
+
 def schedule_learning_path_with_llm(
     llm: Any,
     learner_profile: Mapping[str, Any],
     session_count: int = 0,
-) -> JSONDict:
-    """Convenience helper to create a scheduler and produce a new learning path."""
+    search_rag_manager: Optional[SearchRagManager] = None,
+) -> Tuple[JSONDict, List[Dict[str, Any]]]:
+    """Convenience helper to create a scheduler and produce a new learning path.
 
-    learning_path_scheduler = LearningPathScheduler(llm)
+    Returns (learning_path_dict, retrieved_sources).
+    """
+    retrieved_sources: List[Dict[str, Any]] = []
+    learning_path_scheduler = LearningPathScheduler(
+        llm,
+        search_rag_manager=search_rag_manager,
+        retrieved_docs_sink=retrieved_sources,
+    )
     payload_dict = {
         "learner_profile": learner_profile,
         "session_count": session_count,
     }
-    return learning_path_scheduler.schedule_session(payload_dict)
+    result = learning_path_scheduler.schedule_session(payload_dict)
+    return result, _dedupe_sources(retrieved_sources)
 
 
 def reschedule_learning_path_with_llm(
@@ -197,19 +292,25 @@ def reschedule_learning_path_with_llm(
     session_count: Optional[int] = None,
     other_feedback: Optional[Union[str, Mapping[str, Any]]] = None,
     *,
+    search_rag_manager: Optional[SearchRagManager] = None,
     system_prompt: str = learning_path_scheduler_system_prompt,
     task_prompt: str = learning_path_scheduler_task_prompt_reschedule,
-) -> JSONDict:
+) -> Tuple[JSONDict, List[Dict[str, Any]]]:
     """Convenience helper to reschedule an existing learning path via the scheduler."""
-
-    learning_path_scheduler = LearningPathScheduler(llm)
+    retrieved_sources: List[Dict[str, Any]] = []
+    learning_path_scheduler = LearningPathScheduler(
+        llm,
+        search_rag_manager=search_rag_manager,
+        retrieved_docs_sink=retrieved_sources,
+    )
     payload_dict = {
         "learner_profile": learner_profile,
         "learning_path": learning_path,
         "session_count": session_count,
         "other_feedback": other_feedback,
     }
-    return learning_path_scheduler.reschedule(payload_dict)
+    result = learning_path_scheduler.reschedule(payload_dict)
+    return result, _dedupe_sources(retrieved_sources)
 
 
 def refine_learning_path_with_llm(
@@ -230,13 +331,89 @@ def refine_learning_path_with_llm(
     return learning_path_scheduler.reflexion(payload_dict)
 
 
+# ---------------------------------------------------------------------------
+# Agentic orchestration (auto-refinement loop)
+# ---------------------------------------------------------------------------
+
+def schedule_learning_path_agentic(
+    llm: Any,
+    learner_profile: Mapping[str, Any],
+    session_count: int = 0,
+    search_rag_manager: Optional[SearchRagManager] = None,
+    max_refinements: int = 2,
+) -> Tuple[JSONDict, Dict[str, Any]]:
+    """Agentic learning path generation with auto-refinement.
+
+    Flow:
+    1. Generate initial plan (with retrieval if available)
+    2. Evaluate plan quality via learner simulator tool (gpt-4o-mini)
+    3. Run deterministic quality gate on simulation feedback
+    4. If quality insufficient, feed simulation feedback into reflexion()
+    5. Max ``max_refinements`` refinement iterations (latency guardrail)
+    6. Return final plan + evaluation metadata
+    """
+    retrieved_sources: List[Dict[str, Any]] = []
+    sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
+
+    plan = None
+    simulation_feedback: Any = {}
+    quality: Dict[str, Any] = {"pass": False, "issues": [], "feedback_summary": {}}
+    attempt = 0
+
+    scheduler = LearningPathScheduler(
+        llm,
+        search_rag_manager=search_rag_manager,
+        retrieved_docs_sink=retrieved_sources,
+    )
+
+    for attempt in range(1 + max_refinements):
+        if attempt == 0:
+            plan = scheduler.schedule_session({
+                "learner_profile": learner_profile,
+                "session_count": session_count,
+            })
+        else:
+            plan = scheduler.reflexion({
+                "learning_path": plan.get("learning_path", []),
+                "feedback": {
+                    "learner_profile": learner_profile,
+                    "simulation_feedback": simulation_feedback,
+                },
+            })
+
+        # Evaluate via learner simulation (gpt-4o-mini, fast path)
+        learning_path_list = plan.get("learning_path", [])
+        profile_dict = dict(learner_profile) if isinstance(learner_profile, Mapping) else learner_profile
+
+        simulation_feedback = sim_tool.invoke({
+            "learning_path": learning_path_list,
+            "learner_profile": profile_dict,
+        })
+
+        quality = _evaluate_plan_quality(simulation_feedback)
+        if quality["pass"]:
+            break
+
+    deduped = _dedupe_sources(retrieved_sources)
+    metadata = {
+        "refinement_iterations": attempt + 1,
+        "evaluation": quality,
+        "last_simulation_feedback": simulation_feedback,
+        "retrieved_sources": deduped,
+    }
+
+    return plan, metadata
+
+
 __all__ = [
     "LearningPathScheduler",
     "LearningPathRefinementPayload",
     "LearningPathReschedulePayload",
     "SessionSchedulePayload",
     "schedule_learning_path_with_llm",
+    "schedule_learning_path_agentic",
     "refine_learning_path_with_llm",
     "reschedule_learning_path_with_llm",
     "_apply_fslsm_overrides",
+    "_evaluate_plan_quality",
 ]

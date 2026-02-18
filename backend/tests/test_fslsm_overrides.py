@@ -49,7 +49,7 @@ def _make_learning_path(num_sessions=3, proficiency="intermediate"):
 class TestFSLSMOverrides:
 
     def test_active_learner_gets_checkpoint_challenges(self):
-        """Active (processing <= -0.3) should set has_checkpoint_challenges=True."""
+        """Active (processing <= -0.7) should set has_checkpoint_challenges=True."""
         profile = _make_profile(processing=-0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
@@ -57,7 +57,7 @@ class TestFSLSMOverrides:
             assert session["has_checkpoint_challenges"] is True
 
     def test_reflective_learner_gets_thinking_time(self):
-        """Reflective (processing >= 0.3) should set thinking_time_buffer_minutes >= 10."""
+        """Reflective (processing >= 0.7) should set thinking_time_buffer_minutes >= 10."""
         profile = _make_profile(processing=0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
@@ -65,32 +65,32 @@ class TestFSLSMOverrides:
             assert session["thinking_time_buffer_minutes"] >= 10
 
     def test_sensing_gets_application_first(self):
-        """Sensing (perception <= -0.3) should set session_sequence_hint='application-first'."""
-        profile = _make_profile(perception=-0.5)
+        """Sensing (perception <= -0.7) should set session_sequence_hint='application-first'."""
+        profile = _make_profile(perception=-0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
         for session in result["learning_path"]:
             assert session["session_sequence_hint"] == "application-first"
 
     def test_intuitive_gets_theory_first(self):
-        """Intuitive (perception >= 0.3) should set session_sequence_hint='theory-first'."""
-        profile = _make_profile(perception=0.5)
+        """Intuitive (perception >= 0.7) should set session_sequence_hint='theory-first'."""
+        profile = _make_profile(perception=0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
         for session in result["learning_path"]:
             assert session["session_sequence_hint"] == "theory-first"
 
     def test_sequential_gets_linear_nav(self):
-        """Sequential (understanding <= -0.3) should set navigation_mode='linear'."""
-        profile = _make_profile(understanding=-0.5)
+        """Sequential (understanding <= -0.7) should set navigation_mode='linear'."""
+        profile = _make_profile(understanding=-0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
         for session in result["learning_path"]:
             assert session["navigation_mode"] == "linear"
 
     def test_global_gets_free_nav(self):
-        """Global (understanding >= 0.3) should set navigation_mode='free'."""
-        profile = _make_profile(understanding=0.5)
+        """Global (understanding >= 0.7) should set navigation_mode='free'."""
+        profile = _make_profile(understanding=0.7)
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)
         for session in result["learning_path"]:
@@ -109,7 +109,7 @@ class TestFSLSMOverrides:
 
     def test_overrides_apply_to_all_sessions(self):
         """All sessions in the path should be affected, not just the first."""
-        profile = _make_profile(processing=-0.5, understanding=0.5)
+        profile = _make_profile(processing=-0.7, understanding=0.7)
         path = _make_learning_path(num_sessions=5)
         result = _apply_fslsm_overrides(path, profile)
         assert len(result["learning_path"]) == 5
@@ -142,9 +142,9 @@ class TestFSLSMOverrides:
     def test_combined_dimensions(self):
         """Multiple active dimensions should all apply simultaneously."""
         profile = _make_profile(
-            processing=-0.5,    # active -> checkpoint challenges
-            perception=0.5,     # intuitive -> theory-first
-            understanding=0.5,  # global -> free navigation
+            processing=-0.7,    # active -> checkpoint challenges
+            perception=0.7,     # intuitive -> theory-first
+            understanding=0.7,  # global -> free navigation
         )
         path = _make_learning_path()
         result = _apply_fslsm_overrides(path, profile)

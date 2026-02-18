@@ -8,7 +8,7 @@ from base import BaseAgent
 from base.search_rag import SearchRagManager
 from ..prompts.skill_requirement_mapper import skill_requirement_mapper_system_prompt, skill_requirement_mapper_task_prompt
 from ..schemas import SkillRequirements
-from ..tools.course_content_retrieval_tool import create_course_content_retrieval_tool
+from modules.tools.course_content_retrieval_tool import create_course_content_retrieval_tool
 
 
 JSONDict: TypeAlias = Dict[str, Any]

@@ -559,6 +559,10 @@ def render_questions(quiz_data):
                     "is_mastered": result["is_mastered"],
                     "threshold": result["threshold"],
                 }
+                # Flag adaptation suggestion if backend suggests it
+                if result.get("plan_adaptation_suggested"):
+                    goal_id = st.session_state.get("selected_goal_id")
+                    st.session_state[f"adaptation_suggested_{goal_id}"] = True
                 try:
                     save_persistent_state()
                 except Exception:

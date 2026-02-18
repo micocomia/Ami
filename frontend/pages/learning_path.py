@@ -3,14 +3,13 @@ import math
 import streamlit as st
 from components.skill_info import render_skill_info
 from utils.request_api import (
-    schedule_learning_path,
+    schedule_learning_path_agentic,
     reschedule_learning_path,
-    simulate_path_feedback,
-    refine_learning_path_with_feedback,
-    iterative_refine_learning_path,
+    adapt_learning_path,
     get_app_config,
 )
 from components.navigation import render_navigation
+from utils.format import format_citation
 from utils.state import save_persistent_state
 
 def _get_selected_goal():
@@ -140,43 +139,49 @@ def render_learning_path():
                 st.rerun()
             return
 
-        with st.spinner("Scheduling Learning Path ..."):
+        with st.spinner("Generating learning path (with retrieval, evaluation & auto-refinement)..."):
             st.session_state[attempt_key] = True
 
-            result = schedule_learning_path(
+            result = schedule_learning_path_agentic(
                 learner_profile=goal.get("learner_profile"),
                 session_count=get_app_config()["default_session_count"],
             )
 
-        _store_agent_reasoning(result, "schedule_learning_path")
+        _store_agent_reasoning(result, "schedule_learning_path_agentic")
 
-        # Backend may return either a dict {learning_path: [...]} or a raw list
+        # Backend returns {learning_path: [...], agent_metadata: {...}}
         if isinstance(result, dict):
             if "detail" in result and not result.get("learning_path"):
                 st.error("Backend rejected the schedule request (422).")
                 st.json(result)
                 return
             learning_path = result.get("learning_path")
+            agent_metadata = result.get("agent_metadata", {})
         else:
             learning_path = result
+            agent_metadata = {}
 
         if not learning_path:
             st.error("Scheduling returned an empty learning path.")
             return
 
         goal["learning_path"] = learning_path
+        goal["plan_agent_metadata"] = agent_metadata
+        goal["retrieved_sources"] = agent_metadata.get("retrieved_sources", [])
         try:
             save_persistent_state()
         except Exception:
             pass
-        st.toast("🎉 Successfully scheduled learning path!")
+        st.toast("Successfully scheduled learning path!")
         st.rerun()
 
     else:
         render_overall_information(goal)
+        render_retrieval_sources_banner(goal)
         render_module_map(goal)
         render_narrative_overview(goal)
-        render_path_feedback_section(goal)
+        render_plan_quality_section(goal)
+        render_adaptation_section(goal)
         render_learning_sessions(goal)
 
 
@@ -292,126 +297,93 @@ def render_narrative_overview(goal):
             st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {abstract_preview}...")
 
 
-def render_path_feedback_section(goal):
-    goal_id = st.session_state["selected_goal_id"]
-    cache_key = f"feedback_{goal_id}"
+def render_retrieval_sources_banner(goal):
+    """Show a banner indicating whether the learning plan used verified course content."""
+    sources = goal.get("retrieved_sources") or []
+    if sources:
+        st.info("Learning path was grounded in verified course content.")
+        with st.expander("View sources"):
+            for idx, source in enumerate(sources, start=1):
+                source_ref = dict(source)
+                if "source_type" not in source_ref:
+                    source_ref["source_type"] = "verified_content"
+                st.markdown(format_citation(source_ref, idx))
 
-    with st.expander("AI Path Evaluation & Refinement", expanded=False):
-        st.info("Get AI-simulated learner feedback on your learning path and refine it before starting.")
 
-        col1, col2, col3 = st.columns([2, 2, 2])
-        with col1:
-            if st.button("Simulate Feedback", type="primary", use_container_width=True):
-                st.session_state["if_simulating_feedback"] = True
+def render_plan_quality_section(goal):
+    """Display the agent's auto-evaluation quality results (read-only)."""
+    metadata = goal.get("plan_agent_metadata", {})
+    if not metadata:
+        return
+
+    evaluation = metadata.get("evaluation", {})
+    iterations = metadata.get("refinement_iterations", 1)
+    feedback_summary = evaluation.get("feedback_summary", {})
+
+    with st.expander("Plan Quality (Auto-Evaluated)", expanded=False):
+        # Quality status
+        passed = evaluation.get("pass", True)
+        if passed:
+            st.success(f"Plan Quality: PASS (after {iterations} iteration{'s' if iterations > 1 else ''})")
+        else:
+            issues = evaluation.get("issues", [])
+            st.warning(f"Plan Quality: NEEDS REVIEW ({len(issues)} issues, {iterations} iterations)")
+            for issue in issues:
+                st.write(f"- {issue}")
+
+        # Feedback summary
+        if feedback_summary:
+            fb_cols = st.columns(len(feedback_summary))
+            for i, (key, val) in enumerate(feedback_summary.items()):
+                with fb_cols[i]:
+                    st.write(f"**{key.title()}**")
+                    if isinstance(val, str):
+                        display = val[:120] + "..." if len(val) > 120 else val
+                    else:
+                        display = str(val)
+                    st.caption(display)
+
+        st.caption(f"Refinement iterations: {iterations}")
+
+
+def render_adaptation_section(goal):
+    """Show adaptation suggestion banner when preferences change significantly."""
+    goal_id = st.session_state.get("selected_goal_id")
+    user_id = st.session_state.get("userId", "")
+
+    # Check for pending adaptation suggestion (set by mastery evaluation or preference change)
+    adaptation_key = f"adaptation_suggested_{goal_id}"
+    if st.session_state.get(adaptation_key):
+        st.warning("Your learning preferences or quiz results suggest your learning path may need adjustment.")
+        if st.button("Adapt Learning Path", type="primary", key=f"adapt_btn_{goal_id}"):
+            with st.spinner("Analyzing changes and adapting your learning path..."):
+                result = adapt_learning_path(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    new_learner_profile=goal.get("learner_profile", {}),
+                )
+            if result and result.get("learning_path"):
+                agent_meta = result.get("agent_metadata", {})
+                decision = agent_meta.get("decision", {})
+                action = decision.get("action", "keep")
+                reason = decision.get("reason", "")
+
+                if action == "keep":
+                    st.info("Your current plan is still on track.")
+                elif action == "adjust_future":
+                    goal["learning_path"] = result["learning_path"]
+                    goal["plan_agent_metadata"] = agent_meta
+                    st.success(f"Future sessions have been adjusted. {reason}")
+                elif action == "regenerate":
+                    goal["learning_path"] = result["learning_path"]
+                    goal["plan_agent_metadata"] = agent_meta
+                    st.success(f"Your learning path has been regenerated. {reason}")
+
+                st.session_state[adaptation_key] = False
                 save_persistent_state()
                 st.rerun()
-
-        with col2:
-            if st.button("Refine Path", type="secondary", use_container_width=True,
-                        disabled=cache_key not in st.session_state.get("path_feedback_cache", {})):
-                st.session_state["if_refining_path"] = True
-                save_persistent_state()
-                st.rerun()
-
-        with col3:
-            max_iter = get_app_config()["max_refinement_iterations"]
-            iteration_count = st.selectbox("Iterations", options=list(range(1, max_iter + 1)), index=1, key="auto_refine_iterations")
-            if st.button("Auto-Refine", type="secondary", use_container_width=True):
-                with st.spinner(f'Auto-refining path ({iteration_count} iterations)...'):
-                    result = iterative_refine_learning_path(
-                        goal["learner_profile"],
-                        goal["learning_path"],
-                        max_iterations=iteration_count
-                    )
-                    _store_agent_reasoning(result, 'iterative_refine_learning_path')
-                    if result and result.get("final_learning_path"):
-                        goal["learning_path"] = result["final_learning_path"]
-                        # Clear feedback cache after refinement
-                        if cache_key in st.session_state.get("path_feedback_cache", {}):
-                            del st.session_state["path_feedback_cache"][cache_key]
-                        save_persistent_state()
-                        st.toast(f"Path refined through {iteration_count} iterations!")
-                        # Display iteration history
-                        for iteration in result.get("iterations", []):
-                            st.write(f"**Iteration {iteration['iteration']}:**")
-                            feedback = iteration.get("feedback", {})
-                            if isinstance(feedback, dict):
-                                fb = feedback.get("feedback", {})
-                                st.write(f"- Progression: {fb.get('progression', 'N/A')}")
-                                st.write(f"- Engagement: {fb.get('engagement', 'N/A')}")
-                        st.rerun()
-                    else:
-                        st.error("Failed to auto-refine path.")
-
-        # Handle simulating feedback
-        if st.session_state.get("if_simulating_feedback"):
-            with st.spinner('Simulating learner feedback...'):
-                feedback = simulate_path_feedback(goal["learner_profile"], goal["learning_path"])
-                _store_agent_reasoning(feedback, 'simulate_path_feedback')
-                if feedback:
-                    if "path_feedback_cache" not in st.session_state:
-                        st.session_state["path_feedback_cache"] = {}
-                    st.session_state["path_feedback_cache"][cache_key] = feedback
-                    st.session_state["if_simulating_feedback"] = False
-                    save_persistent_state()
-                    st.toast("Feedback simulated successfully!")
-                    st.rerun()
-                else:
-                    st.session_state["if_simulating_feedback"] = False
-                    st.error("Failed to simulate feedback.")
-
-        # Handle refining path
-        if st.session_state.get("if_refining_path"):
-            cached_feedback = st.session_state.get("path_feedback_cache", {}).get(cache_key)
-            if cached_feedback:
-                with st.spinner('Refining learning path...'):
-                    refined_path = refine_learning_path_with_feedback(goal["learning_path"], cached_feedback)
-                    _store_agent_reasoning(refined_path, 'refine_learning_path_with_feedback')
-                    if refined_path:
-                        goal["learning_path"] = refined_path.get("learning_path", refined_path)
-                        # Clear feedback cache after refinement
-                        del st.session_state["path_feedback_cache"][cache_key]
-                        st.session_state["if_refining_path"] = False
-                        save_persistent_state()
-                        st.toast("Learning path refined successfully!")
-                        st.rerun()
-                    else:
-                        st.session_state["if_refining_path"] = False
-                        st.error("Failed to refine path.")
             else:
-                st.session_state["if_refining_path"] = False
-
-        # Display cached feedback if available
-        cached_feedback = st.session_state.get("path_feedback_cache", {}).get(cache_key)
-        if cached_feedback:
-            st.write("---")
-            st.write("**Simulated Feedback:**")
-
-            feedback_data = cached_feedback.get("feedback", cached_feedback) if isinstance(cached_feedback, dict) else {}
-            suggestions_data = cached_feedback.get("suggestions", {}) if isinstance(cached_feedback, dict) else {}
-
-            # 3-column layout for feedback
-            fb_col1, fb_col2, fb_col3 = st.columns(3)
-            with fb_col1:
-                st.metric("Progression", "")
-                progression_fb = feedback_data.get("progression", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(progression_fb)
-            with fb_col2:
-                st.metric("Engagement", "")
-                engagement_fb = feedback_data.get("engagement", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(engagement_fb)
-            with fb_col3:
-                st.metric("Personalization", "")
-                personalization_fb = feedback_data.get("personalization", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(personalization_fb)
-
-            # Display suggestions
-            if suggestions_data and isinstance(suggestions_data, dict):
-                st.write("---")
-                st.write("**Improvement Suggestions:**")
-                for key, suggestion in suggestions_data.items():
-                    if suggestion:
-                        st.info(f"**{key.title()}:** {suggestion}")
+                st.error("Failed to adapt learning path.")
 
 
 def render_learning_sessions(goal):
