@@ -1,2 +1,2 @@
-from .agents.adaptive_learning_profiler import AdaptiveLearnerProfiler, initialize_learner_profile_with_llm, update_learner_profile_with_llm
 from .agents.fairness_validator import FairnessValidator, validate_profile_fairness_with_llm
+from .agents.adaptive_learning_profiler import AdaptiveLearnerProfiler, initialize_learner_profile_with_llm, update_learner_profile_with_llm, update_cognitive_status_with_llm, update_learning_preferences_with_llm

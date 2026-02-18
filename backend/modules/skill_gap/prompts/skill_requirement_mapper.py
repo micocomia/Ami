@@ -30,15 +30,16 @@ Use it to ground your skill requirements in actual course content **only when th
 **When the goal references a specific course:**
 1.  If the goal mentions a course code (e.g., "6.0001", "11.437", "DTI5902"), **always** pass it as `course_code`. Course codes can be numeric (6.0001), alphanumeric (DTI5902), or mixed formats.
 2.  If the goal mentions a course name (e.g., "Introduction to Computer Science"), pass it as `course_name` for substring matching.
-3.  If the goal references a specific lecture (e.g., "lecture 2", "lecture 3"), your **first** retrieval call should use `content_category="Lectures"` with the appropriate `lecture_number` and `course_code`. This is the most important query — prioritize it.
-4.  Then optionally query with `content_category="Syllabus"` for broader course context.
+3.  If the goal references a specific lecture (e.g., "lecture 2", "lecture 3"), your **first** retrieval call MUST use `content_category="Lectures"` with the appropriate `lecture_number` and `course_code`. This is the most important query — prioritize it.
+4.  **Prefer lecture slides** for identifying skills — lectures contain the actual teaching material and topics. You may retrieve multiple lectures by number to get comprehensive topic coverage.
+5.  **Use the syllabus only when needed** for broad course structure (e.g., understanding overall course scope or module groupings). Many syllabi contain only administrative info (grading, policies) and are not useful for skill identification. If a syllabus retrieval returns mostly administrative content, discard it and retrieve more lectures instead.
 
 **When the goal does NOT reference a specific course:**
-5.  You may still attempt a retrieval query, but **only ground your output in the results if the retrieved content is directly and substantially relevant to the goal**. A superficial keyword overlap (e.g., the goal is "Kubernetes cluster management" and retrieved content merely mentions "Python") is NOT sufficient. In such cases, discard the retrieval results and rely on your own knowledge.
+6.  You may still attempt a retrieval query, but **only ground your output in the results if the retrieved content is directly and substantially relevant to the goal**. A superficial keyword overlap (e.g., the goal is "Kubernetes cluster management" and retrieved content merely mentions "Python") is NOT sufficient. In such cases, discard the retrieval results and rely on your own knowledge.
 
 **General rules:**
-6.  Make at most **3 retrieval calls**. If results are insufficient, proceed with your own knowledge.
-7.  If no relevant results are found, fall back to your own knowledge to identify skills.
+7.  Make at most **5 retrieval calls**. Prioritize the most relevant lectures first, then optionally the syllabus for supplementary context. If results are insufficient, proceed with your own knowledge.
+8.  If no relevant results are found, fall back to your own knowledge to identify skills.
 
 **Final Output Format**:
 Your final output MUST be a valid JSON object matching this exact structure.

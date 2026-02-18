@@ -9,6 +9,26 @@ def render_identifying_skill_gap(goal):
         learning_goal = goal["learning_goal"]
         learner_information = st.session_state["learner_information"]
         llm_type = st.session_state["llm_type"]
+
+        # Gather mastered skills from existing goals so the LLM doesn't flag them as gaps
+        goals = st.session_state.get("goals", [])
+        all_mastered = {}
+        for g in goals:
+            for skill in (g.get("learner_profile") or {}).get("cognitive_status", {}).get("mastered_skills", []):
+                name = skill.get("name")
+                if name and name not in all_mastered:
+                    all_mastered[name] = skill
+
+        if all_mastered:
+            skill_lines = "\n".join(
+                f"  - {s['name']} (proficiency: {s.get('proficiency_level', 'unknown')})"
+                for s in all_mastered.values()
+            )
+            learner_information += (
+                "\n\n[Skills already mastered from previous learning goals"
+                " — do NOT list these as skill gaps]:\n" + skill_lines
+            )
+
         skill_gaps, goal_assessment, retrieved_sources = identify_skill_gap(learning_goal, learner_information, llm_type)
     goal["skill_gaps"] = skill_gaps
     goal["goal_assessment"] = goal_assessment

@@ -1,11 +1,11 @@
 import math
 import streamlit as st
-from utils.request_api import create_learner_profile, update_learner_profile, validate_profile_fairness, auth_delete_user, get_app_config, get_behavioral_metrics
+from utils.request_api import create_learner_profile, update_learning_preferences, save_learner_profile, auth_delete_user, get_app_config, get_behavioral_metrics
 from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
 from streamlit_extras.tags import tagger_component 
-from utils.state import save_persistent_state, delete_persistent_state
+from utils.state import save_persistent_state, delete_persistent_state, propagate_profile_fields_to_other_goals
 
 
 def render_learner_profile():
@@ -316,11 +316,47 @@ def render_additional_info_form(goal):
             with st.spinner("Updating your profile..."):
                 update_learner_profile_with_additional_info(goal)
 
+def _get_fslsm_dims(profile):
+    """Extract FSLSM dimensions dict from a learner profile."""
+    return (
+        profile
+        .get("learning_preferences", {})
+        .get("fslsm_dimensions", {})
+    )
+
+
+def _has_significant_fslsm_change(old_profile, new_profile, threshold=0.3):
+    """Return True if any FSLSM dimension changed by >= threshold."""
+    old_dims = _get_fslsm_dims(old_profile)
+    new_dims = _get_fslsm_dims(new_profile)
+    for key in ("fslsm_processing", "fslsm_perception", "fslsm_input", "fslsm_understanding"):
+        old_val = old_dims.get(key, 0.0)
+        new_val = new_dims.get(key, 0.0)
+        if abs(old_val - new_val) >= threshold:
+            return True
+    return False
+
+
 def update_learner_profile_with_additional_info(goal):
     additional_info = st.session_state["additional_info"]
-    new_learner_profile = update_learner_profile(goal["learner_profile"], additional_info, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+    old_profile = goal.get("learner_profile", {})
+    user_id = st.session_state.get("userId")
+    goal_id = st.session_state.get("selected_goal_id")
+    # Don't pass user_id/goal_id here — avoid persisting to the profile store
+    # immediately, so the adapt-learning-path endpoint can still read the OLD
+    # profile for FSLSM delta comparison.
+    new_learner_profile = update_learning_preferences(old_profile, additional_info)
     if new_learner_profile is not None:
+        # Detect significant FSLSM preference changes
+        if _has_significant_fslsm_change(old_profile, new_learner_profile):
+            st.session_state[f"adaptation_suggested_{goal_id}"] = True
+        else:
+            # No adaptation needed — persist the updated profile to the store now
+            save_learner_profile(user_id, goal_id, new_learner_profile)
+
         goal["learner_profile"] = new_learner_profile
+        # Push updated learning_preferences to all other goals immediately
+        propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
         try:
             save_persistent_state()
         except Exception:

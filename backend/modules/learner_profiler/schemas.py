@@ -37,6 +37,13 @@ class CognitiveStatus(BaseModel):
     mastered_skills: List[MasteredSkill] = Field(default_factory=list)
     in_progress_skills: List[InProgressSkill] = Field(default_factory=list)
 
+    @field_validator("overall_progress", mode="before")
+    @classmethod
+    def coerce_progress_to_int(cls, v):
+        if isinstance(v, float):
+            return int(round(v))
+        return v
+
 
 class FSLSMDimensions(BaseModel):
     fslsm_processing: float = Field(0.0, ge=-1, le=1)     # -1 active ↔ 1 reflective
@@ -49,16 +56,16 @@ def derive_content_style(dims: FSLSMDimensions) -> str:
     """Derive content style from perception + understanding dimensions."""
     parts: list[str] = []
     # perception: sensing (-1) → concrete/practical; intuitive (+1) → conceptual/theoretical
-    if dims.fslsm_perception <= -0.3:
+    if dims.fslsm_perception <= -0.7:
         parts.append("concrete examples and practical applications")
-    elif dims.fslsm_perception >= 0.3:
+    elif dims.fslsm_perception >= 0.7:
         parts.append("conceptual and theoretical explanations")
     else:
         parts.append("a mix of practical and conceptual content")
     # understanding: sequential (-1) → step-by-step; global (+1) → big-picture
-    if dims.fslsm_understanding <= -0.3:
+    if dims.fslsm_understanding <= -0.7:
         parts.append("presented in step-by-step sequences")
-    elif dims.fslsm_understanding >= 0.3:
+    elif dims.fslsm_understanding >= 0.7:
         parts.append("with big-picture overviews first")
     else:
         parts.append("balancing sequential detail and big-picture context")
@@ -69,16 +76,16 @@ def derive_activity_type(dims: FSLSMDimensions) -> str:
     """Derive activity type from processing + input dimensions."""
     parts: list[str] = []
     # processing: active (-1) → hands-on/interactive; reflective (+1) → reading/observation
-    if dims.fslsm_processing <= -0.3:
+    if dims.fslsm_processing <= -0.7:
         parts.append("hands-on and interactive activities")
-    elif dims.fslsm_processing >= 0.3:
+    elif dims.fslsm_processing >= 0.7:
         parts.append("reading and observation-based learning")
     else:
         parts.append("a balance of interactive and reflective activities")
     # input: visual (-1) → diagrams/videos; verbal (+1) → text/lectures
-    if dims.fslsm_input <= -0.3:
+    if dims.fslsm_input <= -0.7:
         parts.append("with diagrams, charts, and videos")
-    elif dims.fslsm_input >= 0.3:
+    elif dims.fslsm_input >= 0.7:
         parts.append("with text-based materials and lectures")
     else:
         parts.append("using both visual and verbal materials")

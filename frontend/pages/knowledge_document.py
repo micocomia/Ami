@@ -7,7 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
-from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_learner_profile, get_app_config
+from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
 from config import use_mock_data, use_search
@@ -57,7 +57,22 @@ def render_learning_content():
             render_questions(quiz_data)
             st.divider()
             selected_sid = st.session_state["selected_session_id"]
-            complete_button_status = True if goal["learning_path"][st.session_state["selected_session_id"]]["if_learned"] else False
+            session_info_bottom = goal["learning_path"][selected_sid]
+            complete_button_status = True if session_info_bottom["if_learned"] else False
+
+            # Mastery gating for bottom Complete Session button
+            nav_mode_bottom = session_info_bottom.get("navigation_mode", "linear")
+            mastery_info_bottom = st.session_state.get("mastery_status", {}).get(session_uid, {})
+            is_mastered_bottom = mastery_info_bottom.get("is_mastered", False)
+            if nav_mode_bottom == "linear":
+                complete_disabled_bottom = (
+                    complete_button_status
+                    or st.session_state["if_updating_learner_profile"]
+                    or not is_mastered_bottom
+                )
+            else:
+                complete_disabled_bottom = complete_button_status or st.session_state["if_updating_learner_profile"]
+
             if st.button("Regenerate", icon=":material/refresh:"):
                 st.session_state["document_caches"].pop(session_uid)
                 try:
@@ -66,15 +81,10 @@ def render_learning_content():
                     pass
                 goal['learner_profile']['behavioral_patterns']['additional_notes'] += f"I have regenerated Session {selected_sid} content.\n"
                 st.rerun()
-            if st.button("Complete Session", 
-                        key="complete-session", type="primary", icon=":material/task_alt:", 
-                        use_container_width=True, disabled=complete_button_status or st.session_state["if_updating_learner_profile"]):
-                st.session_state["if_updating_learner_profile"] = True
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.rerun()
+            if st.button("Complete Session",
+                        key="complete-session", type="primary", icon=":material/task_alt:",
+                        use_container_width=True, disabled=complete_disabled_bottom):
+                _handle_session_completion(goal, selected_sid, session_info_bottom)
 
             st.divider()
             render_content_feedback_form(goal)
@@ -94,6 +104,25 @@ def render_motivational_triggers():
         else:
             st.toast("🚀 Keep up the good work!")
         session_learning_times["trigger_time_list"].append(curr_time)
+
+def _handle_session_completion(goal, selected_sid, session_info):
+    """Handle session completion: update profile, mark learned, navigate away."""
+    session_uid = get_current_session_uid()
+    with st.spinner("Updating learner profile..."):
+        result = update_learner_profile_with_feedback(goal, "", session_information=session_info)
+    if not result:
+        st.session_state["if_updating_learner_profile"] = False
+        return
+    session_info["if_learned"] = True
+    if session_uid in st.session_state.get("session_learning_times", {}):
+        st.session_state["session_learning_times"][session_uid]["end_time"] = time.time()
+    st.session_state["if_updating_learner_profile"] = False
+    try:
+        save_persistent_state()
+    except Exception:
+        pass
+    st.switch_page("pages/learning_path.py")
+
 
 def render_session_details(goal):
     selected_sid = st.session_state["selected_session_id"]
@@ -126,41 +155,26 @@ def render_session_details(goal):
     with col4:
         complete_button_status = True if session_info["if_learned"] else False
 
-        if st.button("Complete Session", 
-                     key="complete-session-bottom", type="primary", icon=":material/task_alt:", 
-                    #  on_click=update_learner_profile_with_feedback, kwargs={"feedback_data": "", "goal": goal, "session_information": session_info},
-                     use_container_width=True, disabled=complete_button_status or st.session_state["if_updating_learner_profile"]):
-            st.session_state["if_updating_learner_profile"] = True
-            st.session_state["current_page"][session_uid] = 0
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            st.rerun()
+        # Mastery gating for sequential (linear) learners
+        navigation_mode = session_info.get("navigation_mode", "linear")
+        mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
+        is_mastered = mastery_info.get("is_mastered", False)
 
-        if st.session_state.get("if_updating_learner_profile"):
-            with st.spinner("Updating your learner profile..."):
-                update_result = update_learner_profile_with_feedback(goal, "", session_info)
-            st.session_state["if_updating_learner_profile"] = False
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            if not update_result:
-                st.toast("Failed to update learner profile. Please try again.")
-                st.rerun()
-            else:
-                st.toast("🎉 Session completed successfully!")
-                goal["learning_path"][selected_sid]["if_learned"] = True
-                st.session_state["selected_page"] = "Learning Path"
-                if get_current_session_uid() in st.session_state["session_learning_times"]:
-                    curr_time = time.time()
-                    st.session_state["session_learning_times"][get_current_session_uid()]["end_time"] = curr_time
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.switch_page("pages/learning_path.py")
+        if navigation_mode == "linear":
+            complete_disabled = (
+                complete_button_status
+                or st.session_state["if_updating_learner_profile"]
+                or not is_mastered
+            )
+            if not is_mastered and not complete_button_status:
+                st.info("Pass the quiz to unlock session completion.")
+        else:
+            complete_disabled = complete_button_status or st.session_state["if_updating_learner_profile"]
+
+        if st.button("Complete Session",
+                     key="complete-session-bottom", type="primary", icon=":material/task_alt:",
+                     use_container_width=True, disabled=complete_disabled):
+            _handle_session_completion(goal, selected_sid, session_info)
 
     st.write(f"# {session_info['id']}")
     st.write(f"# {session_info['title']}")
@@ -422,59 +436,157 @@ def render_document_content_by_document(document):
 
 
 def render_questions(quiz_data):
-    st.subheader("💡 Test Your Knowledge")
-    for i, q in enumerate(quiz_data['single_choice_questions']):
-        st.write(f"**{i+1}. {q['question']}**")
-        selected_option = st.radio("Options", q['options'], key=f"single_{i}", index=None, label_visibility="hidden")
-        if selected_option is not None:
-            correct_option_idx = q['correct_option']
-            correct_option = q['options'][correct_option_idx]
-            if selected_option == correct_option:
-                st.success("Correct!")
-            else:
-                st.error("Incorrect.")
-            with st.expander("Explanation", expanded=True, icon=":material/info:"):
-                st.write(q['explanation'])
+    """Render quiz questions in Submit All mode (no per-question feedback).
 
-    for i, q in enumerate(quiz_data['multiple_choice_questions']):
-        st.write(f"**{len(quiz_data['single_choice_questions']) + i + 1}. {q['question']}**")
-        
-        selected_options = []
-        for j, option in enumerate(q['options']):
-            if st.checkbox(option, key=f"multi_{i}_option_{j}"):
-                selected_options.append(option)
+    All answers are collected and submitted together for mastery evaluation.
+    """
+    st.subheader("Test Your Knowledge")
 
-        if st.button("Submit", key=f"multi_submit_{i}"):
-            correct_options = set(q['options'][correct_option_idx] for correct_option_idx in q['correct_options'])
-            if set(selected_options) == set(correct_options):
-                st.success("Correct!")
-            else:
-                st.error("Some options are incorrect.")
-            with st.expander("Explanation", expanded=False):
-                st.write(q['explanation'])
+    session_uid = get_current_session_uid()
 
-    for i, q in enumerate(quiz_data['true_false_questions']):
-        st.write(f"**{len(quiz_data['single_choice_questions']) + len(quiz_data['multiple_choice_questions']) + i + 1}. {q['question']}**")
-        selected_answer = st.radio("True or False?", ["True", "False"], key=f"tf_{i}", label_visibility="hidden", index=None)
-        correct_answer = "True" if q['correct_answer'] else "False"
-        if selected_answer:
-            if selected_answer == correct_answer:
-                st.success("Correct!")
-            else:
-                st.error("Incorrect.")
-            with st.expander("Explanation", expanded=False):
-                st.write(q['explanation'])
+    # Initialize answer storage for this session
+    if session_uid not in st.session_state.get("quiz_answers", {}):
+        st.session_state.setdefault("quiz_answers", {})[session_uid] = {
+            "single_choice_questions": [None] * len(quiz_data.get("single_choice_questions", [])),
+            "multiple_choice_questions": [[] for _ in quiz_data.get("multiple_choice_questions", [])],
+            "true_false_questions": [None] * len(quiz_data.get("true_false_questions", [])),
+            "short_answer_questions": [None] * len(quiz_data.get("short_answer_questions", [])),
+        }
 
-    for i, q in enumerate(quiz_data['short_answer_questions']):
-        st.write(f"**{len(quiz_data['single_choice_questions']) + len(quiz_data['multiple_choice_questions']) + len(quiz_data['true_false_questions']) + i + 1}. {q['question']}**")
-        user_answer = st.text_input("Your Answer", key=f"short_{i}", label_visibility="hidden")
-        if user_answer:
-            if user_answer.strip().lower() == q['expected_answer'].strip().lower():
-                st.success("Correct!")
+    answers = st.session_state["quiz_answers"][session_uid]
+    q_num = 0
+
+    # Check if quiz has been submitted and mastered already
+    mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
+    quiz_submitted = mastery_info.get("score") is not None
+
+    # Single choice questions
+    for i, q in enumerate(quiz_data.get("single_choice_questions", [])):
+        q_num += 1
+        st.write(f"**{q_num}. {q['question']}**")
+        selected = st.radio(
+            "Options", q["options"], key=f"sc_{session_uid}_{i}",
+            index=None, label_visibility="hidden", disabled=quiz_submitted,
+        )
+        answers["single_choice_questions"][i] = selected
+
+    # Multiple choice questions
+    for i, q in enumerate(quiz_data.get("multiple_choice_questions", [])):
+        q_num += 1
+        st.write(f"**{q_num}. {q['question']}** (Select all that apply)")
+        selected = []
+        for j, option in enumerate(q["options"]):
+            if st.checkbox(option, key=f"mc_{session_uid}_{i}_{j}", disabled=quiz_submitted):
+                selected.append(option)
+        answers["multiple_choice_questions"][i] = selected
+
+    # True/False questions
+    for i, q in enumerate(quiz_data.get("true_false_questions", [])):
+        q_num += 1
+        st.write(f"**{q_num}. {q['question']}**")
+        selected = st.radio(
+            "True or False?", ["True", "False"], key=f"tf_{session_uid}_{i}",
+            index=None, label_visibility="hidden", disabled=quiz_submitted,
+        )
+        answers["true_false_questions"][i] = selected
+
+    # Short answer questions
+    for i, q in enumerate(quiz_data.get("short_answer_questions", [])):
+        q_num += 1
+        st.write(f"**{q_num}. {q['question']}**")
+        user_answer = st.text_input(
+            "Your Answer", key=f"sa_{session_uid}_{i}",
+            label_visibility="hidden", disabled=quiz_submitted,
+        )
+        answers["short_answer_questions"][i] = user_answer if user_answer else None
+
+    try:
+        save_persistent_state()
+    except Exception:
+        pass
+
+    # Show mastery result or submit button
+    if mastery_info.get("is_mastered"):
+        st.success(
+            f"Mastery achieved! Score: {mastery_info['score']:.0f}% "
+            f"(threshold: {mastery_info.get('threshold', 70):.0f}%)"
+        )
+        # Show explanations after mastery
+        _render_quiz_explanations(quiz_data)
+    elif quiz_submitted and not mastery_info.get("is_mastered"):
+        st.warning(
+            f"Score: {mastery_info['score']:.0f}%. "
+            f"Need {mastery_info.get('threshold', 70):.0f}% to master this session. "
+            f"Review the material and try again."
+        )
+        # Show explanations after attempt
+        _render_quiz_explanations(quiz_data)
+        if st.button("Retake Quiz", icon=":material/refresh:", type="primary"):
+            st.session_state["quiz_answers"].pop(session_uid, None)
+            st.session_state["mastery_status"].pop(session_uid, None)
+            try:
+                save_persistent_state()
+            except Exception:
+                pass
+            st.rerun()
+    else:
+        if st.button("Submit Quiz", type="primary", icon=":material/check_circle:"):
+            result = evaluate_mastery(
+                user_id=st.session_state.get("userId", ""),
+                goal_id=st.session_state["selected_goal_id"],
+                session_index=st.session_state["selected_session_id"],
+                quiz_answers=answers,
+            )
+            if result:
+                st.session_state.setdefault("mastery_status", {})[session_uid] = {
+                    "score": result["score_percentage"],
+                    "is_mastered": result["is_mastered"],
+                    "threshold": result["threshold"],
+                }
+                # Mirror mastery data onto the learning path session so it
+                # survives save_persistent_state() and is available for the
+                # adapt-learning-path endpoint.
+                current_goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+                session_obj = current_goal["learning_path"][st.session_state["selected_session_id"]]
+                session_obj["mastery_score"] = result["score_percentage"]
+                session_obj["is_mastered"] = result["is_mastered"]
+                session_obj["mastery_threshold"] = result["threshold"]
+                # Flag adaptation suggestion if backend suggests it
+                if result.get("plan_adaptation_suggested"):
+                    goal_id = st.session_state.get("selected_goal_id")
+                    st.session_state[f"adaptation_suggested_{goal_id}"] = True
+                try:
+                    save_persistent_state()
+                except Exception:
+                    pass
+                st.rerun()
             else:
-                st.error("Incorrect.")
-            with st.expander("Explanation", expanded=False):
-                st.write(q['explanation'])
+                st.error("Failed to evaluate quiz. Please try again.")
+
+
+def _render_quiz_explanations(quiz_data):
+    """Show quiz explanations after submission."""
+    with st.expander("View Explanations", expanded=False, icon=":material/info:"):
+        q_num = 0
+        for q in quiz_data.get("single_choice_questions", []):
+            q_num += 1
+            correct = q["options"][q["correct_option"]]
+            st.write(f"**Q{q_num}.** Correct: {correct}")
+            st.write(f"  {q['explanation']}")
+        for q in quiz_data.get("multiple_choice_questions", []):
+            q_num += 1
+            correct = [q["options"][idx] for idx in q["correct_options"]]
+            st.write(f"**Q{q_num}.** Correct: {', '.join(correct)}")
+            st.write(f"  {q['explanation']}")
+        for q in quiz_data.get("true_false_questions", []):
+            q_num += 1
+            correct = "True" if q["correct_answer"] else "False"
+            st.write(f"**Q{q_num}.** Correct: {correct}")
+            st.write(f"  {q['explanation']}")
+        for q in quiz_data.get("short_answer_questions", []):
+            q_num += 1
+            st.write(f"**Q{q_num}.** Expected: {q['expected_answer']}")
+            st.write(f"  {q['explanation']}")
 
 def render_content_feedback_form(goal):
     st.header("🌟 Value Your Feedback!") 
@@ -510,16 +622,34 @@ def render_content_feedback_form(goal):
             st.success("Thank you for your feedback!")
 
 def update_learner_profile_with_feedback(goal, feedback_data, session_information=""):
-    st.toast("Updating your profile...")
-    if session_information != "":
+    from utils.state import propagate_profile_fields_to_other_goals
+    user_id = st.session_state.get("userId")
+    goal_id = st.session_state.get("selected_goal_id")
+    is_cognitive_update = session_information != ""
+    if is_cognitive_update:
+        # Session completion → update only cognitive status
         session_information = copy.deepcopy(session_information)
         session_information["if_learned"] = True
-    new_learner_profile = update_learner_profile(goal["learner_profile"], feedback_data, session_information=session_information, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+        new_learner_profile = update_cognitive_status(
+            goal["learner_profile"], session_information,
+            user_id=user_id, goal_id=goal_id,
+        )
+    else:
+        # Content feedback → update only learning preferences
+        new_learner_profile = update_learning_preferences(
+            goal["learner_profile"], feedback_data,
+            user_id=user_id, goal_id=goal_id,
+        )
     if new_learner_profile is None:
         st.error("Failed to update learner profile. Please try again.")
         return False
     else:
         goal["learner_profile"] = new_learner_profile
+        # Push changes to all other goals immediately
+        if is_cognitive_update:
+            propagate_profile_fields_to_other_goals(goal_id, sync_mastered_skills=True)
+        else:
+            propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
         st.toast("🎉 Your profile has been updated!")
         return True
 
