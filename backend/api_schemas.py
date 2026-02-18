@@ -192,6 +192,13 @@ class BiasAuditRequest(BaseRequest):
     skill_gaps: str
 
 
+class ProfileFairnessRequest(BaseRequest):
+
+    learner_profile: str
+    learner_information: str
+    persona_name: str = ""
+
+
 class AuthRegisterRequest(BaseModel):
     username: str
     password: str

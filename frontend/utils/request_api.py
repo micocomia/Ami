@@ -130,6 +130,7 @@ API_NAMES = {
     "refine_path": "refine-learning-path",
     "iterative_refine_path": "iterative-refine-path",
     "audit_skill_gap_bias": "audit-skill-gap-bias",
+    "validate_profile_fairness": "validate-profile-fairness",
 }
 
 
@@ -284,6 +285,19 @@ def audit_skill_gap_bias(skill_gaps_dict, learner_information, llm_type=None, me
         "method_name": str(method_name),
     }
     return make_post_request(API_NAMES["audit_skill_gap_bias"], data)
+
+
+def validate_profile_fairness(learner_profile, learner_information, persona_name="", llm_type=None):
+    """Call the fairness validation endpoint and return the result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    data = {
+        "learner_profile": json.dumps(learner_profile) if isinstance(learner_profile, dict) else str(learner_profile),
+        "learner_information": _normalize_learner_information(learner_information),
+        "persona_name": persona_name,
+        "llm_type": str(llm_type),
+    }
+    return make_post_request(API_NAMES["validate_profile_fairness"], data)
 
 
 def create_learner_profile(

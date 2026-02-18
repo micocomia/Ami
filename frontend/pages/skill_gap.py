@@ -9,7 +9,7 @@ from components.gap_identification import (
     has_any_gap,
 )
 from utils.state import add_new_goal, get_new_goal_uid, save_persistent_state
-from utils.request_api import create_learner_profile
+from utils.request_api import create_learner_profile, validate_profile_fairness
 
 
 def render_skill_gap():
@@ -85,6 +85,16 @@ def render_skill_gap():
                                 st.rerun()
                             goal["learner_profile"] = learner_profile
                             st.toast("Your profile has been created!")
+                            # Run fairness validation on the new profile
+                            try:
+                                fairness_result = validate_profile_fairness(
+                                    learner_profile,
+                                    st.session_state["learner_information"],
+                                    persona_name=st.session_state.get("learner_persona", ""),
+                                )
+                                goal["profile_fairness"] = fairness_result
+                            except Exception:
+                                goal["profile_fairness"] = None
 
                     new_goal_id = add_new_goal(**goal)
                     st.session_state["selected_goal_id"] = new_goal_id

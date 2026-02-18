@@ -8,7 +8,7 @@
 
 ## 1. Context
 
-The GenMentor system infers learner skill levels from resume/background text using an LLM. Currently there are **zero checks** for whether these inferences are biased by demographic cues (name, gender, university prestige, nationality, etc.). This module adds a post-processing bias audit layer that reviews skill gap assessments for fairness — completely non-overlapping with existing functionality.
+The AI Tutor system infers learner skill levels from resume/background text using an LLM. Currently there are **zero checks** for whether these inferences are biased by demographic cues (name, gender, university prestige, nationality, etc.). This module adds a post-processing bias audit layer that reviews skill gap assessments for fairness — completely non-overlapping with existing functionality.
 
 ---
 

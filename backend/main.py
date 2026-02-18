@@ -548,6 +548,29 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/validate-profile-fairness")
+async def validate_profile_fairness(request: ProfileFairnessRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    learner_information = request.learner_information
+    persona_name = request.persona_name
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = json.loads(learner_profile)
+            except json.JSONDecodeError:
+                learner_profile = ast.literal_eval(learner_profile)
+        if not isinstance(learner_profile, dict):
+            learner_profile = {}
+        result = validate_profile_fairness_with_llm(
+            llm, learner_information, learner_profile, persona_name
+        )
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 @app.post("/update-learner-profile")
 async def update_learner_profile(request: LearnerProfileUpdateRequest):
     llm = get_llm(request.model_provider, request.model_name)
