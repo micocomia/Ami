@@ -138,7 +138,7 @@ def render_learning_path():
                 st.rerun()
             return
 
-        with st.spinner("Generating learning path (with retrieval, evaluation & auto-refinement)..."):
+        with st.spinner("Generating learning path (with evaluation & auto-refinement)..."):
             st.session_state[attempt_key] = True
 
             result = schedule_learning_path_agentic(

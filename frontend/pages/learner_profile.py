@@ -256,10 +256,37 @@ def render_additional_info_form(goal):
             with st.spinner("Updating your profile..."):
                 update_learner_profile_with_additional_info(goal)
 
+def _get_fslsm_dims(profile):
+    """Extract FSLSM dimensions dict from a learner profile."""
+    return (
+        profile
+        .get("learning_preferences", {})
+        .get("fslsm_dimensions", {})
+    )
+
+
+def _has_significant_fslsm_change(old_profile, new_profile, threshold=0.3):
+    """Return True if any FSLSM dimension changed by >= threshold."""
+    old_dims = _get_fslsm_dims(old_profile)
+    new_dims = _get_fslsm_dims(new_profile)
+    for key in ("fslsm_processing", "fslsm_perception", "fslsm_input", "fslsm_understanding"):
+        old_val = old_dims.get(key, 0.0)
+        new_val = new_dims.get(key, 0.0)
+        if abs(old_val - new_val) >= threshold:
+            return True
+    return False
+
+
 def update_learner_profile_with_additional_info(goal):
     additional_info = st.session_state["additional_info"]
-    new_learner_profile = update_learner_profile(goal["learner_profile"], additional_info, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+    old_profile = goal.get("learner_profile", {})
+    new_learner_profile = update_learner_profile(old_profile, additional_info, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
     if new_learner_profile is not None:
+        # Detect significant FSLSM preference changes
+        if _has_significant_fslsm_change(old_profile, new_learner_profile):
+            goal_id = st.session_state.get("selected_goal_id")
+            st.session_state[f"adaptation_suggested_{goal_id}"] = True
+
         goal["learner_profile"] = new_learner_profile
         try:
             save_persistent_state()
