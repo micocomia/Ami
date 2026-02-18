@@ -198,6 +198,7 @@ def create_learning_content_with_llm(
     method_name="genmentor",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
+    quiz_mix_config: Optional[dict] = None,
 ):
     from .goal_oriented_knowledge_explorer import explore_knowledge_points_with_llm
     from .search_enhanced_knowledge_drafter import draft_knowledge_points_with_llm
@@ -310,15 +311,33 @@ def create_learning_content_with_llm(
         if not with_quiz:
             return learning_content
 
-        # 9. Generate quizzes
+        # 9. Generate quizzes (counts driven by session proficiency)
+        if quiz_mix_config:
+            from utils.quiz_scorer import get_quiz_mix_for_session as _get_quiz_mix
+            _session_dict = (
+                learning_session if isinstance(learning_session, dict)
+                else (learning_session.model_dump() if hasattr(learning_session, "model_dump") else {})
+            )
+            _mix = _get_quiz_mix(_session_dict, quiz_mix_config)
+        else:
+            # Fallback defaults when no config provided
+            _mix = {
+                "single_choice_count": 3,
+                "multiple_choice_count": 0,
+                "true_false_count": 0,
+                "short_answer_count": 0,
+                "open_ended_count": 0,
+            }
+
         document_quiz = generate_document_quizzes_with_llm(
             llm,
             learner_profile,
             learning_document,
-            single_choice_count=3,
-            multiple_choice_count=0,
-            true_false_count=0,
-            short_answer_count=0,
+            single_choice_count=_mix.get("single_choice_count", 3),
+            multiple_choice_count=_mix.get("multiple_choice_count", 0),
+            true_false_count=_mix.get("true_false_count", 0),
+            short_answer_count=_mix.get("short_answer_count", 0),
+            open_ended_count=_mix.get("open_ended_count", 0),
         )
         learning_content["quizzes"] = document_quiz
         return learning_content

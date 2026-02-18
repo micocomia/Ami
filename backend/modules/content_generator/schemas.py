@@ -58,11 +58,19 @@ class ShortAnswerQuestion(BaseModel):
     explanation: str | None = None
 
 
+class OpenEndedQuestion(BaseModel):
+    question: str
+    rubric: str  # SOLO-aligned rubric: what constitutes each SOLO level for this question
+    example_answer: str  # Model answer at the Relational/Extended Abstract level
+    explanation: str | None = None
+
+
 class DocumentQuiz(BaseModel):
     single_choice_questions: List[SingleChoiceQuestion] = Field(default_factory=list)
     multiple_choice_questions: List[MultipleChoiceQuestion] = Field(default_factory=list)
     true_false_questions: List[TrueFalseQuestion] = Field(default_factory=list)
     short_answer_questions: List[ShortAnswerQuestion] = Field(default_factory=list)
+    open_ended_questions: List[OpenEndedQuestion] = Field(default_factory=list)
 
 
 def parse_knowledge_points(data) -> KnowledgePoints:

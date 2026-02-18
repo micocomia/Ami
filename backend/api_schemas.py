@@ -129,6 +129,7 @@ class KnowledgeQuizGenerationRequest(BaseModel):
     multiple_choice_count: int = 0
     true_false_count: int = 0
     short_answer_count: int = 0
+    open_ended_count: int = 0
 
 
 class TailoredContentGenerationRequest(BaseModel):
