@@ -196,23 +196,30 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
                 if new_idx > existing_idx:
                     merged_mastered[name] = dict(skill)
 
-    # Propagate learning_preferences and behavioral_patterns from other goals
+    # Propagate learner_information, learning_preferences and behavioral_patterns from other goals
     target_prefs = target_profile.get("learning_preferences")
     target_behavioral = target_profile.get("behavioral_patterns")
+    target_learner_info = target_profile.get("learner_information", "")
     for gid, profile in all_profiles.items():
         if gid == target_goal_id:
             continue
+        # Propagate learner_information — shared across all goals; always overwrite so
+        # updates (e.g. newly mastered skills, style shifts) are reflected everywhere.
+        other_learner_info = profile.get("learner_information", "")
+        if other_learner_info:
+            target_learner_info = other_learner_info
+
         other_prefs = profile.get("learning_preferences")
         if other_prefs and not target_prefs:
             target_prefs = other_prefs
         elif other_prefs and target_prefs:
-            # Merge: take values from other goal for any missing keys
+            # Merge: unified fields always overwrite; others fill in blanks only
             for key, value in other_prefs.items():
                 if key not in target_prefs or not target_prefs[key]:
                     target_prefs[key] = value
-                elif key == "fslsm_dimensions":
-                    # FSLSM is unified across all goals; overwrite so updates propagate
-                    if isinstance(value, dict) and value:
+                elif key in ("fslsm_dimensions", "additional_notes"):
+                    # Both are unified across all goals; overwrite so updates propagate
+                    if value:
                         target_prefs[key] = value
                 elif isinstance(value, dict) and isinstance(target_prefs.get(key), dict):
                     for sub_key, sub_value in value.items():
@@ -232,7 +239,9 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
         target_profile["cognitive_status"] = {}
     target_profile["cognitive_status"]["mastered_skills"] = list(merged_mastered.values())
 
-    # Apply preferences and behavioral patterns
+    # Apply learner_information, preferences and behavioral patterns
+    if target_learner_info:
+        target_profile["learner_information"] = target_learner_info
     if target_prefs is not None:
         target_profile["learning_preferences"] = target_prefs
     if target_behavioral is not None:

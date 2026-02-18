@@ -317,8 +317,19 @@ def propagate_profile_fields_to_other_goals(
             if new_prefs:
                 target_profile["learning_preferences"] = new_prefs
                 changed = True
+            # learner_information is shared across all goals — always propagate it
+            # so the text description stays in sync with FSLSM vectors and mastery
+            new_learner_info = source_profile.get("learner_information", "")
+            if new_learner_info:
+                target_profile["learner_information"] = new_learner_info
+                changed = True
 
         if sync_mastered_skills:
+            # learner_information is shared — propagate it when cognitive status changes too
+            new_learner_info = source_profile.get("learner_information", "")
+            if new_learner_info and not sync_preferences:  # avoid double-write if both flags set
+                target_profile["learner_information"] = new_learner_info
+                changed = True
             source_mastered = source_profile.get("cognitive_status", {}).get("mastered_skills", [])
             if source_mastered:
                 target_cs = target_profile.setdefault("cognitive_status", {})
