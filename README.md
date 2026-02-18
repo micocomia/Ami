@@ -32,7 +32,7 @@ Our project addresses this gap by enhancing GenMentor with:
 
 <div align="center">
   <p align="center">
-    <img src="resources/framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
+    <img src="resources/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
   </p>
 </div>
 
