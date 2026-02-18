@@ -1,6 +1,6 @@
 import math
 import streamlit as st
-from utils.request_api import create_learner_profile, update_learner_profile, auth_delete_user, get_app_config, get_behavioral_metrics
+from utils.request_api import create_learner_profile, update_learning_preferences, save_learner_profile, auth_delete_user, get_app_config, get_behavioral_metrics
 from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
@@ -280,12 +280,19 @@ def _has_significant_fslsm_change(old_profile, new_profile, threshold=0.3):
 def update_learner_profile_with_additional_info(goal):
     additional_info = st.session_state["additional_info"]
     old_profile = goal.get("learner_profile", {})
-    new_learner_profile = update_learner_profile(old_profile, additional_info, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+    user_id = st.session_state.get("userId")
+    goal_id = st.session_state.get("selected_goal_id")
+    # Don't pass user_id/goal_id here — avoid persisting to the profile store
+    # immediately, so the adapt-learning-path endpoint can still read the OLD
+    # profile for FSLSM delta comparison.
+    new_learner_profile = update_learning_preferences(old_profile, additional_info)
     if new_learner_profile is not None:
         # Detect significant FSLSM preference changes
         if _has_significant_fslsm_change(old_profile, new_learner_profile):
-            goal_id = st.session_state.get("selected_goal_id")
             st.session_state[f"adaptation_suggested_{goal_id}"] = True
+        else:
+            # No adaptation needed — persist the updated profile to the store now
+            save_learner_profile(user_id, goal_id, new_learner_profile)
 
         goal["learner_profile"] = new_learner_profile
         try:

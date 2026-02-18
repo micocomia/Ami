@@ -177,6 +177,16 @@ async def auto_update_profile(request: AutoProfileUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/profile/{user_id}/{goal_id}")
+async def put_profile(user_id: str, goal_id: int, body: dict):
+    """Persist a learner profile to the store without an LLM call."""
+    profile = body.get("learner_profile")
+    if not profile:
+        raise HTTPException(status_code=400, detail="learner_profile is required")
+    store.upsert_profile(user_id, goal_id, profile)
+    return {"ok": True}
+
+
 @app.get("/profile/{user_id}")
 async def get_profile(user_id: str, goal_id: Optional[int] = None):
     if goal_id is not None:
@@ -796,6 +806,69 @@ async def update_learner_profile(request: LearnerProfileUpdateRequest):
         return {"learner_profile": learner_profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-cognitive-status")
+async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    session_information = request.session_information
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = ast.literal_eval(learner_profile)
+            except Exception:
+                learner_profile = {"raw": learner_profile}
+        if isinstance(session_information, str) and session_information.strip():
+            try:
+                session_information = ast.literal_eval(session_information)
+            except Exception:
+                pass
+        learner_profile = update_cognitive_status_with_llm(
+            llm,
+            learner_profile,
+            session_information,
+        )
+        if request.user_id is not None and request.goal_id is not None:
+            store.upsert_profile(request.user_id, request.goal_id, learner_profile)
+        return {"learner_profile": learner_profile}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/update-learning-preferences")
+async def update_learning_preferences(request: LearningPreferencesUpdateRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    learner_interactions = request.learner_interactions
+    learner_information = request.learner_information
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = ast.literal_eval(learner_profile)
+            except Exception:
+                learner_profile = {"raw": learner_profile}
+        if isinstance(learner_interactions, str) and learner_interactions.strip():
+            try:
+                learner_interactions = ast.literal_eval(learner_interactions)
+            except Exception:
+                learner_interactions = {"raw": learner_interactions}
+        if isinstance(learner_information, str) and learner_information.strip():
+            try:
+                learner_information = ast.literal_eval(learner_information)
+            except Exception:
+                learner_information = {"raw": learner_information}
+        learner_profile = update_learning_preferences_with_llm(
+            llm,
+            learner_profile,
+            learner_interactions,
+            learner_information,
+        )
+        if request.user_id is not None and request.goal_id is not None:
+            store.upsert_profile(request.user_id, request.goal_id, learner_profile)
+        return {"learner_profile": learner_profile}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/schedule-learning-path")
 async def schedule_learning_path(request: LearningPathSchedulingRequest):

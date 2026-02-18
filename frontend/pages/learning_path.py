@@ -6,6 +6,7 @@ from utils.request_api import (
     schedule_learning_path_agentic,
     reschedule_learning_path,
     adapt_learning_path,
+    save_learner_profile,
     get_app_config,
 )
 from components.navigation import render_navigation
@@ -339,35 +340,48 @@ def render_adaptation_section(goal):
     adaptation_key = f"adaptation_suggested_{goal_id}"
     if st.session_state.get(adaptation_key):
         st.warning("Your learning preferences or quiz results suggest your learning path may need adjustment.")
-        if st.button("Adapt Learning Path", type="primary", key=f"adapt_btn_{goal_id}"):
-            with st.spinner("Analyzing changes and adapting your learning path..."):
-                result = adapt_learning_path(
-                    user_id=user_id,
-                    goal_id=goal_id,
-                    new_learner_profile=goal.get("learner_profile", {}),
-                )
-            if result and result.get("learning_path"):
-                agent_meta = result.get("agent_metadata", {})
-                decision = agent_meta.get("decision", {})
-                action = decision.get("action", "keep")
-                reason = decision.get("reason", "")
-
-                if action == "keep":
-                    st.info("Your current plan is still on track.")
-                elif action == "adjust_future":
-                    goal["learning_path"] = result["learning_path"]
-                    goal["plan_agent_metadata"] = agent_meta
-                    st.success(f"Future sessions have been adjusted. {reason}")
-                elif action == "regenerate":
-                    goal["learning_path"] = result["learning_path"]
-                    goal["plan_agent_metadata"] = agent_meta
-                    st.success(f"Your learning path has been regenerated. {reason}")
-
+        col_adapt, col_dismiss = st.columns([1, 1])
+        with col_dismiss:
+            if st.button("Dismiss", key=f"dismiss_adapt_{goal_id}"):
+                save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
                 st.session_state[adaptation_key] = False
                 save_persistent_state()
                 st.rerun()
-            else:
-                st.error("Failed to adapt learning path.")
+        with col_adapt:
+            if st.button("Adapt Learning Path", type="primary", key=f"adapt_btn_{goal_id}"):
+                with st.spinner("Analyzing changes and adapting your learning path..."):
+                    result = adapt_learning_path(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        new_learner_profile=goal.get("learner_profile", {}),
+                    )
+                if result and result.get("learning_path"):
+                    agent_meta = result.get("agent_metadata", {})
+                    decision = agent_meta.get("decision", {})
+                    action = decision.get("action", "keep")
+                    reason = decision.get("reason", "")
+
+                    if action == "keep":
+                        st.info("Your current plan is still on track.")
+                    elif action == "adjust_future":
+                        goal["learning_path"] = result["learning_path"]
+                        goal["plan_agent_metadata"] = agent_meta
+                        st.success(f"Future sessions have been adjusted. {reason}")
+                    elif action == "regenerate":
+                        goal["learning_path"] = result["learning_path"]
+                        goal["plan_agent_metadata"] = agent_meta
+                        st.success(f"Your learning path has been regenerated. {reason}")
+
+                    # Now persist the updated profile to the store (deferred from
+                    # the preferences update so the adapt endpoint could compare
+                    # old vs new FSLSM dimensions).
+                    save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
+
+                    st.session_state[adaptation_key] = False
+                    save_persistent_state()
+                    st.rerun()
+                else:
+                    st.error("Failed to adapt learning path.")
 
 
 def render_learning_sessions(goal):

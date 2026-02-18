@@ -47,6 +47,23 @@ class LearnerProfileUpdateRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class CognitiveStatusUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    session_information: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
+class LearningPreferencesUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    learner_interactions: str
+    learner_information: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class LearningPathSchedulingRequest(BaseRequest):
 
     learner_profile: str

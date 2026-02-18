@@ -7,7 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
-from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_learner_profile, get_app_config, evaluate_mastery
+from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
 from config import use_mock_data, use_search
@@ -631,10 +631,22 @@ def render_content_feedback_form(goal):
 
 def update_learner_profile_with_feedback(goal, feedback_data, session_information=""):
     st.toast("Updating your profile...")
+    user_id = st.session_state.get("userId")
+    goal_id = st.session_state.get("selected_goal_id")
     if session_information != "":
+        # Session completion → update only cognitive status
         session_information = copy.deepcopy(session_information)
         session_information["if_learned"] = True
-    new_learner_profile = update_learner_profile(goal["learner_profile"], feedback_data, session_information=session_information, user_id=st.session_state.get("userId"), goal_id=st.session_state.get("selected_goal_id"))
+        new_learner_profile = update_cognitive_status(
+            goal["learner_profile"], session_information,
+            user_id=user_id, goal_id=goal_id,
+        )
+    else:
+        # Content feedback → update only learning preferences
+        new_learner_profile = update_learning_preferences(
+            goal["learner_profile"], feedback_data,
+            user_id=user_id, goal_id=goal_id,
+        )
     if new_learner_profile is None:
         st.error("Failed to update learner profile. Please try again.")
         return False

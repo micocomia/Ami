@@ -114,6 +114,8 @@ API_NAMES = {
     "identify_skill_gap": "identify-skill-gap-with-info",
     "create_profile": "create-learner-profile-with-info",
     "update_profile": "update-learner-profile",
+    "update_cognitive_status": "update-cognitive-status",
+    "update_learning_preferences": "update-learning-preferences",
     "schedule_path": "schedule-learning-path",
     "schedule_path_agentic": "schedule-learning-path-agentic",
     "reschedule_path": "reschedule-learning-path",
@@ -314,6 +316,44 @@ def update_learner_profile(learner_profile, learner_interactions, learner_inform
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["update_profile"], data, "./assets/data_example/learner_profile.json")
     return response.get("learner_profile") if response else None
+
+
+def update_cognitive_status(learner_profile, session_information, llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_information": str(session_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_cognitive_status"], data)
+    return response.get("learner_profile") if response else None
+
+
+def update_learning_preferences(learner_profile, learner_interactions, learner_information="", llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "learner_interactions": str(learner_interactions),
+        "learner_information": str(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_learning_preferences"], data)
+    return response.get("learner_profile") if response else None
+
 
 # @st.cache_resource
 def schedule_learning_path(learner_profile, session_count=None, llm_type=None, method_name=None):
@@ -600,6 +640,16 @@ def auth_delete_user(token):
         return resp.status_code, resp.json()
     except Exception as e:
         return None, {"detail": str(e)}
+
+
+def save_learner_profile(user_id, goal_id, learner_profile):
+    """Persist a learner profile to the backend store without triggering an LLM call."""
+    backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.put(backend_url, json={"learner_profile": learner_profile}, timeout=30)
+        return response.status_code == 200
+    except Exception:
+        return False
 
 
 def get_personas():
