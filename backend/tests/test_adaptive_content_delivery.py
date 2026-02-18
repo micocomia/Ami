@@ -1,0 +1,428 @@
+"""Tests for Audio-Visual Adaptive Content Delivery.
+
+Unit tests — no LLM or network calls; all external dependencies mocked.
+
+Run from backend directory:
+    pytest tests/test_adaptive_content_delivery.py -v
+"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+
+# ---------------------------------------------------------------------------
+# TestGetFslsmInput
+# ---------------------------------------------------------------------------
+
+class TestGetFslsmInput:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_content_creator import _get_fslsm_input
+        return _get_fslsm_input
+
+    def test_standard_extraction(self):
+        _get_fslsm_input = self._import()
+        profile = {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_input": -0.8
+                }
+            }
+        }
+        assert _get_fslsm_input(profile) == pytest.approx(-0.8)
+
+    def test_missing_dims(self):
+        _get_fslsm_input = self._import()
+        assert _get_fslsm_input({}) == 0.0
+
+    def test_nested_missing(self):
+        _get_fslsm_input = self._import()
+        profile = {"learning_preferences": {}}
+        assert _get_fslsm_input(profile) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# TestVisualFormattingHints
+# ---------------------------------------------------------------------------
+
+class TestVisualFormattingHints:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_content_creator import _visual_formatting_hints
+        return _visual_formatting_hints
+
+    def test_strong_visual_contains_mermaid(self):
+        _visual_formatting_hints = self._import()
+        hint = _visual_formatting_hints(-0.9)
+        assert "mermaid" in hint.lower()
+
+    def test_moderate_visual_contains_table(self):
+        _visual_formatting_hints = self._import()
+        hint = _visual_formatting_hints(-0.5)
+        assert "table" in hint.lower()
+
+    def test_balanced_empty(self):
+        _visual_formatting_hints = self._import()
+        hint = _visual_formatting_hints(0.0)
+        assert hint == ""
+
+
+# ---------------------------------------------------------------------------
+# TestStripMarkdown
+# ---------------------------------------------------------------------------
+
+class TestStripMarkdown:
+
+    def _import(self):
+        from modules.content_generator.agents.tts_generator import _strip_markdown
+        return _strip_markdown
+
+    def test_removes_bold(self):
+        _strip_markdown = self._import()
+        assert _strip_markdown("**hello**") == "hello"
+
+    def test_removes_headings(self):
+        _strip_markdown = self._import()
+        result = _strip_markdown("## Title\n")
+        assert "##" not in result
+        assert "Title" in result
+
+    def test_removes_links(self):
+        _strip_markdown = self._import()
+        assert _strip_markdown("[text](url)") == "text"
+
+    def test_removes_html_tags(self):
+        _strip_markdown = self._import()
+        result = _strip_markdown("<audio controls>")
+        assert "<" not in result
+        assert ">" not in result
+
+
+# ---------------------------------------------------------------------------
+# TestParseDialogueTurns
+# ---------------------------------------------------------------------------
+
+class TestParseDialogueTurns:
+
+    def _import(self):
+        from modules.content_generator.agents.tts_generator import _parse_dialogue_turns
+        return _parse_dialogue_turns
+
+    def test_two_speakers(self):
+        _parse_dialogue_turns = self._import()
+        doc = "**[HOST]**: Welcome to the show.\n**[EXPERT]**: Thanks for having me."
+        turns = _parse_dialogue_turns(doc)
+        assert len(turns) == 2
+        assert turns[0][0] == "HOST"
+        assert "Welcome" in turns[0][1]
+        assert turns[1][0] == "EXPERT"
+        assert "Thanks" in turns[1][1]
+
+    def test_speaker_names_uppercased(self):
+        _parse_dialogue_turns = self._import()
+        doc = "**[host]**: Hello.\n**[expert]**: Hi there."
+        turns = _parse_dialogue_turns(doc)
+        assert turns[0][0] == "HOST"
+        assert turns[1][0] == "EXPERT"
+
+    def test_empty_turns_skipped(self):
+        _parse_dialogue_turns = self._import()
+        doc = "**[HOST]**: \n**[EXPERT]**: Real content here."
+        turns = _parse_dialogue_turns(doc)
+        # Empty HOST turn should be skipped
+        assert all(text.strip() for _, text in turns)
+        speakers = [s for s, _ in turns]
+        assert "HOST" not in speakers
+
+    def test_no_turns_returns_empty(self):
+        _parse_dialogue_turns = self._import()
+        doc = "This is plain prose with no speaker labels."
+        turns = _parse_dialogue_turns(doc)
+        assert turns == []
+
+
+# ---------------------------------------------------------------------------
+# TestFindMediaResources
+# ---------------------------------------------------------------------------
+
+class TestFindMediaResources:
+
+    def _import(self):
+        from modules.content_generator.agents.media_resource_finder import find_media_resources
+        return find_media_resources
+
+    def _make_search_result(self, title, link):
+        result = MagicMock()
+        result.title = title
+        result.link = link
+        return result
+
+    def test_youtube_extraction(self):
+        find_media_resources = self._import()
+        mock_runner = MagicMock()
+        mock_runner.invoke.return_value = [
+            self._make_search_result(
+                "Rick Astley Tutorial",
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            )
+        ]
+        results = find_media_resources(mock_runner, [{"name": "Python"}], max_videos=1, max_images=0)
+        videos = [r for r in results if r["type"] == "video"]
+        assert len(videos) == 1
+        assert videos[0]["video_id"] == "dQw4w9WgXcQ"
+
+    def test_thumbnail_url_format(self):
+        find_media_resources = self._import()
+        mock_runner = MagicMock()
+        mock_runner.invoke.return_value = [
+            self._make_search_result(
+                "Tutorial",
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            )
+        ]
+        results = find_media_resources(mock_runner, [{"name": "Python"}], max_videos=1, max_images=0)
+        videos = [r for r in results if r["type"] == "video"]
+        assert len(videos) == 1
+        assert "img.youtube.com/vi/dQw4w9WgXcQ" in videos[0]["thumbnail_url"]
+
+    def test_no_youtube_links(self):
+        find_media_resources = self._import()
+        mock_runner = MagicMock()
+        mock_runner.invoke.return_value = [
+            self._make_search_result("Some Page", "https://www.example.com/page")
+        ]
+        results = find_media_resources(mock_runner, [{"name": "Python"}], max_videos=2, max_images=0)
+        videos = [r for r in results if r["type"] == "video"]
+        assert videos == []
+
+    def test_max_videos_respected(self):
+        find_media_resources = self._import()
+        mock_runner = MagicMock()
+        mock_runner.invoke.return_value = [
+            self._make_search_result("Vid 1", "https://www.youtube.com/watch?v=AAAAAAAAAAA"),
+            self._make_search_result("Vid 2", "https://www.youtube.com/watch?v=BBBBBBBBBBB"),
+            self._make_search_result("Vid 3", "https://www.youtube.com/watch?v=CCCCCCCCCCC"),
+        ]
+        results = find_media_resources(
+            mock_runner,
+            [{"name": "Topic A"}, {"name": "Topic B"}],
+            max_videos=1,
+            max_images=0,
+        )
+        videos = [r for r in results if r["type"] == "video"]
+        assert len(videos) <= 1
+
+    def test_search_failure_graceful(self):
+        find_media_resources = self._import()
+        mock_runner = MagicMock()
+        mock_runner.invoke.side_effect = RuntimeError("Network error")
+        # Should not raise; should return empty list
+        results = find_media_resources(mock_runner, [{"name": "Python"}], max_videos=2, max_images=0)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# TestPrepareMarkdownDocumentWithMedia
+# ---------------------------------------------------------------------------
+
+class TestPrepareMarkdownDocumentWithMedia:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_document_integrator import prepare_markdown_document
+        return prepare_markdown_document
+
+    def _make_doc_structure(self):
+        return {"title": "My Doc", "overview": "An overview.", "summary": "A summary."}
+
+    def test_no_media_unchanged(self):
+        prepare_markdown_document = self._import()
+        doc = prepare_markdown_document(self._make_doc_structure(), [], [], media_resources=None)
+        assert "📺" not in doc
+
+    def test_video_section_appended(self):
+        prepare_markdown_document = self._import()
+        media = [{
+            "type": "video",
+            "title": "Python Tutorial",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_id": "dQw4w9WgXcQ",
+            "thumbnail_url": "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+        }]
+        doc = prepare_markdown_document(self._make_doc_structure(), [], [], media_resources=media)
+        assert "📺 Visual Learning Resources" in doc
+        assert "youtube.com" in doc
+
+    def test_image_section_appended(self):
+        prepare_markdown_document = self._import()
+        media = [{
+            "type": "image",
+            "title": "Python (programming language)",
+            "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Python-logo-notext.svg/121px-Python-logo-notext.svg.png",
+            "description": "High-level programming language",
+        }]
+        doc = prepare_markdown_document(self._make_doc_structure(), [], [], media_resources=media)
+        assert "📺 Visual Learning Resources" in doc
+        assert "wikimedia" in doc or "wikipedia" in doc
+
+    def test_mixed_media(self):
+        prepare_markdown_document = self._import()
+        media = [
+            {
+                "type": "video",
+                "title": "Tutorial",
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "video_id": "dQw4w9WgXcQ",
+                "thumbnail_url": "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+            },
+            {
+                "type": "image",
+                "title": "Python Wiki",
+                "url": "https://en.wikipedia.org/wiki/Python",
+                "image_url": "https://upload.wikimedia.org/img.png",
+                "description": "Python language",
+            },
+        ]
+        doc = prepare_markdown_document(self._make_doc_structure(), [], [], media_resources=media)
+        assert "youtube.com" in doc
+        assert "wikimedia" in doc or "wikipedia" in doc
+
+
+# ---------------------------------------------------------------------------
+# TestContentFormatRouting
+# ---------------------------------------------------------------------------
+
+class TestContentFormatRouting:
+    """Test the routing logic in create_learning_content_with_llm() using mocks."""
+
+    def _make_profile(self, fslsm_input: float):
+        return {
+            "learning_preferences": {
+                "fslsm_dimensions": {"fslsm_input": fslsm_input}
+            }
+        }
+
+    def _call(self, fslsm_input, mock_explore, mock_draft, mock_integrate,
+              mock_quiz, mock_media, mock_podcast, mock_tts,
+              with_quiz=False):
+        from modules.content_generator.agents.learning_content_creator import (
+            create_learning_content_with_llm,
+        )
+        mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
+        mock_draft.return_value = [{"title": "Draft A", "content": "Content A"}]
+        mock_integrate.return_value = "## Document\n\nContent here."
+        mock_quiz.return_value = {}
+        mock_media.return_value = []
+        mock_podcast.return_value = "## Podcast Document\n\nConverted."
+
+        mock_llm = MagicMock()
+        mock_search_rag = MagicMock()
+        mock_search_rag.search_runner = MagicMock()
+
+        profile = self._make_profile(fslsm_input)
+        return create_learning_content_with_llm(
+            mock_llm, profile, {}, {},
+            with_quiz=with_quiz,
+            search_rag_manager=mock_search_rag,
+        )
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_strong_visual(self, mock_explore, mock_draft, mock_integrate,
+                           mock_quiz, mock_media, mock_podcast, mock_tts):
+        result = self._call(-0.9, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        assert result["content_format"] == "visual_enhanced"
+        assert "audio_url" not in result
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_moderate_visual(self, mock_explore, mock_draft, mock_integrate,
+                             mock_quiz, mock_media, mock_podcast, mock_tts):
+        result = self._call(-0.5, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        assert result["content_format"] == "visual_enhanced"
+        assert "audio_url" not in result
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_standard(self, mock_explore, mock_draft, mock_integrate,
+                      mock_quiz, mock_media, mock_podcast, mock_tts):
+        result = self._call(0.0, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        assert result["content_format"] == "standard"
+        assert "audio_url" not in result
+        mock_podcast.assert_not_called()
+        mock_tts.assert_not_called()
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_moderate_audio(self, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts):
+        result = self._call(+0.5, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        assert result["content_format"] == "podcast"
+        assert "audio_url" not in result
+        mock_podcast.assert_called_once()
+        mock_tts.assert_not_called()
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_strong_audio(self, mock_explore, mock_draft, mock_integrate,
+                          mock_quiz, mock_media, mock_podcast, mock_tts):
+        mock_tts.return_value = "/static/audio/abc123.mp3"
+        result = self._call(+0.9, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        assert result["content_format"] == "podcast"
+        assert "audio_url" in result
+        assert result["audio_url"] == "/static/audio/abc123.mp3"
+        mock_podcast.assert_called_once()
+        mock_tts.assert_called_once()
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_tts_failure_no_crash(self, mock_explore, mock_draft, mock_integrate,
+                                  mock_quiz, mock_media, mock_podcast, mock_tts):
+        mock_tts.side_effect = RuntimeError("TTS service unavailable")
+        result = self._call(+0.9, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts)
+        # Podcast document should still be returned
+        assert result["content_format"] == "podcast"
+        assert "document" in result
+        # audio_url should be absent
+        assert "audio_url" not in result

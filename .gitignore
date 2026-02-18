@@ -18,3 +18,7 @@ backend/data/
 pids/
 .DS_Store
 frontend/config.py
+
+# IDE and tooling
+.idea/
+.claude/

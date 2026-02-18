@@ -65,6 +65,51 @@ def prepare_content_outline_with_llm(llm, learner_profile, learning_path, learni
     return creator.prepare_outline(payload)
 
 
+_FSLSM_STRONG = 0.7
+_FSLSM_MODERATE = 0.3
+
+
+def _get_fslsm_input(learner_profile) -> float:
+    """Extract fslsm_input value from a learner profile dict. Returns 0.0 on missing/error."""
+    if isinstance(learner_profile, str):
+        try:
+            import ast as _ast
+            learner_profile = _ast.literal_eval(learner_profile)
+        except Exception:
+            return 0.0
+    if not isinstance(learner_profile, dict):
+        return 0.0
+    try:
+        dims = (
+            learner_profile
+            .get("learning_preferences", {})
+            .get("fslsm_dimensions", {})
+        )
+        if not isinstance(dims, dict):
+            return 0.0
+        val = dims.get("fslsm_input", 0.0)
+        return float(val) if val is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _visual_formatting_hints(fslsm_input: float) -> str:
+    """Return formatting instruction hints for visual learners based on fslsm_input score."""
+    if fslsm_input <= -_FSLSM_STRONG:
+        return (
+            "\n\n**Visual Formatting Instructions**: This learner is a strong visual learner. "
+            "You MUST include at least one Mermaid diagram (```mermaid ... ```) to illustrate key concepts. "
+            "Use markdown tables to present comparisons, steps, or structured data."
+        )
+    elif fslsm_input <= -_FSLSM_MODERATE:
+        return (
+            "\n\n**Visual Formatting Instructions**: This learner prefers visual content. "
+            "Include markdown tables where applicable to present comparisons or structured data. "
+            "Use code blocks and structured layouts where applicable."
+        )
+    return ""
+
+
 def create_learning_content_with_llm(
     llm,
     learner_profile,
@@ -86,9 +131,16 @@ def create_learning_content_with_llm(
     from .document_quiz_generator import generate_document_quizzes_with_llm
 
     if method_name == "genmentor":
+        # 1. Explore knowledge points
         knowledge_points = explore_knowledge_points_with_llm(
             llm, learner_profile, learning_path, learning_session
         )
+
+        # 2. Compute visual formatting hints based on fslsm_input
+        fslsm_input = _get_fslsm_input(learner_profile)
+        hints = _visual_formatting_hints(fslsm_input)
+
+        # 3. Draft knowledge points with visual hints
         knowledge_drafts = draft_knowledge_points_with_llm(
             llm,
             learner_profile,
@@ -98,8 +150,38 @@ def create_learning_content_with_llm(
             allow_parallel=allow_parallel,
             use_search=use_search,
             max_workers=max_workers,
+            visual_formatting_hints=hints,
             search_rag_manager=search_rag_manager,
         )
+
+        # 4. Find media resources for visual learners
+        media_resources = []
+        if fslsm_input <= -_FSLSM_MODERATE:
+            from .media_resource_finder import find_media_resources
+            _search_runner = None
+            if search_rag_manager is not None:
+                _search_runner = getattr(search_rag_manager, "search_runner", None)
+            if _search_runner is None:
+                try:
+                    from config.loader import default_config
+                    from base.searcher_factory import SearchRunner
+                    _search_runner = SearchRunner.from_config(default_config)
+                except Exception:
+                    pass
+            if _search_runner is not None:
+                max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
+                max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+                try:
+                    media_resources = find_media_resources(
+                        _search_runner,
+                        knowledge_points,
+                        max_videos=max_videos,
+                        max_images=max_images,
+                    )
+                except Exception:
+                    media_resources = []
+
+        # 5. Integrate document (with media appended for visual learners)
         learning_document = integrate_learning_document_with_llm(
             llm,
             learner_profile,
@@ -108,10 +190,44 @@ def create_learning_content_with_llm(
             knowledge_points,
             knowledge_drafts,
             output_markdown=output_markdown,
+            media_resources=media_resources if media_resources else None,
         )
-        learning_content = {"document": learning_document}
+
+        # 6. Set content_format
+        content_format = "standard"
+        if fslsm_input <= -_FSLSM_MODERATE:
+            content_format = "visual_enhanced"
+
+        # 7. Podcast conversion for auditory learners
+        audio_url = None
+        if fslsm_input >= _FSLSM_MODERATE:
+            from .podcast_style_converter import convert_to_podcast_with_llm
+            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
+            learning_document = convert_to_podcast_with_llm(
+                llm, learning_document, learner_profile, mode=mode
+            )
+            content_format = "podcast"
+
+            # 8. TTS generation for strong auditory learners
+            if fslsm_input >= _FSLSM_STRONG:
+                from .tts_generator import generate_tts_audio
+                try:
+                    audio_url = generate_tts_audio(learning_document)
+                    learning_document = (
+                        f'<audio controls src="{audio_url}"></audio>\n\n'
+                        + learning_document
+                    )
+                except Exception:
+                    audio_url = None
+
+        learning_content = {"document": learning_document, "content_format": content_format}
+        if audio_url is not None:
+            learning_content["audio_url"] = audio_url
+
         if not with_quiz:
             return learning_content
+
+        # 9. Generate quizzes
         document_quiz = generate_document_quizzes_with_llm(
             llm,
             learner_profile,

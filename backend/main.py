@@ -41,6 +41,10 @@ app_config = load_config(config_name="main")
 search_rag_manager = SearchRagManager.from_config(app_config)
 
 app = FastAPI()
+from fastapi.staticfiles import StaticFiles
+import os
+os.makedirs("data/audio", exist_ok=True)
+app.mount("/static/audio", StaticFiles(directory="data/audio"), name="audio")
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime

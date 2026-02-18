@@ -81,6 +81,16 @@ def parse_document_quiz(data) -> DocumentQuiz:
     return DocumentQuiz.model_validate(data)
 
 
+class MediaResource(BaseModel):
+    type: str
+    title: str
+    url: str
+    video_id: str = ""
+    thumbnail_url: str = ""
+    image_url: str = ""
+    description: str = ""
+
+
 class ContentSection(BaseModel):
     title: str
     summary: str
