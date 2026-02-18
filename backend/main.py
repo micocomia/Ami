@@ -760,6 +760,25 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
+@app.post("/audit-skill-gap-bias")
+async def audit_skill_gap_bias(request: BiasAuditRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_information = request.learner_information
+    skill_gaps = request.skill_gaps
+    try:
+        if isinstance(skill_gaps, str) and skill_gaps.strip():
+            try:
+                skill_gaps = json.loads(skill_gaps)
+            except json.JSONDecodeError:
+                skill_gaps = ast.literal_eval(skill_gaps)
+        if not isinstance(skill_gaps, dict):
+            skill_gaps = {"skill_gaps": []}
+        result = audit_skill_gap_bias_with_llm(llm, learner_information, skill_gaps)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 @app.post("/create-learner-profile-with-info")
 async def create_learner_profile_with_info(request: LearnerProfileInitializationWithInfoRequest):
     llm = get_llm(request.model_provider, request.model_name)
@@ -785,6 +804,29 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
         return {"learner_profile": learner_profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/validate-profile-fairness")
+async def validate_profile_fairness(request: ProfileFairnessRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    learner_information = request.learner_information
+    persona_name = request.persona_name
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = json.loads(learner_profile)
+            except json.JSONDecodeError:
+                learner_profile = ast.literal_eval(learner_profile)
+        if not isinstance(learner_profile, dict):
+            learner_profile = {}
+        result = validate_profile_fairness_with_llm(
+            llm, learner_information, learner_profile, persona_name
+        )
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
 
 @app.post("/update-learner-profile")
 async def update_learner_profile(request: LearnerProfileUpdateRequest):

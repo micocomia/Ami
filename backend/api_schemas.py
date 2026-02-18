@@ -183,6 +183,18 @@ class LearningContentFeedbackRequest(BaseRequest):
     learner_profile: str
     learning_content: str
 
+class BiasAuditRequest(BaseRequest):
+
+    learner_information: str
+    skill_gaps: str
+
+
+class ProfileFairnessRequest(BaseRequest):
+
+    learner_profile: str
+    learner_information: str
+    persona_name: str = ""
+
 
 class AuthRegisterRequest(BaseModel):
     username: str

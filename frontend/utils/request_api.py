@@ -130,6 +130,11 @@ API_NAMES = {
     "draft_knowledge_points": "draft-knowledge-points",
     "integrate_learning_document": "integrate-learning-document",
     "generate_document_quizzes": "generate-document-quizzes",
+    "simulate_path_feedback": "simulate-path-feedback",
+    "refine_path": "refine-learning-path",
+    "iterative_refine_path": "iterative-refine-path",
+    "audit_skill_gap_bias": "audit-skill-gap-bias",
+    "validate_profile_fairness": "validate-profile-fairness",
 }
 
 
@@ -270,6 +275,33 @@ def identify_skill_gap(
     if not response:
         return None, None, None
     return response.get("skill_gaps"), response.get("goal_assessment"), response.get("retrieved_sources")
+
+
+def audit_skill_gap_bias(skill_gaps_dict, learner_information, llm_type=None, method_name=None):
+    """Call the bias audit endpoint and return the audit result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "skill_gaps": json.dumps(skill_gaps_dict),
+        "learner_information": _normalize_learner_information(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    return make_post_request(API_NAMES["audit_skill_gap_bias"], data)
+
+
+def validate_profile_fairness(learner_profile, learner_information, persona_name="", llm_type=None):
+    """Call the fairness validation endpoint and return the result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    data = {
+        "learner_profile": json.dumps(learner_profile) if isinstance(learner_profile, dict) else str(learner_profile),
+        "learner_information": _normalize_learner_information(learner_information),
+        "persona_name": persona_name,
+        "llm_type": str(llm_type),
+    }
+    return make_post_request(API_NAMES["validate_profile_fairness"], data)
 
 
 def create_learner_profile(
