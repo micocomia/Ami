@@ -9,7 +9,6 @@ from utils.request_api import (
     get_app_config,
 )
 from components.navigation import render_navigation
-from utils.format import format_citation
 from utils.state import save_persistent_state
 
 def _get_selected_goal():
@@ -167,7 +166,6 @@ def render_learning_path():
 
         goal["learning_path"] = learning_path
         goal["plan_agent_metadata"] = agent_metadata
-        goal["retrieved_sources"] = agent_metadata.get("retrieved_sources", [])
         try:
             save_persistent_state()
         except Exception:
@@ -177,7 +175,6 @@ def render_learning_path():
 
     else:
         render_overall_information(goal)
-        render_retrieval_sources_banner(goal)
         render_module_map(goal)
         render_narrative_overview(goal)
         render_plan_quality_section(goal)
@@ -295,19 +292,6 @@ def render_narrative_overview(goal):
                 prefix = "Next, you'll explore"
             abstract_preview = session["abstract"][:120]
             st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {abstract_preview}...")
-
-
-def render_retrieval_sources_banner(goal):
-    """Show a banner indicating whether the learning plan used verified course content."""
-    sources = goal.get("retrieved_sources") or []
-    if sources:
-        st.info("Learning path was grounded in verified course content.")
-        with st.expander("View sources"):
-            for idx, source in enumerate(sources, start=1):
-                source_ref = dict(source)
-                if "source_type" not in source_ref:
-                    source_ref["source_type"] = "verified_content"
-                st.markdown(format_citation(source_ref, idx))
 
 
 def render_plan_quality_section(goal):

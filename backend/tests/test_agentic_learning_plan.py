@@ -1,9 +1,7 @@
 """Tests for the agentic learning plan generation orchestration.
 
 These tests mock LLM calls and verify the orchestration logic:
-- Initial plan generation
 - Auto-refinement loop with quality gate
-- Retrieval integration
 - Metadata structure
 
 Run from the repo root:
@@ -20,7 +18,6 @@ from unittest.mock import MagicMock, patch
 
 from modules.learning_plan_generator.agents.learning_path_scheduler import (
     _evaluate_plan_quality,
-    _dedupe_sources,
     LearningPathScheduler,
 )
 
@@ -68,52 +65,16 @@ def _make_plan(num_sessions=3):
 
 
 # ---------------------------------------------------------------------------
-# Tests for _dedupe_sources
+# Tests for LearningPathScheduler init
 # ---------------------------------------------------------------------------
 
-class TestDedupeSources:
+class TestLearningPathSchedulerInit:
 
-    def test_removes_duplicates(self):
-        sources = [
-            {"course_code": "6.0001", "type": "Syllabus"},
-            {"course_code": "6.0001", "type": "Syllabus"},
-            {"course_code": "6.0001", "type": "Lectures"},
-        ]
-        deduped = _dedupe_sources(sources)
-        assert len(deduped) == 2
-
-    def test_preserves_unique(self):
-        sources = [
-            {"course_code": "6.0001", "type": "Syllabus"},
-            {"course_code": "6.0001", "type": "Lectures"},
-        ]
-        deduped = _dedupe_sources(sources)
-        assert len(deduped) == 2
-
-    def test_empty_list(self):
-        assert _dedupe_sources([]) == []
-
-
-# ---------------------------------------------------------------------------
-# Tests for LearningPathScheduler with tools
-# ---------------------------------------------------------------------------
-
-class TestLearningPathSchedulerWithTools:
-
-    def test_scheduler_init_without_rag(self):
-        """Scheduler should work without search_rag_manager."""
+    def test_scheduler_init_no_tools(self):
+        """Scheduler should have no tools (retrieval removed)."""
         mock_llm = MagicMock()
         scheduler = LearningPathScheduler(mock_llm)
         assert scheduler._tools is None
-
-    def test_scheduler_init_with_rag(self):
-        """Scheduler should have tools when search_rag_manager is provided."""
-        mock_llm = MagicMock()
-        mock_rag = MagicMock()
-        mock_rag.verified_content_manager = MagicMock()
-        scheduler = LearningPathScheduler(mock_llm, search_rag_manager=mock_rag)
-        assert scheduler._tools is not None
-        assert len(scheduler._tools) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -125,14 +86,22 @@ class TestAgenticMetadata:
     def test_evaluate_plan_quality_returns_expected_keys(self):
         """Quality gate should return pass, issues, feedback_summary."""
         feedback = {
-            "progression": "Good",
-            "engagement": "Good",
-            "personalization": "Good",
+            "feedback": {
+                "progression": "Good",
+                "engagement": "Good",
+                "personalization": "Good",
+            },
+            "suggestions": {
+                "progression": "",
+                "engagement": "",
+                "personalization": "",
+            },
         }
         result = _evaluate_plan_quality(feedback)
         assert "pass" in result
         assert "issues" in result
         assert "feedback_summary" in result
+        assert len(result["feedback_summary"]) == 3
 
     def test_schedule_agentic_returns_metadata(self):
         """Mocked agentic generation should return plan + metadata dict."""
@@ -141,16 +110,13 @@ class TestAgenticMetadata:
         pass
 
     def test_schedule_agentic_without_rag_falls_back(self):
-        """When no RAG is available, scheduler should still work."""
+        """Scheduler should work without any tools."""
         mock_llm = MagicMock()
         scheduler = LearningPathScheduler(mock_llm)
-        # No tools should be attached
         assert scheduler._tools is None
 
     def test_schedule_agentic_caps_at_max_refinements(self):
         """Quality gate failing every time should still cap at max refinements."""
-        # We verify this by checking the _evaluate_plan_quality function
-        # always returns a consistent structure
         bad_feedback = {
             "progression": "poor progression needs improvement",
             "engagement": "weak engagement",

@@ -450,20 +450,17 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
 
         if decision.action == "adjust_future":
             # Reschedule only future sessions
-            result_plan, retrieved_sources = reschedule_learning_path_with_llm(
+            result_plan = reschedule_learning_path_with_llm(
                 llm,
                 current_plan.get("learning_path", []),
                 new_profile,
                 other_feedback=f"Adaptation reason: {decision.reason}",
-                search_rag_manager=search_rag_manager,
             )
-            agent_metadata["retrieved_sources"] = retrieved_sources
 
         elif decision.action == "regenerate":
             # Full agentic regeneration preserving learned sessions
             plan, regen_metadata = schedule_learning_path_agentic(
                 llm, new_profile,
-                search_rag_manager=search_rag_manager,
             )
             # Preserve learned sessions from original plan
             learned = [
@@ -810,11 +807,10 @@ async def schedule_learning_path(request: LearningPathSchedulingRequest):
             learner_profile = ast.literal_eval(learner_profile)
         if not isinstance(learner_profile, dict):
             learner_profile = {}
-        learning_path, retrieved_sources = schedule_learning_path_with_llm(
+        learning_path = schedule_learning_path_with_llm(
             llm, learner_profile, session_count,
-            search_rag_manager=search_rag_manager,
         )
-        return {**learning_path, "retrieved_sources": retrieved_sources}
+        return learning_path
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -837,11 +833,10 @@ async def reschedule_learning_path(request: LearningPathReschedulingRequest):
                 other_feedback = ast.literal_eval(other_feedback)
             except Exception:
                 pass
-        learning_path_result, retrieved_sources = reschedule_learning_path_with_llm(
+        learning_path_result = reschedule_learning_path_with_llm(
             llm, learning_path, learner_profile, session_count, other_feedback,
-            search_rag_manager=search_rag_manager,
         )
-        return {**learning_path_result, "retrieved_sources": retrieved_sources}
+        return learning_path_result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -865,7 +860,6 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
             learner_profile = {}
         plan, agent_metadata = schedule_learning_path_agentic(
             llm, learner_profile, session_count,
-            search_rag_manager=search_rag_manager,
         )
         return {
             **plan,

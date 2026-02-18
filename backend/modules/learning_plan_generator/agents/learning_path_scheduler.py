@@ -4,7 +4,6 @@ import json
 from pydantic import BaseModel, Field
 
 from base import BaseAgent
-from base.search_rag import SearchRagManager
 from modules.learning_plan_generator.schemas import LearningPath
 from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_system_prompt,
@@ -12,7 +11,6 @@ from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_task_prompt_reschedule,
     learning_path_scheduler_task_prompt_session,
 )
-from modules.tools.course_content_retrieval_tool import create_course_content_retrieval_tool
 from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
 from utils.quiz_scorer import get_mastery_threshold_for_session
 
@@ -133,23 +131,11 @@ class LearningPathScheduler(BaseAgent):
 
     name: str = "LearningPathScheduler"
 
-    def __init__(
-        self,
-        model: Any,
-        search_rag_manager: Optional[SearchRagManager] = None,
-        retrieved_docs_sink: Optional[List[Dict[str, Any]]] = None,
-    ) -> None:
-        tools = None
-        if search_rag_manager is not None:
-            retrieve_tool = create_course_content_retrieval_tool(
-                search_rag_manager, retrieved_docs_sink=retrieved_docs_sink,
-            )
-            tools = [retrieve_tool]
-
+    def __init__(self, model: Any) -> None:
         super().__init__(
             model=model,
             system_prompt=learning_path_scheduler_system_prompt,
-            tools=tools,
+            tools=None,
             jsonalize_output=True,
         )
 
@@ -189,18 +175,6 @@ class LearningPathScheduler(BaseAgent):
         # Apply FSLSM overrides
         profile = _parse_profile(input_dict.get("learner_profile", {}))
         return _apply_fslsm_overrides(result, profile)
-
-
-def _dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Remove duplicate retrieved source metadata dicts."""
-    seen = set()
-    deduped = []
-    for src in sources:
-        key = json.dumps(src, sort_keys=True, default=str)
-        if key not in seen:
-            seen.add(key)
-            deduped.append(src)
-    return deduped
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +218,13 @@ def _evaluate_plan_quality(simulation_feedback: Any) -> Dict[str, Any]:
         if total > 3:
             issues.append(f"high_suggestion_count ({total})")
 
+    # Extract from nested "feedback" dict (LearnerFeedback schema)
+    feedback_detail = simulation_feedback.get("feedback", {})
+    if not isinstance(feedback_detail, dict):
+        feedback_detail = {}
     feedback_summary = {}
     for key in ("progression", "engagement", "personalization"):
-        val = simulation_feedback.get(key)
+        val = feedback_detail.get(key)
         if val is not None:
             feedback_summary[key] = val
 
@@ -265,24 +243,14 @@ def schedule_learning_path_with_llm(
     llm: Any,
     learner_profile: Mapping[str, Any],
     session_count: int = 0,
-    search_rag_manager: Optional[SearchRagManager] = None,
-) -> Tuple[JSONDict, List[Dict[str, Any]]]:
-    """Convenience helper to create a scheduler and produce a new learning path.
-
-    Returns (learning_path_dict, retrieved_sources).
-    """
-    retrieved_sources: List[Dict[str, Any]] = []
-    learning_path_scheduler = LearningPathScheduler(
-        llm,
-        search_rag_manager=search_rag_manager,
-        retrieved_docs_sink=retrieved_sources,
-    )
+) -> JSONDict:
+    """Convenience helper to create a scheduler and produce a new learning path."""
+    learning_path_scheduler = LearningPathScheduler(llm)
     payload_dict = {
         "learner_profile": learner_profile,
         "session_count": session_count,
     }
-    result = learning_path_scheduler.schedule_session(payload_dict)
-    return result, _dedupe_sources(retrieved_sources)
+    return learning_path_scheduler.schedule_session(payload_dict)
 
 
 def reschedule_learning_path_with_llm(
@@ -292,25 +260,18 @@ def reschedule_learning_path_with_llm(
     session_count: Optional[int] = None,
     other_feedback: Optional[Union[str, Mapping[str, Any]]] = None,
     *,
-    search_rag_manager: Optional[SearchRagManager] = None,
     system_prompt: str = learning_path_scheduler_system_prompt,
     task_prompt: str = learning_path_scheduler_task_prompt_reschedule,
-) -> Tuple[JSONDict, List[Dict[str, Any]]]:
+) -> JSONDict:
     """Convenience helper to reschedule an existing learning path via the scheduler."""
-    retrieved_sources: List[Dict[str, Any]] = []
-    learning_path_scheduler = LearningPathScheduler(
-        llm,
-        search_rag_manager=search_rag_manager,
-        retrieved_docs_sink=retrieved_sources,
-    )
+    learning_path_scheduler = LearningPathScheduler(llm)
     payload_dict = {
         "learner_profile": learner_profile,
         "learning_path": learning_path,
         "session_count": session_count,
         "other_feedback": other_feedback,
     }
-    result = learning_path_scheduler.reschedule(payload_dict)
-    return result, _dedupe_sources(retrieved_sources)
+    return learning_path_scheduler.reschedule(payload_dict)
 
 
 def refine_learning_path_with_llm(
@@ -339,20 +300,18 @@ def schedule_learning_path_agentic(
     llm: Any,
     learner_profile: Mapping[str, Any],
     session_count: int = 0,
-    search_rag_manager: Optional[SearchRagManager] = None,
     max_refinements: int = 2,
 ) -> Tuple[JSONDict, Dict[str, Any]]:
     """Agentic learning path generation with auto-refinement.
 
     Flow:
-    1. Generate initial plan (with retrieval if available)
+    1. Generate initial plan
     2. Evaluate plan quality via learner simulator tool (gpt-4o-mini)
     3. Run deterministic quality gate on simulation feedback
     4. If quality insufficient, feed simulation feedback into reflexion()
     5. Max ``max_refinements`` refinement iterations (latency guardrail)
     6. Return final plan + evaluation metadata
     """
-    retrieved_sources: List[Dict[str, Any]] = []
     sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
 
     plan = None
@@ -360,11 +319,7 @@ def schedule_learning_path_agentic(
     quality: Dict[str, Any] = {"pass": False, "issues": [], "feedback_summary": {}}
     attempt = 0
 
-    scheduler = LearningPathScheduler(
-        llm,
-        search_rag_manager=search_rag_manager,
-        retrieved_docs_sink=retrieved_sources,
-    )
+    scheduler = LearningPathScheduler(llm)
 
     for attempt in range(1 + max_refinements):
         if attempt == 0:
@@ -394,12 +349,10 @@ def schedule_learning_path_agentic(
         if quality["pass"]:
             break
 
-    deduped = _dedupe_sources(retrieved_sources)
     metadata = {
         "refinement_iterations": attempt + 1,
         "evaluation": quality,
         "last_simulation_feedback": simulation_feedback,
-        "retrieved_sources": deduped,
     }
 
     return plan, metadata

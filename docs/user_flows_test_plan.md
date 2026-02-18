@@ -693,16 +693,15 @@ python -m pytest backend/tests/test_quiz_scorer.py backend/tests/test_mastery_ev
 ### User Story
 
 > **As a** learner who has completed skill gap identification,
-> **I want** the system to automatically generate a high-quality learning path grounded in real course content, evaluate it, and refine it if needed — without any manual intervention,
-> **so that** I receive a well-structured, personalized learning plan that I can trust is grounded in verified materials and has been quality-checked.
+> **I want** the system to automatically generate a high-quality learning path, evaluate it, and refine it if needed — without any manual intervention,
+> **so that** I receive a well-structured, personalized learning plan that has been quality-checked.
 
 ### Backend Test Scripts
 
 | Test file | Class / Tests | What it covers |
 |---|---|---|
-| `backend/tests/test_agentic_learning_plan.py` | `TestDeduplicateSources` (2 tests) | Source deduplication: removes duplicates by page_content, preserves unique sources |
-| `backend/tests/test_agentic_learning_plan.py` | `TestLearningPathSchedulerInit` (2 tests) | Scheduler initialization: creates with RAG tools when search_rag_manager provided, creates without tools when no RAG |
-| `backend/tests/test_agentic_learning_plan.py` | `TestAgenticMetadataStructure` (1 test) | Verifies agentic orchestration returns required metadata keys (iterations, evaluation, retrieved_sources) |
+| `backend/tests/test_agentic_learning_plan.py` | `TestLearningPathSchedulerInit` (1 test) | Scheduler initialization: creates without tools (retrieval is handled by skill gap agent) |
+| `backend/tests/test_agentic_learning_plan.py` | `TestAgenticMetadata` (4 tests) | Quality gate returns expected keys, scheduler works without tools, quality gate caps at max refinements |
 | `backend/tests/test_plan_quality_gate.py` | `TestEvaluatePlanQuality` (7 tests) | Deterministic quality gate: passes positive feedback, fails on negative keywords, extracts issues list, handles non-dict input, fails on high suggestion count (list and dict variants), extracts feedback summary |
 
 **Run command:**
@@ -712,15 +711,15 @@ python -m pytest backend/tests/test_agentic_learning_plan.py backend/tests/test_
 
 ### Streamlit Frontend Test Steps
 
-#### 8.1 — Plan grounded in syllabus content (course code in goal)
+#### 8.1 — Plan generation from skill gaps
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Set a learning goal referencing a verified course (e.g., "Learn DTI5902 topics" or "Introduction to Computer Science and Programming in Python") | Goal is accepted |
-| 2 | Complete onboarding and click **"Schedule Learning Path"** | Spinner appears: "Generating your personalized learning plan..." |
+| 1 | Set a learning goal and complete skill gap identification | Skills and gaps are identified (retrieval-grounded if a course is referenced) |
+| 2 | Click **"Schedule Learning Path"** | Spinner appears: "Generating your personalized learning plan..." |
 | 3 | Wait for plan generation to complete | Learning path page loads with session cards |
-| 4 | Observe the **Retrieved Sources** banner below the learning path header | A collapsible section "Course Content Sources" lists the verified documents used to ground the plan (e.g., syllabus, specific lectures). Each source shows course code, document name, and content category |
-| 5 | Check session topics | Session topics should align with the actual course syllabus/lecture progression rather than generic LLM knowledge |
+| 4 | Check session topics | Sessions cover the skill gaps identified earlier. Topic ordering is logical and progressive |
+| 5 | No "Retrieved Sources" banner on Learning Path page | Retrieval is handled during skill gap identification (Flow 2F), not during plan generation |
 
 #### 8.2 — Auto-refinement with quality evaluation (no user intervention)
 
@@ -740,15 +739,6 @@ python -m pytest backend/tests/test_agentic_learning_plan.py backend/tests/test_
 | 3 | Check feedback summary | Three scores are displayed: Progression, Engagement, Personalization — each showing the simulation's assessment |
 | 4 | Check refinement count | Shows "Refinement iterations: N" (1 = passed first try, 2-3 = required refinement) |
 | 5 | If quality is "NEEDS REVIEW" | An issues list is displayed below the scores explaining what could be improved |
-
-#### 8.4 — Retrieved sources shown for plan sessions
-
-| Step | Action | Expected Result |
-|------|--------|-----------------|
-| 1 | Set a goal NOT matching any verified course (e.g., "Learn Kubernetes cluster management") | Goal is accepted |
-| 2 | Schedule a learning path | Plan generates using LLM knowledge (no retrieval) |
-| 3 | Check the Retrieved Sources section | Section either shows "No course content sources available" or is not displayed |
-| 4 | Plan quality section still displays | Quality evaluation runs regardless of whether retrieval was used |
 
 ---
 
@@ -837,10 +827,10 @@ python -m pytest backend/tests/test_plan_regeneration.py -v
 | `backend/tests/test_quiz_scorer.py` | 16 | Flow 7 (quiz scoring: all question types, edge cases, mastery threshold lookup by proficiency) |
 | `backend/tests/test_fslsm_overrides.py` | 12 | Flow 6 (FSLSM post-processing: checkpoint challenges, thinking time, sequencing hints, navigation mode, mastery thresholds, combined dimensions) |
 | `backend/tests/test_mastery_evaluation.py` | 7 | Flow 7 (mastery evaluation: pass/fail, boundary, proficiency-based thresholds, fallback defaults) |
-| `backend/tests/test_agentic_learning_plan.py` | 8 | Flow 8 (agentic plan generation: source dedup, scheduler init with/without RAG, metadata structure, retrieval integration) |
+| `backend/tests/test_agentic_learning_plan.py` | 5 | Flow 8 (agentic plan generation: scheduler init, quality gate structure, max refinement cap) |
 | `backend/tests/test_plan_quality_gate.py` | 7 | Flow 8 (deterministic quality gate: positive/negative feedback, issue extraction, non-dict handling, suggestion count threshold) |
 | `backend/tests/test_plan_regeneration.py` | 13 | Flow 9 (adaptive regeneration: FSLSM delta computation, mastery failure counting, keep/adjust/regenerate decisions, learned session preservation) |
-| **Total** | **241** | |
+| **Total** | **238** | |
 
 ### Running All Tests
 
