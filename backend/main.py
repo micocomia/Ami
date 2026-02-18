@@ -481,6 +481,16 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
                 s for s in plan.get("learning_path", [])
                 if not s.get("if_learned", False)
             ]
+            # Renumber new session IDs to avoid collisions with learned sessions
+            learned_ids = {s.get("id") for s in learned}
+            offset = len(learned)
+            for i, s in enumerate(new_sessions):
+                new_id = f"Session {offset + i + 1}"
+                # Avoid collisions if IDs happen to overlap
+                while new_id in learned_ids:
+                    offset += 1
+                    new_id = f"Session {offset + i + 1}"
+                s["id"] = new_id
             result_plan = {"learning_path": learned + new_sessions}
             agent_metadata.update(regen_metadata)
 
@@ -809,6 +819,7 @@ async def update_learner_profile(request: LearnerProfileUpdateRequest):
 
 @app.post("/update-cognitive-status")
 async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
+    import traceback as _tb
     llm = get_llm(request.model_provider, request.model_name)
     learner_profile = request.learner_profile
     session_information = request.session_information
@@ -823,15 +834,28 @@ async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
                 session_information = ast.literal_eval(session_information)
             except Exception:
                 pass
-        learner_profile = update_cognitive_status_with_llm(
-            llm,
-            learner_profile,
-            session_information,
-        )
+        try:
+            learner_profile = update_cognitive_status_with_llm(
+                llm,
+                learner_profile,
+                session_information,
+            )
+        except Exception as llm_err:
+            print(f"[update-cognitive-status] Scoped update failed: {llm_err}")
+            _tb.print_exc()
+            # Fallback to the general update function which is known to work
+            learner_profile = update_learner_profile_with_llm(
+                llm,
+                learner_profile,
+                "Session completed. Update cognitive status only. Do NOT change learning_preferences or behavioral_patterns.",
+                "",
+                session_information,
+            )
         if request.user_id is not None and request.goal_id is not None:
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
         return {"learner_profile": learner_profile}
     except Exception as e:
+        _tb.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

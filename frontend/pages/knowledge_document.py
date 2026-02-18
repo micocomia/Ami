@@ -84,12 +84,7 @@ def render_learning_content():
             if st.button("Complete Session",
                         key="complete-session", type="primary", icon=":material/task_alt:",
                         use_container_width=True, disabled=complete_disabled_bottom):
-                st.session_state["if_updating_learner_profile"] = True
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.rerun()
+                _handle_session_completion(goal, selected_sid, session_info_bottom)
 
             st.divider()
             render_content_feedback_form(goal)
@@ -109,6 +104,25 @@ def render_motivational_triggers():
         else:
             st.toast("🚀 Keep up the good work!")
         session_learning_times["trigger_time_list"].append(curr_time)
+
+def _handle_session_completion(goal, selected_sid, session_info):
+    """Handle session completion: update profile, mark learned, navigate away."""
+    session_uid = get_current_session_uid()
+    with st.spinner("Updating learner profile..."):
+        result = update_learner_profile_with_feedback(goal, "", session_information=session_info)
+    if not result:
+        st.session_state["if_updating_learner_profile"] = False
+        return
+    session_info["if_learned"] = True
+    if session_uid in st.session_state.get("session_learning_times", {}):
+        st.session_state["session_learning_times"][session_uid]["end_time"] = time.time()
+    st.session_state["if_updating_learner_profile"] = False
+    try:
+        save_persistent_state()
+    except Exception:
+        pass
+    st.switch_page("pages/learning_path.py")
+
 
 def render_session_details(goal):
     selected_sid = st.session_state["selected_session_id"]
@@ -160,37 +174,7 @@ def render_session_details(goal):
         if st.button("Complete Session",
                      key="complete-session-bottom", type="primary", icon=":material/task_alt:",
                      use_container_width=True, disabled=complete_disabled):
-            st.session_state["if_updating_learner_profile"] = True
-            st.session_state["current_page"][session_uid] = 0
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            st.rerun()
-
-        if st.session_state.get("if_updating_learner_profile"):
-            with st.spinner("Updating your learner profile..."):
-                update_result = update_learner_profile_with_feedback(goal, "", session_info)
-            st.session_state["if_updating_learner_profile"] = False
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            if not update_result:
-                st.toast("Failed to update learner profile. Please try again.")
-                st.rerun()
-            else:
-                st.toast("🎉 Session completed successfully!")
-                goal["learning_path"][selected_sid]["if_learned"] = True
-                st.session_state["selected_page"] = "Learning Path"
-                if get_current_session_uid() in st.session_state["session_learning_times"]:
-                    curr_time = time.time()
-                    st.session_state["session_learning_times"][get_current_session_uid()]["end_time"] = curr_time
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.switch_page("pages/learning_path.py")
+            _handle_session_completion(goal, selected_sid, session_info)
 
     st.write(f"# {session_info['id']}")
     st.write(f"# {session_info['title']}")
@@ -559,6 +543,14 @@ def render_questions(quiz_data):
                     "is_mastered": result["is_mastered"],
                     "threshold": result["threshold"],
                 }
+                # Mirror mastery data onto the learning path session so it
+                # survives save_persistent_state() and is available for the
+                # adapt-learning-path endpoint.
+                current_goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+                session_obj = current_goal["learning_path"][st.session_state["selected_session_id"]]
+                session_obj["mastery_score"] = result["score_percentage"]
+                session_obj["is_mastered"] = result["is_mastered"]
+                session_obj["mastery_threshold"] = result["threshold"]
                 # Flag adaptation suggestion if backend suggests it
                 if result.get("plan_adaptation_suggested"):
                     goal_id = st.session_state.get("selected_goal_id")
@@ -630,7 +622,6 @@ def render_content_feedback_form(goal):
             st.success("Thank you for your feedback!")
 
 def update_learner_profile_with_feedback(goal, feedback_data, session_information=""):
-    st.toast("Updating your profile...")
     user_id = st.session_state.get("userId")
     goal_id = st.session_state.get("selected_goal_id")
     if session_information != "":

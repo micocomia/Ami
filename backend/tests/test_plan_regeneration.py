@@ -130,7 +130,7 @@ class TestDecideRegeneration:
         new = _make_fslsm(0.3, 0.0, 0.0, 0.0)
         decision = decide_regeneration(plan, old, new)
         assert decision.action == "regenerate"
-        assert "1.10" in decision.reason
+        assert "processing" in decision.reason.lower()
 
     def test_adjust_future_on_single_mastery_failure(self):
         """One session below threshold = adjust_future."""

@@ -270,7 +270,7 @@ def render_module_map(goal):
                 st.markdown(
                     f"<div style='text-align:center; padding:8px; border:2px solid {color}; "
                     f"border-radius:8px; margin:4px;'>"
-                    f"<b>S{i+1}</b><br><small>{session['title'][:30]}</small></div>",
+                    f"<b>S{i+1}</b><br><small>{session['title']}</small></div>",
                     unsafe_allow_html=True
                 )
 
@@ -291,8 +291,7 @@ def render_narrative_overview(goal):
                 prefix = "You've completed"
             else:
                 prefix = "Next, you'll explore"
-            abstract_preview = session["abstract"][:120]
-            st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {abstract_preview}...")
+            st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {session['abstract']}")
 
 
 def render_plan_quality_section(goal):
@@ -322,10 +321,7 @@ def render_plan_quality_section(goal):
             for i, (key, val) in enumerate(feedback_summary.items()):
                 with fb_cols[i]:
                     st.write(f"**{key.title()}**")
-                    if isinstance(val, str):
-                        display = val[:120] + "..." if len(val) > 120 else val
-                    else:
-                        display = str(val)
+                    display = val if isinstance(val, str) else str(val)
                     st.caption(display)
 
         st.caption(f"Refinement iterations: {iterations}")
@@ -338,6 +334,18 @@ def render_adaptation_section(goal):
 
     # Check for pending adaptation suggestion (set by mastery evaluation or preference change)
     adaptation_key = f"adaptation_suggested_{goal_id}"
+    # Display adaptation result from a previous run (persists across rerun)
+    adapt_result_key = f"adaptation_result_{goal_id}"
+    if st.session_state.get(adapt_result_key):
+        result_info = st.session_state[adapt_result_key]
+        if result_info["level"] == "info":
+            st.info(result_info["message"])
+        else:
+            st.success(result_info["message"])
+        if st.button("OK", key=f"ack_adapt_{goal_id}"):
+            st.session_state[adapt_result_key] = None
+            st.rerun()
+
     if st.session_state.get(adaptation_key):
         st.warning("Your learning preferences or quiz results suggest your learning path may need adjustment.")
         col_adapt, col_dismiss = st.columns([1, 1])
@@ -362,15 +370,24 @@ def render_adaptation_section(goal):
                     reason = decision.get("reason", "")
 
                     if action == "keep":
-                        st.info("Your current plan is still on track.")
+                        st.session_state[adapt_result_key] = {
+                            "level": "info",
+                            "message": f"Your current plan is still on track. {reason}",
+                        }
                     elif action == "adjust_future":
                         goal["learning_path"] = result["learning_path"]
                         goal["plan_agent_metadata"] = agent_meta
-                        st.success(f"Future sessions have been adjusted. {reason}")
+                        st.session_state[adapt_result_key] = {
+                            "level": "success",
+                            "message": f"Future sessions have been adjusted. {reason}",
+                        }
                     elif action == "regenerate":
                         goal["learning_path"] = result["learning_path"]
                         goal["plan_agent_metadata"] = agent_meta
-                        st.success(f"Your learning path has been regenerated. {reason}")
+                        st.session_state[adapt_result_key] = {
+                            "level": "success",
+                            "message": f"Your learning path has been regenerated. {reason}",
+                        }
 
                     # Now persist the updated profile to the store (deferred from
                     # the preferences update so the adapt endpoint could compare

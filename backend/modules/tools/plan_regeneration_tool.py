@@ -39,6 +39,13 @@ _KEEP_THRESHOLD = 0.3       # abs delta < 0.3 on ALL dims → keep
 _ADJUST_THRESHOLD = 0.5     # abs delta in [0.3, 0.5) → adjust future
 # abs delta >= 0.5 on any dim → regenerate
 
+_DIM_LABELS = {
+    "fslsm_processing": "processing (active vs. reflective)",
+    "fslsm_perception": "perception (sensing vs. intuitive)",
+    "fslsm_input": "input (visual vs. verbal)",
+    "fslsm_understanding": "understanding (sequential vs. global)",
+}
+
 
 # ---------------------------------------------------------------------------
 # Core deterministic logic
@@ -116,15 +123,13 @@ def decide_regeneration(
         if not s.get("if_learned", False)
     ]
 
+    dim_label = _DIM_LABELS.get(max_delta_dim, max_delta_dim)
+
     # REGENERATE conditions
     if max_delta >= _ADJUST_THRESHOLD:
         return RegenerationDecision(
             action="regenerate",
-            reason=(
-                f"Major preference shift detected: {max_delta_dim} "
-                f"changed by {max_delta:.2f} (threshold: {_ADJUST_THRESHOLD}). "
-                f"Regenerating future sessions from scratch."
-            ),
+            reason=f"Major shift in {dim_label} preference detected. Regenerating future sessions.",
             affected_sessions=future_indices,
         )
 
@@ -135,10 +140,7 @@ def decide_regeneration(
         ]
         return RegenerationDecision(
             action="regenerate",
-            reason=(
-                f"Multiple mastery failures detected ({failures} sessions). "
-                f"Regenerating future sessions with reinforcement."
-            ),
+            reason=f"Mastery not achieved in {failures} sessions. Regenerating future sessions with reinforcement.",
             affected_sessions=failed_indices + future_indices,
         )
 
@@ -146,10 +148,7 @@ def decide_regeneration(
     if max_delta >= _KEEP_THRESHOLD:
         return RegenerationDecision(
             action="adjust_future",
-            reason=(
-                f"Moderate preference change detected: {max_delta_dim} "
-                f"changed by {max_delta:.2f}. Adjusting future sessions."
-            ),
+            reason=f"Shift in {dim_label} preference detected. Adjusting future sessions.",
             affected_sessions=future_indices,
         )
 
@@ -161,10 +160,7 @@ def decide_regeneration(
         affected = [failed_idx] + future_indices if failed_idx is not None else future_indices
         return RegenerationDecision(
             action="adjust_future",
-            reason=(
-                f"Single mastery failure detected at session {failed_idx}. "
-                f"Adjusting future sessions with reinforcement."
-            ),
+            reason="Mastery not achieved in a session. Adjusting future sessions with reinforcement.",
             affected_sessions=affected,
         )
 

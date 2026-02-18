@@ -37,6 +37,13 @@ class CognitiveStatus(BaseModel):
     mastered_skills: List[MasteredSkill] = Field(default_factory=list)
     in_progress_skills: List[InProgressSkill] = Field(default_factory=list)
 
+    @field_validator("overall_progress", mode="before")
+    @classmethod
+    def coerce_progress_to_int(cls, v):
+        if isinstance(v, float):
+            return int(round(v))
+        return v
+
 
 class FSLSMDimensions(BaseModel):
     fslsm_processing: float = Field(0.0, ge=-1, le=1)     # -1 active ↔ 1 reflective
