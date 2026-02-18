@@ -622,9 +622,11 @@ def render_content_feedback_form(goal):
             st.success("Thank you for your feedback!")
 
 def update_learner_profile_with_feedback(goal, feedback_data, session_information=""):
+    from utils.state import propagate_profile_fields_to_other_goals
     user_id = st.session_state.get("userId")
     goal_id = st.session_state.get("selected_goal_id")
-    if session_information != "":
+    is_cognitive_update = session_information != ""
+    if is_cognitive_update:
         # Session completion → update only cognitive status
         session_information = copy.deepcopy(session_information)
         session_information["if_learned"] = True
@@ -643,6 +645,11 @@ def update_learner_profile_with_feedback(goal, feedback_data, session_informatio
         return False
     else:
         goal["learner_profile"] = new_learner_profile
+        # Push changes to all other goals immediately
+        if is_cognitive_update:
+            propagate_profile_fields_to_other_goals(goal_id, sync_mastered_skills=True)
+        else:
+            propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
         st.toast("🎉 Your profile has been updated!")
         return True
 

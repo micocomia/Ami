@@ -642,6 +642,18 @@ def auth_delete_user(token):
         return None, {"detail": str(e)}
 
 
+def sync_profile(user_id, goal_id):
+    """Sync a goal's profile with shared fields from all other goals."""
+    backend_url = f"{backend_endpoint}sync-profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.post(backend_url, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("learner_profile")
+    except Exception:
+        pass
+    return None
+
+
 def save_learner_profile(user_id, goal_id, learner_profile):
     """Persist a learner profile to the backend store without triggering an LLM call."""
     backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"

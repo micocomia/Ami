@@ -177,6 +177,16 @@ async def auto_update_profile(request: AutoProfileUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/sync-profile/{user_id}/{goal_id}")
+async def sync_profile(user_id: str, goal_id: int):
+    """Merge shared profile fields (mastered skills, preferences, behavioral patterns)
+    from all of a user's goals into the target goal's profile."""
+    result = store.merge_shared_profile_fields(user_id, goal_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No profile found for this goal")
+    return {"learner_profile": result}
+
+
 @app.put("/profile/{user_id}/{goal_id}")
 async def put_profile(user_id: str, goal_id: int, body: dict):
     """Persist a learner profile to the store without an LLM call."""

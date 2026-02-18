@@ -84,6 +84,15 @@ def render_skill_gap():
                             goal["learner_profile"] = learner_profile
                             st.toast("Your profile has been created!")
 
+                            # Sync the newly created profile with shared fields from existing goals
+                            from utils.request_api import sync_profile
+                            user_id = st.session_state.get("userId")
+                            new_gid = get_new_goal_uid()
+                            if user_id and learner_profile:
+                                merged = sync_profile(user_id, new_gid)
+                                if merged:
+                                    goal["learner_profile"] = merged
+
                     new_goal_id = add_new_goal(**goal)
                     st.session_state["selected_goal_id"] = new_goal_id
                     st.session_state["if_complete_onboarding"] = True

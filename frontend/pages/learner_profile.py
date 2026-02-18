@@ -5,7 +5,7 @@ from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
 from streamlit_extras.tags import tagger_component 
-from utils.state import save_persistent_state, delete_persistent_state
+from utils.state import save_persistent_state, delete_persistent_state, propagate_profile_fields_to_other_goals
 
 
 def render_learner_profile():
@@ -295,6 +295,8 @@ def update_learner_profile_with_additional_info(goal):
             save_learner_profile(user_id, goal_id, new_learner_profile)
 
         goal["learner_profile"] = new_learner_profile
+        # Push updated learning_preferences to all other goals immediately
+        propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
         try:
             save_persistent_state()
         except Exception:

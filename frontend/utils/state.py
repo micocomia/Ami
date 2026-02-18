@@ -232,6 +232,14 @@ def change_selected_goal_id(new_goal_id):
     st.session_state["is_learner_profile_ready"] = True if st.session_state["learner_profile"] else False
     st.session_state["is_learning_path_ready"] = True if st.session_state["learning_path"] else False
     st.session_state["is_skill_gap_ready"] = True if st.session_state["skill_gaps"] else False
+    # Sync profile with shared fields from other goals
+    from utils.request_api import sync_profile
+    user_id = st.session_state.get("userId")
+    if user_id and goals[goal_id_idx].get("learner_profile"):
+        merged = sync_profile(user_id, new_goal_id)
+        if merged:
+            goals[goal_id_idx]["learner_profile"] = merged
+            st.session_state["learner_profile"] = merged
     # persist change
     try:
         save_persistent_state()
@@ -262,6 +270,81 @@ def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_
     except Exception:
         pass
     return goal_idx
+
+_PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
+
+
+def _proficiency_idx(level: str) -> int:
+    try:
+        return _PROFICIENCY_ORDER.index(level)
+    except ValueError:
+        return 0
+
+
+def propagate_profile_fields_to_other_goals(
+    source_goal_id: int,
+    sync_preferences: bool = False,
+    sync_mastered_skills: bool = False,
+):
+    """Push learning_preferences and/or mastered_skills from one goal's profile to all others.
+
+    Call this after updating a goal's profile so that changes are immediately reflected
+    in all other goals without waiting for the next goal-switch sync.
+    """
+    from utils.request_api import save_learner_profile
+
+    goals = st.session_state.get("goals", [])
+    source_idx = index_goal_by_id(source_goal_id)
+    if source_idx is None:
+        return
+
+    source_profile = goals[source_idx].get("learner_profile") or {}
+    user_id = st.session_state.get("userId")
+
+    for goal in goals:
+        if goal["id"] == source_goal_id:
+            continue
+        target_profile = goal.get("learner_profile")
+        if not target_profile:
+            continue
+
+        changed = False
+
+        if sync_preferences:
+            new_prefs = source_profile.get("learning_preferences")
+            if new_prefs:
+                target_profile["learning_preferences"] = new_prefs
+                changed = True
+
+        if sync_mastered_skills:
+            source_mastered = source_profile.get("cognitive_status", {}).get("mastered_skills", [])
+            if source_mastered:
+                target_cs = target_profile.setdefault("cognitive_status", {})
+                target_mastered = target_cs.get("mastered_skills", [])
+                merged = {s["name"]: s for s in target_mastered if s.get("name")}
+                for skill in source_mastered:
+                    name = skill.get("name")
+                    if not name:
+                        continue
+                    existing = merged.get(name)
+                    if existing is None:
+                        merged[name] = skill
+                    else:
+                        existing_idx = _proficiency_idx(existing.get("proficiency_level", "unlearned"))
+                        new_idx = _proficiency_idx(skill.get("proficiency_level", "unlearned"))
+                        if new_idx > existing_idx:
+                            merged[name] = skill
+                target_cs["mastered_skills"] = list(merged.values())
+                changed = True
+
+        if changed:
+            goal["learner_profile"] = target_profile
+            if user_id:
+                try:
+                    save_learner_profile(user_id, goal["id"], target_profile)
+                except Exception:
+                    pass
+
 
 def get_current_knowledge_point_uid():
     selected_gid = st.session_state["selected_goal_id"]
