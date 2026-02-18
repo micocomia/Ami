@@ -10,7 +10,14 @@ learning_path_output_format = """
             "desired_outcome_when_completed": [
                 {"name": "Skill 1", "level": "intermediate"},
                 {"name": "Skill 2", "level": "expert"}
-            ]
+            ],
+            "mastery_score": null,
+            "is_mastered": false,
+            "mastery_threshold": 70.0,
+            "has_checkpoint_challenges": false,
+            "thinking_time_buffer_minutes": 0,
+            "session_sequence_hint": null,
+            "navigation_mode": "linear"
         }
     ]
 }
@@ -23,6 +30,20 @@ Your role is to create, refine, or re-schedule a personalized, goal-oriented lea
 **Universal Core Directives (Apply to all tasks)**:
 1.  **Goal-Oriented**: The final path must be the most efficient route to close the learner's skill gap and achieve their `learning_goal`.
 2.  **Personalized**: You MUST adapt the path based on the `learner_profile`, especially `learning_preferences` (e.g., "concise" vs. "detailed") and `behavioral_patterns` (e.g., session length).
+2b. **FSLSM-Driven Structure**: You MUST read `fslsm_dimensions` from the learner profile's `learning_preferences` and apply these rules:
+   - **Processing** (`fslsm_processing`):
+     - If <= -0.7 (Active): Set `has_checkpoint_challenges: true`. Include "Checkpoint Challenge" activities in session abstracts to break up information blocks.
+     - If >= 0.7 (Reflective): Set `thinking_time_buffer_minutes` to 10-15. Note "Reflection Period" in session abstracts. Avoid scheduling back-to-back high-intensity sessions.
+   - **Perception** (`fslsm_perception`):
+     - If <= -0.7 (Sensing): Set `session_sequence_hint: "application-first"`. Order content: Application -> Example -> Theory in session abstracts.
+     - If >= 0.7 (Intuitive): Set `session_sequence_hint: "theory-first"`. Allow conceptual leaps across related theories.
+   - **Input** (`fslsm_input`):
+     - If <= -0.7 (Visual): Reference "Module Map" in session abstracts. Emphasize diagrams and visual overviews.
+     - If >= 0.7 (Verbal): Frame sessions as narrative chapters with written discussions.
+   - **Understanding** (`fslsm_understanding`):
+     - If <= -0.7 (Sequential): Set `navigation_mode: "linear"` for ALL sessions. Each session builds strictly on the previous.
+     - If >= 0.7 (Global): Set `navigation_mode: "free"` for ALL sessions. Sessions can be explored in any order.
+     - Otherwise: default to `navigation_mode: "linear"`.
 3.  **Progressive**: Sessions must be sequenced logically, building from foundational to advanced skills. Valid proficiency levels are "beginner", "intermediate", "advanced", "expert" (SOLO taxonomy).
 4.  **Quality over Quantity**: A short, high-quality path is better than a long one. The total number of sessions should generally be between 1 and 10, depending on the goal's complexity.
 5.  **Strict JSON Output**: Your *entire* output MUST be *only* the valid JSON specified in the `FINAL OUTPUT FORMAT` section. Do not include any other text, markdown tags, or explanations.

@@ -112,6 +112,119 @@ def delete_user_state(user_id: str):
         _flush_user_states()
 
 
+_PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
+
+
+def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[Dict[str, Any]]:
+    """Merge mastered_skills, learning_preferences, and behavioral_patterns
+    from all of a user's goal profiles into the target goal's profile.
+
+    - mastered_skills: union across all goals (highest proficiency per skill name)
+    - learning_preferences: overwrite with values from another goal if target has none
+    - behavioral_patterns: same as preferences
+    - in_progress_skills: remove any skill now in mastered_skills
+    - overall_progress: recalculate as mastered / (mastered + in_progress) * 100
+
+    Persists the merged profile and returns it.
+    Returns None if no profile exists for the target goal.
+    """
+    all_profiles = get_all_profiles_for_user(user_id)
+    target_profile = all_profiles.get(target_goal_id)
+    if target_profile is None:
+        return None
+
+    # Build union of mastered_skills across all goals (highest proficiency wins)
+    merged_mastered: Dict[str, Dict[str, Any]] = {}
+    for skill in target_profile.get("cognitive_status", {}).get("mastered_skills", []):
+        name = skill.get("name")
+        if name:
+            merged_mastered[name] = dict(skill)
+
+    for gid, profile in all_profiles.items():
+        if gid == target_goal_id:
+            continue
+        for skill in profile.get("cognitive_status", {}).get("mastered_skills", []):
+            name = skill.get("name")
+            if not name:
+                continue
+            existing = merged_mastered.get(name)
+            if existing is None:
+                merged_mastered[name] = dict(skill)
+            else:
+                # Keep the higher proficiency
+                existing_level = existing.get("proficiency_level", "unlearned")
+                new_level = skill.get("proficiency_level", "unlearned")
+                try:
+                    existing_idx = _PROFICIENCY_ORDER.index(existing_level)
+                except ValueError:
+                    existing_idx = 0
+                try:
+                    new_idx = _PROFICIENCY_ORDER.index(new_level)
+                except ValueError:
+                    new_idx = 0
+                if new_idx > existing_idx:
+                    merged_mastered[name] = dict(skill)
+
+    # Propagate learning_preferences and behavioral_patterns from other goals
+    target_prefs = target_profile.get("learning_preferences")
+    target_behavioral = target_profile.get("behavioral_patterns")
+    for gid, profile in all_profiles.items():
+        if gid == target_goal_id:
+            continue
+        other_prefs = profile.get("learning_preferences")
+        if other_prefs and not target_prefs:
+            target_prefs = other_prefs
+        elif other_prefs and target_prefs:
+            # Merge: take values from other goal for any missing keys
+            for key, value in other_prefs.items():
+                if key not in target_prefs or not target_prefs[key]:
+                    target_prefs[key] = value
+                elif isinstance(value, dict) and isinstance(target_prefs.get(key), dict):
+                    for sub_key, sub_value in value.items():
+                        if sub_key not in target_prefs[key]:
+                            target_prefs[key][sub_key] = sub_value
+
+        other_behavioral = profile.get("behavioral_patterns")
+        if other_behavioral and not target_behavioral:
+            target_behavioral = other_behavioral
+        elif other_behavioral and target_behavioral:
+            for key, value in other_behavioral.items():
+                if key not in target_behavioral or not target_behavioral[key]:
+                    target_behavioral[key] = value
+
+    # Apply merged mastered_skills
+    if "cognitive_status" not in target_profile:
+        target_profile["cognitive_status"] = {}
+    target_profile["cognitive_status"]["mastered_skills"] = list(merged_mastered.values())
+
+    # Apply preferences and behavioral patterns
+    if target_prefs is not None:
+        target_profile["learning_preferences"] = target_prefs
+    if target_behavioral is not None:
+        target_profile["behavioral_patterns"] = target_behavioral
+
+    # Remove mastered skills from in_progress_skills
+    mastered_names = set(merged_mastered.keys())
+    in_progress = target_profile.get("cognitive_status", {}).get("in_progress_skills", [])
+    in_progress = [s for s in in_progress if s.get("name") not in mastered_names]
+    target_profile["cognitive_status"]["in_progress_skills"] = in_progress
+
+    # Recalculate overall_progress
+    num_mastered = len(merged_mastered)
+    num_in_progress = len(in_progress)
+    total = num_mastered + num_in_progress
+    if total > 0:
+        target_profile["cognitive_status"]["overall_progress"] = round(
+            num_mastered / total * 100, 1
+        )
+    else:
+        target_profile["cognitive_status"]["overall_progress"] = 0.0
+
+    # Persist
+    upsert_profile(user_id, target_goal_id, target_profile)
+    return target_profile
+
+
 def delete_all_user_data(user_id: str):
     with _lock:
         # Remove profiles (keyed as "user_id:goal_id")

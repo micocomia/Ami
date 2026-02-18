@@ -114,8 +114,12 @@ API_NAMES = {
     "identify_skill_gap": "identify-skill-gap-with-info",
     "create_profile": "create-learner-profile-with-info",
     "update_profile": "update-learner-profile",
+    "update_cognitive_status": "update-cognitive-status",
+    "update_learning_preferences": "update-learning-preferences",
     "schedule_path": "schedule-learning-path",
+    "schedule_path_agentic": "schedule-learning-path-agentic",
     "reschedule_path": "reschedule-learning-path",
+    "adapt_path": "adapt-learning-path",
     "explore_knowledge_perspectives": "explore-knowledge-perspectives",
     "draft_knowledge_perspective": "draft-knowledge-perspective",
     "draft_point_perspectives": "draft-point-perspectives",
@@ -126,9 +130,6 @@ API_NAMES = {
     "draft_knowledge_points": "draft-knowledge-points",
     "integrate_learning_document": "integrate-learning-document",
     "generate_document_quizzes": "generate-document-quizzes",
-    "simulate_path_feedback": "simulate-path-feedback",
-    "refine_path": "refine-learning-path",
-    "iterative_refine_path": "iterative-refine-path",
 }
 
 
@@ -316,6 +317,44 @@ def update_learner_profile(learner_profile, learner_interactions, learner_inform
     response = make_post_request(API_NAMES["update_profile"], data, "./assets/data_example/learner_profile.json")
     return response.get("learner_profile") if response else None
 
+
+def update_cognitive_status(learner_profile, session_information, llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_information": str(session_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_cognitive_status"], data)
+    return response.get("learner_profile") if response else None
+
+
+def update_learning_preferences(learner_profile, learner_interactions, learner_information="", llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "learner_interactions": str(learner_interactions),
+        "learner_information": str(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_learning_preferences"], data)
+    return response.get("learner_profile") if response else None
+
+
 # @st.cache_resource
 def schedule_learning_path(learner_profile, session_count=None, llm_type=None, method_name=None):
     cfg = get_app_config()
@@ -334,7 +373,56 @@ def schedule_learning_path(learner_profile, session_count=None, llm_type=None, m
     }
 
     response = make_post_request(API_NAMES["schedule_path"], data)
-    return response.get("learning_path") if response else None
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "retrieved_sources": response.get("retrieved_sources", []),
+        }
+    return None
+
+
+def schedule_learning_path_agentic(learner_profile, session_count=None, llm_type=None, method_name=None):
+    """Call the agentic learning path endpoint with auto-refinement."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    try:
+        session_count_int = int(session_count) if session_count is not None else cfg["default_session_count"]
+    except Exception:
+        session_count_int = cfg["default_session_count"]
+
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_count": session_count_int,
+    }
+
+    response = make_post_request(API_NAMES["schedule_path_agentic"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
+
+def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, method_name=None):
+    """Call the adaptive plan regeneration endpoint."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "new_learner_profile": str(new_learner_profile),
+    }
+    response = make_post_request(API_NAMES["adapt_path"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
 
 def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type=None, method_name=None):
     cfg = get_app_config()
@@ -441,51 +529,27 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
     else:
         return response.get("learning_document") if response else None
 
-def simulate_path_feedback(learner_profile, learning_path, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
+def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
+    """Submit quiz answers for mastery evaluation."""
     data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "quiz_answers": quiz_answers,
     }
-    response = make_post_request(API_NAMES["simulate_path_feedback"], data)
-    return response.get("feedback") if response else None
+    response = make_post_request("evaluate-mastery", data)
+    return response if response else None
 
-def refine_learning_path_with_feedback(learning_path, feedback, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learning_path": str(learning_path),
-        "feedback": str(feedback),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["refine_path"], data)
-    return response.get("refined_learning_path") if response else None
 
-def iterative_refine_learning_path(learner_profile, learning_path, max_iterations=None, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    if max_iterations is None:
-        max_iterations = cfg["max_refinement_iterations"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "max_iterations": max_iterations,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["iterative_refine_path"], data)
-    if response:
-        return {
-            "final_learning_path": response.get("final_learning_path"),
-            "iterations": response.get("iterations", [])
-        }
+def get_session_mastery_status(user_id, goal_id):
+    """Get mastery status for all sessions in a goal."""
+    url = f"{backend_endpoint}session-mastery-status/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
     return None
 
 
@@ -576,6 +640,28 @@ def auth_delete_user(token):
         return resp.status_code, resp.json()
     except Exception as e:
         return None, {"detail": str(e)}
+
+
+def sync_profile(user_id, goal_id):
+    """Sync a goal's profile with shared fields from all other goals."""
+    backend_url = f"{backend_endpoint}sync-profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.post(backend_url, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("learner_profile")
+    except Exception:
+        pass
+    return None
+
+
+def save_learner_profile(user_id, goal_id, learner_profile):
+    """Persist a learner profile to the backend store without triggering an LLM call."""
+    backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.put(backend_url, json={"learner_profile": learner_profile}, timeout=30)
+        return response.status_code == 200
+    except Exception:
+        return False
 
 
 def get_personas():

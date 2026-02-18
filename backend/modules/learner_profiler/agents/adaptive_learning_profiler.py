@@ -12,6 +12,8 @@ from ..prompts import (
     adaptive_learner_profiler_system_prompt,
     adaptive_learner_profiler_task_prompt_initialization,
     adaptive_learner_profiler_task_prompt_update,
+    adaptive_learner_profiler_task_prompt_update_cognitive,
+    adaptive_learner_profiler_task_prompt_update_preferences,
 )
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -33,6 +35,21 @@ class LearnerProfileUpdatePayload(BaseModel):
     learner_interactions: Union[str, Dict[str, Any], Mapping[str, Any]]
     learner_information: Union[str, Dict[str, Any], Mapping[str, Any]]
     session_information: Optional[Union[str, Dict[str, Any], Mapping[str, Any]]] = None
+
+
+class CognitiveUpdatePayload(BaseModel):
+    """Payload for updating only cognitive_status based on session/quiz results."""
+
+    learner_profile: Union[str, Dict[str, Any], Mapping[str, Any]]
+    session_information: Union[str, Dict[str, Any], Mapping[str, Any]]
+
+
+class PreferencesUpdatePayload(BaseModel):
+    """Payload for updating only learning_preferences based on feedback."""
+
+    learner_profile: Union[str, Dict[str, Any], Mapping[str, Any]]
+    learner_interactions: Union[str, Dict[str, Any], Mapping[str, Any]]
+    learner_information: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
 
 
 class AdaptiveLearnerProfiler(BaseAgent):
@@ -59,6 +76,22 @@ class AdaptiveLearnerProfiler(BaseAgent):
         """Update an existing learner profile with fresh interaction data."""
         task_prompt = adaptive_learner_profiler_task_prompt_update
         payload_dict = LearnerProfileUpdatePayload(**input_dict).model_dump()
+        raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
+        validated_output = LearnerProfile.model_validate(raw_output)
+        return validated_output.model_dump()
+
+    def update_cognitive_status(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Update only cognitive_status based on session/quiz results."""
+        task_prompt = adaptive_learner_profiler_task_prompt_update_cognitive
+        payload_dict = CognitiveUpdatePayload(**input_dict).model_dump()
+        raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
+        validated_output = LearnerProfile.model_validate(raw_output)
+        return validated_output.model_dump()
+
+    def update_learning_preferences(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Update only learning_preferences (and optionally behavioral_patterns)."""
+        task_prompt = adaptive_learner_profiler_task_prompt_update_preferences
+        payload_dict = PreferencesUpdatePayload(**input_dict).model_dump()
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated_output = LearnerProfile.model_validate(raw_output)
         return validated_output.model_dump()
@@ -98,3 +131,31 @@ def update_learner_profile_with_llm(
         "session_information": session_information,
     }
     return learner_profiler.update_profile(payload_dict)
+
+
+def update_cognitive_status_with_llm(
+    llm: Any,
+    learner_profile: Union[str, Mapping[str, Any]],
+    session_information: Union[str, Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Public helper for updating only cognitive_status via the LLM backend."""
+    profiler = AdaptiveLearnerProfiler(llm)
+    return profiler.update_cognitive_status({
+        "learner_profile": learner_profile,
+        "session_information": session_information,
+    })
+
+
+def update_learning_preferences_with_llm(
+    llm: Any,
+    learner_profile: Union[str, Mapping[str, Any]],
+    learner_interactions: Union[str, Mapping[str, Any]],
+    learner_information: Union[str, Mapping[str, Any]] = "",
+) -> Dict[str, Any]:
+    """Public helper for updating only learning_preferences via the LLM backend."""
+    profiler = AdaptiveLearnerProfiler(llm)
+    return profiler.update_learning_preferences({
+        "learner_profile": learner_profile,
+        "learner_interactions": learner_interactions,
+        "learner_information": learner_information,
+    })

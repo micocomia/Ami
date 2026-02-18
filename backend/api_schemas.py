@@ -47,6 +47,23 @@ class LearnerProfileUpdateRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class CognitiveStatusUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    session_information: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
+class LearningPreferencesUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    learner_interactions: str
+    learner_information: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class LearningPathSchedulingRequest(BaseRequest):
 
     learner_profile: str
@@ -161,29 +178,10 @@ class LearningDocumentIntegrationRequest(BaseModel):
     output_markdown: bool = False
 
 
-class LearningPathFeedbackRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-
-
 class LearningContentFeedbackRequest(BaseRequest):
 
     learner_profile: str
     learning_content: str
-
-
-class LearningPathRefinementRequest(BaseRequest):
-    """Request for refining a learning path based on feedback."""
-    learning_path: str
-    feedback: str
-
-
-class IterativeRefinementRequest(BaseRequest):
-    """Request for iterative refinement with feedback simulation."""
-    learner_profile: str
-    learning_path: str
-    max_iterations: int = 2
 
 
 class AuthRegisterRequest(BaseModel):
@@ -198,6 +196,13 @@ class AuthLoginRequest(BaseModel):
 
 class UserStateRequest(BaseModel):
     state: Dict[str, Any]
+
+
+class MasteryEvaluationRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+    quiz_answers: Dict[str, Any]
 
 
 class BehavioralMetricsResponse(BaseModel):

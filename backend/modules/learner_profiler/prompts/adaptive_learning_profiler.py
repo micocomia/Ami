@@ -139,3 +139,40 @@ Session Information: {{'id': 'Session 2', 'title': 'Intermediate Data Analysis T
 	- If `if_learned` is True and the outcome level is equal or higher than the required level, Must move the skill to the mastered list!!!!!!
 """
 adaptive_learner_profiler_task_prompt_update = adaptive_learner_profiler_task_prompt_update.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)
+
+adaptive_learner_profiler_task_prompt_update_cognitive = """
+Task B-Cognitive: Cognitive Status Update
+
+Update ONLY the cognitive_status section of the learner's profile based on session completion and quiz results.
+
+- Learner's Previous Profile: {learner_profile}
+- Have Learned Session Information: {session_information}
+
+RULES:
+- You MUST preserve learning_preferences and behavioral_patterns EXACTLY as they are in the previous profile. Copy them verbatim.
+- Only update cognitive_status (overall_progress, mastered_skills, in_progress_skills).
+- If if_learned is True and the desired_outcome level meets or exceeds the required level, move the skill to mastered_skills.
+- Recalculate overall_progress based on the updated skill statuses.
+
+LEARNER_PROFILE_OUTPUT_FORMAT
+"""
+adaptive_learner_profiler_task_prompt_update_cognitive = adaptive_learner_profiler_task_prompt_update_cognitive.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)
+
+adaptive_learner_profiler_task_prompt_update_preferences = """
+Task B-Preferences: Learning Preferences Update
+
+Update ONLY the learning_preferences section of the learner's profile based on the learner's feedback and interactions.
+
+- Learner's Previous Profile: {learner_profile}
+- Learner Feedback / Interactions: {learner_interactions}
+- Additional Learner Information: {learner_information}
+
+RULES:
+- You MUST preserve cognitive_status EXACTLY as it is in the previous profile. Copy it verbatim. Do NOT change mastered_skills, in_progress_skills, or overall_progress.
+- Only update learning_preferences (fslsm_dimensions, additional_notes).
+- Adjust FSLSM dimension values based on the learner's stated preferences and feedback.
+- You may also update behavioral_patterns if the feedback includes relevant behavioral information.
+
+LEARNER_PROFILE_OUTPUT_FORMAT
+"""
+adaptive_learner_profiler_task_prompt_update_preferences = adaptive_learner_profiler_task_prompt_update_preferences.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)

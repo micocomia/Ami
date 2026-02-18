@@ -1,16 +1,6 @@
 <div align="center">
-  <p align="center">
-    <img src="resources/logo.png" alt="GenMentor Logo" width="300"/>
-  </p>
   <p><b>Cognitive-Style Adaptive AI Tutor</b></p>
   <p>An enhanced fork of GenMentor — LLM-powered & Goal-oriented Tutoring System</p>
-
-  <p>
-    <a href="https://www.tianfuwang.tech/gen-mentor">Original Website</a> &nbsp;·&nbsp;
-    <a href="https://arxiv.org/pdf/2501.15749">Original Paper</a> &nbsp;·&nbsp;
-    <a href="https://gen-mentor.streamlit.app/">Original Demo</a>
-  </p>
-
 </div>
 
 ---
@@ -42,7 +32,7 @@ Our project addresses this gap by enhancing GenMentor with:
 
 <div align="center">
   <p align="center">
-    <img src="resources/genmentor-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
+    <img src="resources/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
   </p>
 </div>
 

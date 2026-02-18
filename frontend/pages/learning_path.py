@@ -3,11 +3,10 @@ import math
 import streamlit as st
 from components.skill_info import render_skill_info
 from utils.request_api import (
-    schedule_learning_path,
+    schedule_learning_path_agentic,
     reschedule_learning_path,
-    simulate_path_feedback,
-    refine_learning_path_with_feedback,
-    iterative_refine_learning_path,
+    adapt_learning_path,
+    save_learner_profile,
     get_app_config,
 )
 from components.navigation import render_navigation
@@ -140,188 +139,266 @@ def render_learning_path():
                 st.rerun()
             return
 
-        with st.spinner("Scheduling Learning Path ..."):
+        with st.spinner("Generating learning path (with evaluation & auto-refinement)..."):
             st.session_state[attempt_key] = True
 
-            result = schedule_learning_path(
+            result = schedule_learning_path_agentic(
                 learner_profile=goal.get("learner_profile"),
                 session_count=get_app_config()["default_session_count"],
             )
 
-        _store_agent_reasoning(result, "schedule_learning_path")
+        _store_agent_reasoning(result, "schedule_learning_path_agentic")
 
-        # Backend may return either a dict {learning_path: [...]} or a raw list
+        # Backend returns {learning_path: [...], agent_metadata: {...}}
         if isinstance(result, dict):
             if "detail" in result and not result.get("learning_path"):
                 st.error("Backend rejected the schedule request (422).")
                 st.json(result)
                 return
             learning_path = result.get("learning_path")
+            agent_metadata = result.get("agent_metadata", {})
         else:
             learning_path = result
+            agent_metadata = {}
 
         if not learning_path:
             st.error("Scheduling returned an empty learning path.")
             return
 
         goal["learning_path"] = learning_path
+        goal["plan_agent_metadata"] = agent_metadata
         try:
             save_persistent_state()
         except Exception:
             pass
-        st.toast("🎉 Successfully scheduled learning path!")
+        st.toast("Successfully scheduled learning path!")
         st.rerun()
 
     else:
         render_overall_information(goal)
-        render_path_feedback_section(goal)
+        render_module_map(goal)
+        render_narrative_overview(goal)
+        render_plan_quality_section(goal)
+        render_adaptation_section(goal)
         render_learning_sessions(goal)
 
 
 def render_overall_information(goal):
     with st.container(border=True):
-        st.write("#### 🎯 Current Goal")
+        st.write("#### Current Goal")
         st.text_area("In-progress Goal", value=goal["learning_goal"], disabled=True, help="Change this in the Goal Management section.")
         learned_sessions = sum(1 for s in goal["learning_path"] if s["if_learned"])
         total_sessions = len(goal["learning_path"])
         if total_sessions == 0:
             st.warning("No learning sessions found.")
-            progress = 0
-        else:
-            progress = int((learned_sessions / total_sessions) * 100)
-        st.write("#### 📊 Overall Progress")
-        with st.container():
-            st.progress(progress)
-            st.write(f"{learned_sessions}/{total_sessions} sessions completed ({progress}%)")
+            return
 
-            if learned_sessions == total_sessions:
-                st.success("🎉 Congratulations! All sessions are complete.")
-                st.balloons()
-            else:
-                st.info("🚀 Keep going! You’re making great progress.")
+        # Mastery count
+        mastered_count = sum(
+            1 for i in range(total_sessions)
+            if st.session_state.get("mastery_status", {}).get(
+                f"{st.session_state['selected_goal_id']}-{i}", {}
+            ).get("is_mastered", False)
+            or goal["learning_path"][i].get("is_mastered", False)
+        )
+
+        st.write("#### Overall Progress")
+        col1, col2 = st.columns(2)
+        with col1:
+            completion_pct = int((learned_sessions / total_sessions) * 100)
+            st.progress(completion_pct)
+            st.write(f"{learned_sessions}/{total_sessions} sessions completed ({completion_pct}%)")
+        with col2:
+            mastery_pct = int((mastered_count / total_sessions) * 100)
+            st.progress(mastery_pct)
+            st.write(f"{mastered_count}/{total_sessions} sessions mastered ({mastery_pct}%)")
+
+        if learned_sessions == total_sessions:
+            st.success("Congratulations! All sessions are complete.")
+            st.balloons()
+        else:
+            st.info("Keep going! You're making great progress.")
         with st.expander("View Skill Details", expanded=False):
             render_skill_info(goal["learner_profile"])
 
-def render_path_feedback_section(goal):
-    goal_id = st.session_state["selected_goal_id"]
-    cache_key = f"feedback_{goal_id}"
+def _is_session_locked(goal, sid):
+    """Check if a session is locked due to mastery lock (sequential learners).
 
-    with st.expander("AI Path Evaluation & Refinement", expanded=False):
-        st.info("Get AI-simulated learner feedback on your learning path and refine it before starting.")
+    For linear navigation mode: session N is locked unless session N-1 is mastered.
+    Session 0 is always unlocked.
+    For free navigation mode: nothing is locked.
+    """
+    session = goal["learning_path"][sid]
+    nav_mode = session.get("navigation_mode", "linear")
 
-        col1, col2, col3 = st.columns([2, 2, 2])
-        with col1:
-            if st.button("Simulate Feedback", type="primary", use_container_width=True):
-                st.session_state["if_simulating_feedback"] = True
+    if nav_mode == "free":
+        return False
+    if sid == 0:
+        return False
+
+    # Check if previous session is mastered
+    prev_session = goal["learning_path"][sid - 1]
+    prev_uid = f"{st.session_state['selected_goal_id']}-{sid - 1}"
+    prev_mastery = st.session_state.get("mastery_status", {}).get(prev_uid, {})
+
+    return not prev_mastery.get("is_mastered", False) and not prev_session.get("is_mastered", False)
+
+
+def render_module_map(goal):
+    """Visual map of the learning path for visual learners (fslsm_input <= -0.3)."""
+    fslsm_dims = goal.get("learner_profile", {}).get(
+        "learning_preferences", {}
+    ).get("fslsm_dimensions", {})
+
+    if fslsm_dims.get("fslsm_input", 0) > -0.3:
+        return  # Only for visual learners
+
+    st.write("#### Module Map")
+    with st.container(border=True):
+        num_sessions = len(goal["learning_path"])
+        cols_per_row = min(num_sessions, 5)
+        cols = st.columns(cols_per_row)
+        for i, session in enumerate(goal["learning_path"]):
+            col_idx = i % cols_per_row
+            with cols[col_idx]:
+                if session.get("is_mastered") or session["if_learned"]:
+                    color = "#5ecc6b"
+                elif _is_session_locked(goal, i):
+                    color = "#999"
+                else:
+                    color = "#fc7474"
+                st.markdown(
+                    f"<div style='text-align:center; padding:8px; border:2px solid {color}; "
+                    f"border-radius:8px; margin:4px;'>"
+                    f"<b>S{i+1}</b><br><small>{session['title']}</small></div>",
+                    unsafe_allow_html=True
+                )
+
+
+def render_narrative_overview(goal):
+    """Narrative-style learning journey for verbal learners (fslsm_input >= 0.3)."""
+    fslsm_dims = goal.get("learner_profile", {}).get(
+        "learning_preferences", {}
+    ).get("fslsm_dimensions", {})
+
+    if fslsm_dims.get("fslsm_input", 0) < 0.3:
+        return  # Only for verbal learners
+
+    st.write("#### Your Learning Journey")
+    with st.container(border=True):
+        for i, session in enumerate(goal["learning_path"]):
+            if session["if_learned"]:
+                prefix = "You've completed"
+            else:
+                prefix = "Next, you'll explore"
+            st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {session['abstract']}")
+
+
+def render_plan_quality_section(goal):
+    """Display the agent's auto-evaluation quality results (read-only)."""
+    metadata = goal.get("plan_agent_metadata", {})
+    if not metadata:
+        return
+
+    evaluation = metadata.get("evaluation", {})
+    iterations = metadata.get("refinement_iterations", 1)
+    feedback_summary = evaluation.get("feedback_summary", {})
+
+    with st.expander("Plan Quality (Auto-Evaluated)", expanded=False):
+        # Quality status
+        passed = evaluation.get("pass", True)
+        if passed:
+            st.success(f"Plan Quality: PASS (after {iterations} iteration{'s' if iterations > 1 else ''})")
+        else:
+            issues = evaluation.get("issues", [])
+            st.warning(f"Plan Quality: NEEDS REVIEW ({len(issues)} issues, {iterations} iterations)")
+            for issue in issues:
+                st.write(f"- {issue}")
+
+        # Feedback summary
+        if feedback_summary:
+            fb_cols = st.columns(len(feedback_summary))
+            for i, (key, val) in enumerate(feedback_summary.items()):
+                with fb_cols[i]:
+                    st.write(f"**{key.title()}**")
+                    display = val if isinstance(val, str) else str(val)
+                    st.caption(display)
+
+        st.caption(f"Refinement iterations: {iterations}")
+
+
+def render_adaptation_section(goal):
+    """Show adaptation suggestion banner when preferences change significantly."""
+    goal_id = st.session_state.get("selected_goal_id")
+    user_id = st.session_state.get("userId", "")
+
+    # Check for pending adaptation suggestion (set by mastery evaluation or preference change)
+    adaptation_key = f"adaptation_suggested_{goal_id}"
+    # Display adaptation result from a previous run (persists across rerun)
+    adapt_result_key = f"adaptation_result_{goal_id}"
+    if st.session_state.get(adapt_result_key):
+        result_info = st.session_state[adapt_result_key]
+        if result_info["level"] == "info":
+            st.info(result_info["message"])
+        else:
+            st.success(result_info["message"])
+        if st.button("OK", key=f"ack_adapt_{goal_id}"):
+            st.session_state[adapt_result_key] = None
+            st.rerun()
+
+    if st.session_state.get(adaptation_key):
+        st.warning("Your learning preferences or quiz results suggest your learning path may need adjustment.")
+        col_adapt, col_dismiss = st.columns([1, 1])
+        with col_dismiss:
+            if st.button("Dismiss", key=f"dismiss_adapt_{goal_id}"):
+                save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
+                st.session_state[adaptation_key] = False
                 save_persistent_state()
                 st.rerun()
-
-        with col2:
-            if st.button("Refine Path", type="secondary", use_container_width=True,
-                        disabled=cache_key not in st.session_state.get("path_feedback_cache", {})):
-                st.session_state["if_refining_path"] = True
-                save_persistent_state()
-                st.rerun()
-
-        with col3:
-            max_iter = get_app_config()["max_refinement_iterations"]
-            iteration_count = st.selectbox("Iterations", options=list(range(1, max_iter + 1)), index=1, key="auto_refine_iterations")
-            if st.button("Auto-Refine", type="secondary", use_container_width=True):
-                with st.spinner(f'Auto-refining path ({iteration_count} iterations)...'):
-                    result = iterative_refine_learning_path(
-                        goal["learner_profile"],
-                        goal["learning_path"],
-                        max_iterations=iteration_count
+        with col_adapt:
+            if st.button("Adapt Learning Path", type="primary", key=f"adapt_btn_{goal_id}"):
+                with st.spinner("Analyzing changes and adapting your learning path..."):
+                    result = adapt_learning_path(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        new_learner_profile=goal.get("learner_profile", {}),
                     )
-                    _store_agent_reasoning(result, 'iterative_refine_learning_path')
-                    if result and result.get("final_learning_path"):
-                        goal["learning_path"] = result["final_learning_path"]
-                        # Clear feedback cache after refinement
-                        if cache_key in st.session_state.get("path_feedback_cache", {}):
-                            del st.session_state["path_feedback_cache"][cache_key]
-                        save_persistent_state()
-                        st.toast(f"Path refined through {iteration_count} iterations!")
-                        # Display iteration history
-                        for iteration in result.get("iterations", []):
-                            st.write(f"**Iteration {iteration['iteration']}:**")
-                            feedback = iteration.get("feedback", {})
-                            if isinstance(feedback, dict):
-                                fb = feedback.get("feedback", {})
-                                st.write(f"- Progression: {fb.get('progression', 'N/A')}")
-                                st.write(f"- Engagement: {fb.get('engagement', 'N/A')}")
-                        st.rerun()
-                    else:
-                        st.error("Failed to auto-refine path.")
+                if result and result.get("learning_path"):
+                    agent_meta = result.get("agent_metadata", {})
+                    decision = agent_meta.get("decision", {})
+                    action = decision.get("action", "keep")
+                    reason = decision.get("reason", "")
 
-        # Handle simulating feedback
-        if st.session_state.get("if_simulating_feedback"):
-            with st.spinner('Simulating learner feedback...'):
-                feedback = simulate_path_feedback(goal["learner_profile"], goal["learning_path"])
-                _store_agent_reasoning(feedback, 'simulate_path_feedback')
-                if feedback:
-                    if "path_feedback_cache" not in st.session_state:
-                        st.session_state["path_feedback_cache"] = {}
-                    st.session_state["path_feedback_cache"][cache_key] = feedback
-                    st.session_state["if_simulating_feedback"] = False
+                    if action == "keep":
+                        st.session_state[adapt_result_key] = {
+                            "level": "info",
+                            "message": f"Your current plan is still on track. {reason}",
+                        }
+                    elif action == "adjust_future":
+                        goal["learning_path"] = result["learning_path"]
+                        goal["plan_agent_metadata"] = agent_meta
+                        st.session_state[adapt_result_key] = {
+                            "level": "success",
+                            "message": f"Future sessions have been adjusted. {reason}",
+                        }
+                    elif action == "regenerate":
+                        goal["learning_path"] = result["learning_path"]
+                        goal["plan_agent_metadata"] = agent_meta
+                        st.session_state[adapt_result_key] = {
+                            "level": "success",
+                            "message": f"Your learning path has been regenerated. {reason}",
+                        }
+
+                    # Now persist the updated profile to the store (deferred from
+                    # the preferences update so the adapt endpoint could compare
+                    # old vs new FSLSM dimensions).
+                    save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
+
+                    st.session_state[adaptation_key] = False
                     save_persistent_state()
-                    st.toast("Feedback simulated successfully!")
                     st.rerun()
                 else:
-                    st.session_state["if_simulating_feedback"] = False
-                    st.error("Failed to simulate feedback.")
-
-        # Handle refining path
-        if st.session_state.get("if_refining_path"):
-            cached_feedback = st.session_state.get("path_feedback_cache", {}).get(cache_key)
-            if cached_feedback:
-                with st.spinner('Refining learning path...'):
-                    refined_path = refine_learning_path_with_feedback(goal["learning_path"], cached_feedback)
-                    _store_agent_reasoning(refined_path, 'refine_learning_path_with_feedback')
-                    if refined_path:
-                        goal["learning_path"] = refined_path.get("learning_path", refined_path)
-                        # Clear feedback cache after refinement
-                        del st.session_state["path_feedback_cache"][cache_key]
-                        st.session_state["if_refining_path"] = False
-                        save_persistent_state()
-                        st.toast("Learning path refined successfully!")
-                        st.rerun()
-                    else:
-                        st.session_state["if_refining_path"] = False
-                        st.error("Failed to refine path.")
-            else:
-                st.session_state["if_refining_path"] = False
-
-        # Display cached feedback if available
-        cached_feedback = st.session_state.get("path_feedback_cache", {}).get(cache_key)
-        if cached_feedback:
-            st.write("---")
-            st.write("**Simulated Feedback:**")
-
-            feedback_data = cached_feedback.get("feedback", cached_feedback) if isinstance(cached_feedback, dict) else {}
-            suggestions_data = cached_feedback.get("suggestions", {}) if isinstance(cached_feedback, dict) else {}
-
-            # 3-column layout for feedback
-            fb_col1, fb_col2, fb_col3 = st.columns(3)
-            with fb_col1:
-                st.metric("Progression", "")
-                progression_fb = feedback_data.get("progression", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(progression_fb)
-            with fb_col2:
-                st.metric("Engagement", "")
-                engagement_fb = feedback_data.get("engagement", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(engagement_fb)
-            with fb_col3:
-                st.metric("Personalization", "")
-                personalization_fb = feedback_data.get("personalization", "N/A") if isinstance(feedback_data, dict) else "N/A"
-                st.write(personalization_fb)
-
-            # Display suggestions
-            if suggestions_data and isinstance(suggestions_data, dict):
-                st.write("---")
-                st.write("**Improvement Suggestions:**")
-                for key, suggestion in suggestions_data.items():
-                    if suggestion:
-                        st.info(f"**{key.title()}:** {suggestion}")
+                    st.error("Failed to adapt learning path.")
 
 
 def render_learning_sessions(goal):
@@ -356,7 +433,7 @@ def render_learning_sessions(goal):
                 st.rerun()
     save_persistent_state()
     columns_spec = 2
-    num_columns = math.ceil(len(goal["learning_path"]) / columns_spec)  
+    num_columns = math.ceil(len(goal["learning_path"]) / columns_spec)
     columns_list = [st.columns(columns_spec, gap="large") for _ in range(num_columns)]
     for sid, session in enumerate(goal["learning_path"]):
         session_column = columns_list[sid // columns_spec]
@@ -372,6 +449,31 @@ def render_learning_sessions(goal):
                     for skill_outcome in session["desired_outcome_when_completed"]:
                         st.write(f"- {skill_outcome['name']} (`{skill_outcome['level']}`)")
 
+                    # Sequence hint from perception dimension
+                    seq_hint = session.get("session_sequence_hint")
+                    if seq_hint == "application-first":
+                        st.caption("Content order: Application -> Example -> Theory")
+                    elif seq_hint == "theory-first":
+                        st.caption("Content order: Theory-first / Conceptual exploration")
+
+                # Mastery score badge
+                session_uid = f"{st.session_state['selected_goal_id']}-{sid}"
+                mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
+                if mastery_info.get("score") is not None:
+                    score = mastery_info["score"]
+                    threshold = mastery_info.get("threshold", 70)
+                    if mastery_info.get("is_mastered"):
+                        st.markdown(f"**Mastery: {score:.0f}%** :white_check_mark:")
+                    else:
+                        st.markdown(f"**Quiz Score: {score:.0f}%** (need {threshold:.0f}%) :warning:")
+
+                # FSLSM indicators
+                if session.get("has_checkpoint_challenges"):
+                    st.caption("Contains Checkpoint Challenges")
+                buffer = session.get("thinking_time_buffer_minutes", 0)
+                if buffer > 0:
+                    st.caption(f"Recommended reflection time: {buffer} min before next session")
+
                 col1, col2 = st.columns([5, 3])
                 with col1:
                     if_learned_key = f"if_learned_{session['id']}"
@@ -383,8 +485,17 @@ def render_learning_sessions(goal):
                     if session_if_learned != old_if_learned:
                         st.rerun()
 
+                locked = _is_session_locked(goal, sid)
+
                 with col2:
-                    if not session["if_learned"]:
+                    if locked:
+                        st.button(
+                            "Locked", key=f"locked_{session['id']}",
+                            use_container_width=True, disabled=True,
+                            icon=":material/lock:",
+                        )
+                        st.caption("Master the previous session first")
+                    elif not session["if_learned"]:
                         start_key = f"start_{session['id']}_{session['if_learned']}"
                         if st.button("Learning", key=start_key, use_container_width=True, type="primary", icon=":material/local_library:"):
                             st.session_state["selected_session_id"] = sid
