@@ -510,7 +510,10 @@ async def audit_skill_gap_bias(request: BiasAuditRequest):
     skill_gaps = request.skill_gaps
     try:
         if isinstance(skill_gaps, str) and skill_gaps.strip():
-            skill_gaps = ast.literal_eval(skill_gaps)
+            try:
+                skill_gaps = json.loads(skill_gaps)
+            except json.JSONDecodeError:
+                skill_gaps = ast.literal_eval(skill_gaps)
         if not isinstance(skill_gaps, dict):
             skill_gaps = {"skill_gaps": []}
         result = audit_skill_gap_bias_with_llm(llm, learner_information, skill_gaps)
