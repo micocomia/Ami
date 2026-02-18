@@ -1,3 +1,4 @@
 from .learning_goal_refiner import LearningGoalRefiner, refine_learning_goal_with_llm
 from .skill_gap_identifier import SkillGapIdentifier, identify_skill_gap_with_llm
 from .skill_requirement_mapper import SkillRequirementMapper, map_goal_to_skills_with_llm
+from .bias_auditor import BiasAuditor, audit_skill_gap_bias_with_llm

@@ -503,6 +503,22 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
+@app.post("/audit-skill-gap-bias")
+async def audit_skill_gap_bias(request: BiasAuditRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_information = request.learner_information
+    skill_gaps = request.skill_gaps
+    try:
+        if isinstance(skill_gaps, str) and skill_gaps.strip():
+            skill_gaps = ast.literal_eval(skill_gaps)
+        if not isinstance(skill_gaps, dict):
+            skill_gaps = {"skill_gaps": []}
+        result = audit_skill_gap_bias_with_llm(llm, learner_information, skill_gaps)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 @app.post("/create-learner-profile-with-info")
 async def create_learner_profile_with_info(request: LearnerProfileInitializationWithInfoRequest):
     llm = get_llm(request.model_provider, request.model_name)

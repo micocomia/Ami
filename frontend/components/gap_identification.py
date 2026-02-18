@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.request_api import create_learner_profile, identify_skill_gap, get_app_config
+from utils.request_api import create_learner_profile, identify_skill_gap, audit_skill_gap_bias, get_app_config
 from utils.format import format_citation
 from utils.state import save_persistent_state
 
@@ -17,6 +17,20 @@ def render_identifying_skill_gap(goal):
     # If the goal was auto-refined, update the learning_goal to the refined version
     if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("refined_goal"):
         goal["learning_goal"] = goal_assessment["refined_goal"]
+    # Run bias audit on the skill gap results
+    if skill_gaps:
+        try:
+            skill_gaps_dict = {"skill_gaps": skill_gaps}
+            if goal_assessment:
+                skill_gaps_dict["goal_assessment"] = goal_assessment
+            bias_audit = audit_skill_gap_bias(
+                skill_gaps_dict,
+                learner_information,
+                llm_type,
+            )
+            goal["bias_audit"] = bias_audit
+        except Exception:
+            goal["bias_audit"] = None
     save_persistent_state()
     st.rerun()
     st.toast("Successfully identified skill gaps!")
@@ -164,3 +178,57 @@ def render_identified_skill_gap(goal, method_name="genmentor"):
                 except Exception:
                     pass
                 st.rerun()
+
+
+_FALLBACK_DISCLAIMER = (
+    "These skill assessments are AI-generated inferences based on the information you provided. "
+    "They may not fully reflect your actual abilities. Use them as a starting point, not a definitive evaluation."
+)
+
+
+def render_bias_audit_banners(goal):
+    """Show ethical disclaimer and any bias/calibration warnings from the audit."""
+    audit = goal.get("bias_audit")
+
+    # Always show ethical disclaimer (even if audit failed)
+    disclaimer = (audit or {}).get("ethical_disclaimer", _FALLBACK_DISCLAIMER)
+    st.info(disclaimer)
+
+    if not audit:
+        return
+
+    # Overall risk warning
+    risk = audit.get("overall_bias_risk", "low")
+    if risk in ("medium", "high"):
+        flagged = audit.get("flagged_skill_count", 0)
+        audited = audit.get("audited_skill_count", 0)
+        severity_label = "Moderate" if risk == "medium" else "High"
+        st.warning(
+            f"{severity_label} bias risk detected: {flagged} of {audited} skills flagged. "
+            f"Review the details below and consider adjusting the assessments."
+        )
+
+    # Bias flags details
+    bias_flags = audit.get("bias_flags", [])
+    calibration_flags = audit.get("confidence_calibration_flags", [])
+
+    if bias_flags or calibration_flags:
+        with st.expander("View bias audit details"):
+            if bias_flags:
+                st.markdown("**Bias Flags**")
+                for flag in bias_flags:
+                    severity = flag.get("severity", "low")
+                    icon = {"low": "🟡", "medium": "🟠", "high": "🔴"}.get(severity, "🟡")
+                    st.markdown(
+                        f"{icon} **{flag.get('skill_name', 'Unknown')}** — "
+                        f"*{flag.get('bias_category', '')}* ({severity})\n\n"
+                        f"  {flag.get('explanation', '')}\n\n"
+                        f"  **Suggestion:** {flag.get('suggestion', '')}"
+                    )
+
+            if calibration_flags:
+                st.markdown("**Confidence Calibration Warnings**")
+                for flag in calibration_flags:
+                    st.markdown(
+                        f"⚠️ **{flag.get('skill_name', 'Unknown')}**: {flag.get('issue', '')}"
+                    )

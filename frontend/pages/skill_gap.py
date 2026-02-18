@@ -5,6 +5,7 @@ from components.gap_identification import (
     render_identified_skill_gap,
     render_goal_assessment_banners,
     render_retrieval_sources_banner,
+    render_bias_audit_banners,
     has_any_gap,
 )
 from utils.state import add_new_goal, get_new_goal_uid, save_persistent_state
@@ -43,6 +44,7 @@ def render_skill_gap():
             # Show goal assessment banners (auto-refined, vague, all-mastered)
             render_goal_assessment_banners(goal)
             render_retrieval_sources_banner(goal)
+            render_bias_audit_banners(goal)
 
             num_skills = len(skill_gaps)
             num_gaps = sum(1 for skill in skill_gaps if skill["is_gap"])

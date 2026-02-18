@@ -110,3 +110,65 @@ class SkillGapsRoot(RootModel):
 
 class RefinedLearningGoal(BaseModel):
     refined_goal: str
+
+
+# ── Bias Auditor schemas ────────────────────────────────────────────
+
+class BiasCategory(str, Enum):
+    demographic_inference = "demographic_inference"
+    prestige_bias = "prestige_bias"
+    gender_assumption = "gender_assumption"
+    age_assumption = "age_assumption"
+    nationality_assumption = "nationality_assumption"
+    stereotype_based = "stereotype_based"
+    unsubstantiated_claim = "unsubstantiated_claim"
+
+
+class BiasSeverity(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class BiasFlag(BaseModel):
+    skill_name: str
+    bias_category: BiasCategory
+    severity: BiasSeverity
+    explanation: str = Field(..., description="Max 40 words explaining the detected bias.")
+    suggestion: str = Field(..., description="Max 30 words suggesting how to fix the bias.")
+
+    @field_validator("explanation")
+    @classmethod
+    def limit_explanation_words(cls, v: str) -> str:
+        if len(v.split()) > 40:
+            raise ValueError("Explanation must be 40 words or fewer.")
+        return v
+
+    @field_validator("suggestion")
+    @classmethod
+    def limit_suggestion_words(cls, v: str) -> str:
+        if len(v.split()) > 30:
+            raise ValueError("Suggestion must be 30 words or fewer.")
+        return v
+
+
+class ConfidenceCalibrationFlag(BaseModel):
+    skill_name: str
+    current_level: str
+    level_confidence: str
+    issue: str
+
+
+_DEFAULT_ETHICAL_DISCLAIMER = (
+    "These skill assessments are AI-generated inferences based on the information you provided. "
+    "They may not fully reflect your actual abilities. Use them as a starting point, not a definitive evaluation."
+)
+
+
+class BiasAuditResult(BaseModel):
+    bias_flags: List[BiasFlag] = Field(default_factory=list)
+    confidence_calibration_flags: List[ConfidenceCalibrationFlag] = Field(default_factory=list)
+    overall_bias_risk: BiasSeverity = BiasSeverity.low
+    audited_skill_count: int = 0
+    flagged_skill_count: int = 0
+    ethical_disclaimer: str = Field(default=_DEFAULT_ETHICAL_DISCLAIMER)

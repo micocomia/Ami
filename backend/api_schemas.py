@@ -186,6 +186,12 @@ class IterativeRefinementRequest(BaseRequest):
     max_iterations: int = 2
 
 
+class BiasAuditRequest(BaseRequest):
+
+    learner_information: str
+    skill_gaps: str
+
+
 class AuthRegisterRequest(BaseModel):
     username: str
     password: str
