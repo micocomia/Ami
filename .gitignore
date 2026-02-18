@@ -18,7 +18,3 @@ backend/data/
 pids/
 .DS_Store
 frontend/config.py
-
-/backend/notes
-/backend/implementation_plan
-/frontend/implementation_plan

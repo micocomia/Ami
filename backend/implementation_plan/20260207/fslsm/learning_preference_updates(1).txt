@@ -1,0 +1,63 @@
+There are exactly two user actions in the frontend that trigger a profile update (and thus can shift FSLSM  
+  dimensions):                                                                                                
+                                                                                                              
+  1. Learner Profile Page — "Update Profile" button                                                           
+                                                                                                              
+  File: frontend/pages/learner_profile.py → update_learner_profile_with_additional_info()                     
+
+  Trigger: User fills out the feedback form and clicks "Update Profile".                                      
+                                                                                                              
+  Data sent as learner_interactions:                                                                          
+  - agreement_star — 1–5 star rating of profile accuracy
+  - suggestions — free-text corrections/suggestions                                                           
+  - additional_info — extra context (text + optional PDF upload)                                              
+                                                                                                              
+  The LLM interprets this text for learning-style signals (e.g. "I prefer watching videos over reading" →     
+  shifts fslsm_input toward -1).                                                                              
+                                                                                                              
+  2. Knowledge Document Page — content feedback + session completion
+
+  File: frontend/pages/knowledge_document.py → update_learner_profile_with_feedback()
+
+  Trigger: User submits content feedback and/or clicks "Complete Session" after finishing a learning session.
+
+  Data sent as learner_interactions:
+  - clarity — star rating (1–5)
+  - relevance — star rating (1–5)
+  - depth — star rating (1–5)
+  - engagement — emoji feedback (1–5)
+  - additional_comments — free text (up to 500 chars)
+
+  Data sent as session_information (on session completion):
+  - id, title — session identifiers
+  - if_learned: true — marks the session done
+  - associated_skills — skills covered
+  - desired_outcome_when_completed — target proficiency levels
+
+  ---
+  How the LLM decides to shift dimensions
+
+  All of this data is passed to the LLM along with the current profile and the update prompt. The LLM is
+  instructed to adjust the four FSLSM values based on behavioral signals:
+  ┌───────────────────────────────────────┬─────────────────────┬───────────────────┐
+  │      Signal in interaction data       │ Dimension affected  │     Direction     │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Engages with hands-on exercises, labs │ fslsm_processing    │ → -1 (active)     │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Prefers reading, observation          │ fslsm_processing    │ → +1 (reflective) │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Gravitates to concrete examples       │ fslsm_perception    │ → -1 (sensing)    │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Prefers abstract concepts, theory     │ fslsm_perception    │ → +1 (intuitive)  │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Spends time on diagrams, videos       │ fslsm_input         │ → -1 (visual)     │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Prefers text, lectures                │ fslsm_input         │ → +1 (verbal)     │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Follows step-by-step paths            │ fslsm_understanding │ → -1 (sequential) │
+  ├───────────────────────────────────────┼─────────────────────┼───────────────────┤
+  │ Seeks big-picture overviews first     │ fslsm_understanding │ → +1 (global)     │
+  └───────────────────────────────────────┴─────────────────────┴───────────────────┘
+  The structured ratings (clarity, depth, engagement stars) give indirect signals — e.g. consistently high
+  engagement on interactive sessions hints at an active learner. The free-text comments provide the strongest
+  explicit signals for the LLM to interpret.
