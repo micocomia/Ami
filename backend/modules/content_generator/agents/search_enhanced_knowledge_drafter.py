@@ -24,6 +24,7 @@ class KnowledgeDraftPayload(BaseModel):
     knowledge_point: Any
     external_resources: str | None = ""
     visual_formatting_hints: str = ""
+    processing_perception_hints: str = ""
 
     @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_point")
     @classmethod
@@ -101,6 +102,7 @@ def draft_knowledge_point_with_llm(
     knowledge_point,
     use_search: bool = True,
     visual_formatting_hints: str = "",
+    processing_perception_hints: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
 ):
@@ -113,6 +115,7 @@ def draft_knowledge_point_with_llm(
         "knowledge_points": knowledge_points,
         "knowledge_point": knowledge_point,
         "visual_formatting_hints": visual_formatting_hints,
+        "processing_perception_hints": processing_perception_hints,
     }
     return drafter.draft(payload)
 
@@ -127,6 +130,7 @@ def draft_knowledge_points_with_llm(
     use_search: bool = True,
     max_workers: int = 8,
     visual_formatting_hints: str = "",
+    processing_perception_hints: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
 ):
@@ -147,6 +151,7 @@ def draft_knowledge_points_with_llm(
             kp,
             use_search=use_search,
             visual_formatting_hints=visual_formatting_hints,
+            processing_perception_hints=processing_perception_hints,
             search_rag_manager=search_rag_manager,
         )
 

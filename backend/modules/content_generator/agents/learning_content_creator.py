@@ -93,6 +93,80 @@ def _get_fslsm_input(learner_profile) -> float:
         return 0.0
 
 
+def _get_fslsm_dim(learner_profile, dim_name: str) -> float:
+    """Extract a named FSLSM dimension value from a learner profile dict. Returns 0.0 on missing/error."""
+    if isinstance(learner_profile, str):
+        try:
+            import ast as _ast
+            learner_profile = _ast.literal_eval(learner_profile)
+        except Exception:
+            return 0.0
+    if not isinstance(learner_profile, dict):
+        return 0.0
+    try:
+        dims = (
+            learner_profile
+            .get("learning_preferences", {})
+            .get("fslsm_dimensions", {})
+        )
+        if not isinstance(dims, dict):
+            return 0.0
+        val = dims.get(dim_name, 0.0)
+        return float(val) if val is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _processing_perception_hints(processing: float, perception: float) -> str:
+    """Return per-section hints for the Processing and Perception FSLSM dimensions."""
+    parts = []
+    if processing <= -_FSLSM_MODERATE:
+        parts.append(
+            "**Processing Style (Active)**: After each concept, include a "
+            "`🔧 Try It First` block — a hands-on challenge or trial-and-error simulation "
+            "that lets the learner engage directly before the full explanation."
+        )
+    elif processing >= _FSLSM_MODERATE:
+        parts.append(
+            "**Processing Style (Reflective)**: After each concept, include a "
+            "`🤔 Reflection Pause` block — one deep-thinking question that encourages "
+            "the learner to connect the concept to prior knowledge before moving on."
+        )
+    if perception <= -_FSLSM_MODERATE:
+        parts.append(
+            "**Perception Style (Sensing)**: Present each concept in this order: "
+            "(1) a concrete real-world example first, (2) step-by-step facts or procedure, "
+            "(3) underlying theory last."
+        )
+    elif perception >= _FSLSM_MODERATE:
+        parts.append(
+            "**Perception Style (Intuitive)**: Present each concept in this order: "
+            "(1) the abstract principle or theory first, (2) relationships and patterns, "
+            "(3) concrete examples last."
+        )
+    if not parts:
+        return ""
+    return "\n\n**Learning Style Instructions**:\n" + "\n".join(f"- {p}" for p in parts)
+
+
+def _understanding_hints(understanding: float) -> str:
+    """Return document-level structure hint for the Understanding FSLSM dimension."""
+    if understanding <= -_FSLSM_MODERATE:
+        return (
+            "\n\n**Understanding Style (Sequential)**: Structure the document with strict linear "
+            "progression. Use explicit 'Building on [previous concept]...' transitions between "
+            "sections. Avoid forward references — do not mention concepts before they have been "
+            "introduced."
+        )
+    elif understanding >= _FSLSM_MODERATE:
+        return (
+            "\n\n**Understanding Style (Global)**: Begin the document with a `🗺️ Big Picture` "
+            "section that shows how this session fits into the overall course and learning path. "
+            "Use cross-references between sections to highlight connections between ideas."
+        )
+    return ""
+
+
 def _visual_formatting_hints(fslsm_input: float) -> str:
     """Return formatting instruction hints for visual learners based on fslsm_input score."""
     if fslsm_input <= -_FSLSM_STRONG:
@@ -140,7 +214,14 @@ def create_learning_content_with_llm(
         fslsm_input = _get_fslsm_input(learner_profile)
         hints = _visual_formatting_hints(fslsm_input)
 
-        # 3. Draft knowledge points with visual hints
+        # 2b. Extract remaining FSLSM dimensions and build their hints
+        fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
+        fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+        fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
+        proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
+        und_hints = _understanding_hints(fslsm_understanding)
+
+        # 3. Draft knowledge points with visual + processing/perception hints
         knowledge_drafts = draft_knowledge_points_with_llm(
             llm,
             learner_profile,
@@ -151,6 +232,7 @@ def create_learning_content_with_llm(
             use_search=use_search,
             max_workers=max_workers,
             visual_formatting_hints=hints,
+            processing_perception_hints=proc_perc_hints,
             search_rag_manager=search_rag_manager,
         )
 
@@ -181,7 +263,7 @@ def create_learning_content_with_llm(
                 except Exception:
                     media_resources = []
 
-        # 5. Integrate document (with media appended for visual learners)
+        # 5. Integrate document (with media appended for visual learners and understanding hints)
         learning_document = integrate_learning_document_with_llm(
             llm,
             learner_profile,
@@ -191,6 +273,7 @@ def create_learning_content_with_llm(
             knowledge_drafts,
             output_markdown=output_markdown,
             media_resources=media_resources if media_resources else None,
+            understanding_hints=und_hints,
         )
 
         # 6. Set content_format

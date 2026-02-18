@@ -44,4 +44,5 @@ Draft detailed markdown content for the selected knowledge point using the provi
 
 **External Resources (for RAG)**:
 {external_resources}
-{visual_formatting_hints}"""
+{visual_formatting_hints}
+{processing_perception_hints}"""

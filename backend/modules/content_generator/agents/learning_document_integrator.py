@@ -19,6 +19,7 @@ class IntegratedDocPayload(BaseModel):
     learning_session: Any
     knowledge_points: Any
     knowledge_drafts: Any
+    understanding_hints: str = ""
 
     @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_drafts")
     @classmethod
@@ -54,6 +55,7 @@ def integrate_learning_document_with_llm(
     knowledge_drafts,
     output_markdown=True,
     media_resources: Optional[List[dict]] = None,
+    understanding_hints: str = "",
 ):
     logger.info(f'Integrating learning document with {len(knowledge_points)} knowledge points and {len(knowledge_drafts)} drafts...')
     input_dict = {
@@ -61,7 +63,8 @@ def integrate_learning_document_with_llm(
         'learning_path': learning_path,
         'learning_session': learning_session,
         'knowledge_points': knowledge_points,
-        'knowledge_drafts': knowledge_drafts
+        'knowledge_drafts': knowledge_drafts,
+        'understanding_hints': understanding_hints,
     }
     learning_document_integrator = LearningDocumentIntegrator(llm)
     document_structure = learning_document_integrator.integrate(input_dict)

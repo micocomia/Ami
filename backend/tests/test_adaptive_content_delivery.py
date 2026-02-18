@@ -47,6 +47,137 @@ class TestGetFslsmInput:
 
 
 # ---------------------------------------------------------------------------
+# TestGetFslsmDim
+# ---------------------------------------------------------------------------
+
+class TestGetFslsmDim:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_content_creator import _get_fslsm_dim
+        return _get_fslsm_dim
+
+    def test_extracts_processing(self):
+        _get_fslsm_dim = self._import()
+        profile = {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_processing": -0.6
+                }
+            }
+        }
+        assert _get_fslsm_dim(profile, "fslsm_processing") == pytest.approx(-0.6)
+
+    def test_extracts_perception(self):
+        _get_fslsm_dim = self._import()
+        profile = {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_perception": 0.5
+                }
+            }
+        }
+        assert _get_fslsm_dim(profile, "fslsm_perception") == pytest.approx(0.5)
+
+    def test_extracts_understanding(self):
+        _get_fslsm_dim = self._import()
+        profile = {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_understanding": 0.8
+                }
+            }
+        }
+        assert _get_fslsm_dim(profile, "fslsm_understanding") == pytest.approx(0.8)
+
+    def test_missing_dim_returns_zero(self):
+        _get_fslsm_dim = self._import()
+        profile = {"learning_preferences": {"fslsm_dimensions": {}}}
+        assert _get_fslsm_dim(profile, "fslsm_processing") == 0.0
+
+    def test_empty_profile_returns_zero(self):
+        _get_fslsm_dim = self._import()
+        assert _get_fslsm_dim({}, "fslsm_understanding") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# TestProcessingPerceptionHints
+# ---------------------------------------------------------------------------
+
+class TestProcessingPerceptionHints:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_content_creator import _processing_perception_hints
+        return _processing_perception_hints
+
+    def test_active_processing_contains_try_it(self):
+        _processing_perception_hints = self._import()
+        hint = _processing_perception_hints(-0.5, 0.0)
+        assert "Try It First" in hint
+
+    def test_reflective_processing_contains_reflection(self):
+        _processing_perception_hints = self._import()
+        hint = _processing_perception_hints(0.5, 0.0)
+        assert "Reflection Pause" in hint
+
+    def test_sensing_perception_example_first(self):
+        _processing_perception_hints = self._import()
+        hint = _processing_perception_hints(0.0, -0.5)
+        assert "Sensing" in hint
+        assert "real-world example" in hint
+
+    def test_intuitive_perception_theory_first(self):
+        _processing_perception_hints = self._import()
+        hint = _processing_perception_hints(0.0, 0.5)
+        assert "Intuitive" in hint
+        assert "theory" in hint.lower()
+
+    def test_neutral_returns_empty(self):
+        _processing_perception_hints = self._import()
+        assert _processing_perception_hints(0.0, 0.0) == ""
+
+    def test_within_threshold_returns_empty(self):
+        _processing_perception_hints = self._import()
+        assert _processing_perception_hints(0.2, -0.2) == ""
+
+    def test_both_dims_combined(self):
+        _processing_perception_hints = self._import()
+        hint = _processing_perception_hints(-0.7, 0.7)
+        assert "Try It First" in hint
+        assert "Intuitive" in hint
+
+
+# ---------------------------------------------------------------------------
+# TestUnderstandingHints
+# ---------------------------------------------------------------------------
+
+class TestUnderstandingHints:
+
+    def _import(self):
+        from modules.content_generator.agents.learning_content_creator import _understanding_hints
+        return _understanding_hints
+
+    def test_sequential_contains_linear(self):
+        _understanding_hints = self._import()
+        hint = _understanding_hints(-0.5)
+        assert "Sequential" in hint
+        assert "linear" in hint.lower()
+
+    def test_global_contains_big_picture(self):
+        _understanding_hints = self._import()
+        hint = _understanding_hints(0.5)
+        assert "Big Picture" in hint
+
+    def test_neutral_returns_empty(self):
+        _understanding_hints = self._import()
+        assert _understanding_hints(0.0) == ""
+
+    def test_within_threshold_returns_empty(self):
+        _understanding_hints = self._import()
+        assert _understanding_hints(0.2) == ""
+        assert _understanding_hints(-0.2) == ""
+
+
+# ---------------------------------------------------------------------------
 # TestVisualFormattingHints
 # ---------------------------------------------------------------------------
 
