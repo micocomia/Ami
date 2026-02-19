@@ -6,12 +6,12 @@ then produces a side-by-side comparison report.
 
 Usage:
     # From backend/ directory:
-    python -m evals.run_all [--skip-rag] [--skip-perf] [--scenarios S01,S02]
+    python -m evals.run_all [--skip-rag] [--skip-perf] [--scenarios S1,S2]
 
 Arguments:
     --skip-rag      Skip RAGAS evaluation (saves ~5 min and API cost)
     --skip-perf     Skip API performance evaluation
-    --scenarios     Comma-separated list of scenario IDs to run (default: all 9)
+    --scenarios     Comma-separated list of scenario IDs to run (default: all scenarios in dataset)
 
 Environment variables required:
     GENMENTOR_BASE_URL   (default: http://localhost:8000)
@@ -93,11 +93,21 @@ def build_report(
 
     # 1. RAG
     if rag_summary:
-        lines.append("## 1. RAG Quality (RAGAS, 0–1 scale)")
+        lines.append("## 1. RAG Quality (RAGAS, 0–1 scale, Product Mode)")
+        lines.append("")
+        lines.append("*Method note: enhanced has verified-course-content access; baseline is web-search driven.*")
         lines.append("")
         rag_dims = ["context_precision", "context_recall", "faithfulness", "answer_relevancy"]
+        rag_metadata_diag_dims = [
+            "metadata_course_hit_rate",
+            "metadata_verified_source_rate",
+            "metadata_keyword_coverage",
+        ]
         b = rag_summary.get("genmentor", {})
         e = rag_summary.get("enhanced", {})
+
+        lines.append("### Overall")
+        lines.append("")
         lines.append("| Metric | GenMentor | 5902Group5 | Delta |")
         lines.append("|---|---|---|---|")
         for dim in rag_dims:
@@ -105,18 +115,65 @@ def build_report(
             ev = e.get(dim)
             lines.append(f"| {dim} | {format_score(bv)} | {format_score(ev)} | {delta_str(bv, ev)} |")
         lines.append("")
+
+        lines.append("### Standard Cases Only")
+        lines.append("")
+        lines.append("| Metric | GenMentor | 5902Group5 | Delta |")
+        lines.append("|---|---|---|---|")
+        for dim in rag_dims:
+            key = f"standard_{dim}"
+            bv = b.get(key)
+            ev = e.get(key)
+            if bv is not None or ev is not None:
+                lines.append(f"| {dim} | {format_score(bv)} | {format_score(ev)} | {delta_str(bv, ev)} |")
+        lines.append("")
+
+        lines.append("### Metadata Cases Only")
+        lines.append("")
+        lines.append("| Metric | GenMentor | 5902Group5 | Delta |")
+        lines.append("|---|---|---|---|")
+        for dim in rag_dims:
+            key = f"metadata_{dim}"
+            bv = b.get(key)
+            ev = e.get(key)
+            if bv is not None or ev is not None:
+                lines.append(f"| {dim} | {format_score(bv)} | {format_score(ev)} | {delta_str(bv, ev)} |")
+        lines.append("")
+
+        lines.append("### Metadata Diagnostics")
+        lines.append("")
+        lines.append("| Metric | GenMentor | 5902Group5 | Delta |")
+        lines.append("|---|---|---|---|")
+        for dim in rag_metadata_diag_dims:
+            bv = b.get(dim)
+            ev = e.get(dim)
+            if bv is not None or ev is not None:
+                lines.append(f"| {dim} | {format_score(bv)} | {format_score(ev)} | {delta_str(bv, ev)} |")
+        lines.append("")
     else:
         lines.append("## 1. RAG Quality (RAGAS) — *skipped*\n")
 
     # 2. Skill Gap
     b_sg = sg_summary.get("genmentor", {})
     e_sg = sg_summary.get("enhanced", {})
+    a_sg = sg_summary.get("genmentor_forced_refine", {})
     section_table(
         "2. Skill Gap Quality (LLM-Judge, 1–5 scale)",
         ["completeness", "gap_calibration", "goal_refinement_quality", "confidence_validity"],
         b_sg, e_sg,
         enhanced_only_dims=["expert_calibration", "solo_level_accuracy"],
     )
+
+    if a_sg:
+        lines.append("### Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)")
+        lines.append("")
+        lines.append("| Dimension | GenMentor | GenMentor (Forced Refine) | 5902Group5 |")
+        lines.append("|---|---|---|---|")
+        for dim in ["completeness", "gap_calibration", "goal_refinement_quality", "confidence_validity"]:
+            lines.append(
+                f"| {dim} | {format_score(b_sg.get(dim))} | {format_score(a_sg.get(dim))} | {format_score(e_sg.get(dim))} |"
+            )
+        lines.append("")
 
     # 3. Learning Plan
     b_plan = plan_summary.get("genmentor", {})
@@ -200,7 +257,14 @@ def main():
     parser = argparse.ArgumentParser(description="Run comparative evaluation suite")
     parser.add_argument("--skip-rag", action="store_true", help="Skip RAGAS evaluation")
     parser.add_argument("--skip-perf", action="store_true", help="Skip API performance evaluation")
-    parser.add_argument("--scenarios", type=str, default=None, help="Comma-separated scenario IDs, e.g. S01,S02,S03")
+    parser.add_argument("--resume-perf", action="store_true", help="Resume API perf from local checkpoint cache")
+    parser.add_argument(
+        "--perf-cache-path",
+        type=str,
+        default=os.path.join(RESULTS_DIR, "api_perf_checkpoint.json"),
+        help="Local cache path for incremental API perf results",
+    )
+    parser.add_argument("--scenarios", type=str, default=None, help="Comma-separated scenario IDs, e.g. S1,S2,S3")
     args = parser.parse_args()
 
     scenario_filter = args.scenarios.split(",") if args.scenarios else None
@@ -210,45 +274,49 @@ def main():
 
     run_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # --- API Perf ---
+    perf_results = None
+    if not args.skip_perf:
+        print("\n" + "="*60)
+        print("PHASE 1: API Performance (also seeds shared endpoint cache)")
+        print("="*60)
+        perf_results = run_eval_api_perf(
+            scenarios,
+            cache_path=args.perf_cache_path,
+            resume=args.resume_perf,
+        )
+
     # --- Skill Gap ---
     print("\n" + "="*60)
-    print("PHASE 1: Skill Gap Evaluation")
+    print("PHASE 2: Skill Gap Evaluation")
     print("="*60)
-    sg_results = run_eval_skill_gap(scenarios)
+    sg_results = run_eval_skill_gap(scenarios, prefetched_runs=perf_results)
     sg_summary = summarise_skill_gap(sg_results)
 
     # --- Learning Plan ---
     print("\n" + "="*60)
-    print("PHASE 2: Learning Plan Evaluation")
+    print("PHASE 3: Learning Plan Evaluation")
     print("="*60)
-    plan_results = run_eval_plan(scenarios)
+    plan_results = run_eval_plan(scenarios, prefetched_runs=perf_results)
     plan_summary = summarise_plan(plan_results)
 
     # --- Content ---
     print("\n" + "="*60)
-    print("PHASE 3: Content Evaluation")
+    print("PHASE 4: Content Evaluation")
     print("="*60)
-    content_results = run_eval_content(scenarios)
+    content_results = run_eval_content(scenarios, prefetched_runs=perf_results)
     content_summary = summarise_content(content_results)
 
     # --- RAG ---
     rag_summary = None
     if not args.skip_rag:
         print("\n" + "="*60)
-        print("PHASE 4: RAG Evaluation (RAGAS)")
+        print("PHASE 5: RAG Evaluation (RAGAS)")
         print("="*60)
         from evals.eval_rag import build_rag_cases, run_eval_rag, compute_ragas_scores
         rag_cases = build_rag_cases(dataset)
         rag_rows = run_eval_rag(rag_cases)
-        rag_summary = {v: compute_ragas_scores(rows) for v, rows in rag_rows.items()}
-
-    # --- API Perf ---
-    perf_results = None
-    if not args.skip_perf:
-        print("\n" + "="*60)
-        print("PHASE 5: API Performance")
-        print("="*60)
-        perf_results = run_eval_api_perf(scenarios)
+        rag_summary = {v: compute_ragas_scores(rows, version_key=v) for v, rows in rag_rows.items()}
 
     # --- Save raw results ---
     os.makedirs(RESULTS_DIR, exist_ok=True)

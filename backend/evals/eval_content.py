@@ -18,6 +18,7 @@ Usage:
 
 import json
 import os
+import ast
 import httpx
 
 from evals.config import VERSIONS, DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL_NAME, DATASETS_DIR, RESULTS_DIR, DEFAULT_SESSION_COUNT
@@ -54,15 +55,27 @@ Rate 1-5 for each dimension. Respond with JSON only:
 Scoring rubric — higher is always better:
 - cognitive_level_match: Does the content complexity match the learner's stated background?
     Score 5: explanations and examples are pitched at exactly the right level — neither over-simplified for an experienced learner nor assuming knowledge a beginner does not have.
+    Score 4: level match is strong overall, with only minor moments that are slightly too advanced or too basic.
+    Score 3: level match is mixed — substantial parts fit, but noticeable sections are mismatched for the learner.
+    Score 2: level match is weak — much of the content is inappropriately advanced or simplistic, with only limited useful sections.
     Score 1: the content is severely mismatched — either far too advanced (assumes expertise the learner clearly lacks) or far too basic (condescendingly simple for a learner with stated experience).
 - factual_accuracy: Are the claims made in the content correct?
     Score 5: all statements are factually accurate with no misleading simplifications or errors.
+    Score 4: content is mostly accurate; any inaccuracies are minor and unlikely to mislead the learner's core understanding.
+    Score 3: accuracy is mixed; there are some meaningful errors or oversimplifications, but key ideas are still partly correct.
+    Score 2: accuracy is poor; multiple significant errors or misleading claims affect important concepts.
     Score 1: the content contains clear factual errors or significantly misleading statements that would cause the learner to form incorrect understanding.
 - quiz_alignment: Do the quiz questions test concepts that were actually explained in this session's content?
     Score 5: every quiz question directly tests a concept or skill that was covered and explained in the content excerpt for this session.
+    Score 4: most quiz questions align with explained concepts, with at most one minor drift into lightly covered material.
+    Score 3: partial alignment; some questions are relevant, but several target concepts not clearly taught in the content.
+    Score 2: weak alignment; most questions are loosely related or rely on concepts not properly explained.
     Score 1: the quiz questions ask about topics not covered in the content, or are entirely disconnected from the session's stated knowledge points.
 - engagement_quality: Is the content clearly structured, well-explained, and supported by concrete examples?
     Score 5: the content has a logical flow, uses concrete examples to illustrate concepts, and is written in an accessible way that would motivate a learner to continue.
+    Score 4: content is generally clear and engaging, with good structure and some concrete examples, though a few sections are less polished.
+    Score 3: engagement is inconsistent; structure or clarity is adequate in parts, but explanations or examples are uneven.
+    Score 2: content is hard to follow for long stretches, with weak structure and few useful examples.
     Score 1: the content is disorganised or relies on unexplained jargon, lacks any illustrative examples, or is written in a way that would actively discourage a learner.
 
 Important: verify that your score and reason are consistent before writing the JSON.
@@ -93,6 +106,9 @@ FSLSM content adaptation — check whether the content format reflects the learn
 
 - fslsm_content_adaptation:
     Score 5: the content format clearly reflects the learner's FSLSM profile (e.g., a visual learner's content includes visual elements; an active learner's content includes exercises), or the learner is balanced and the content is well-structured overall.
+    Score 4: adaptation is mostly aligned with FSLSM preferences, with only minor omissions in one dimension.
+    Score 3: adaptation is partial — some style preferences are reflected, but others are missing or weakly implemented.
+    Score 2: adaptation is limited — most FSLSM preferences are not reflected, with only occasional accidental alignment.
     Score 1: the content format directly contradicts the FSLSM profile (e.g., a visual learner receives pure text with no visual elements; an active learner receives only passive reading with no tasks).
 
 SOLO cognitive alignment — does the content's cognitive demand match the learner's current level?
@@ -103,6 +119,9 @@ SOLO cognitive alignment — does the content's cognitive demand match the learn
 
 - solo_cognitive_alignment:
     Score 5: the content's depth, complexity, and cognitive tasks closely match the learner's current SOLO level (e.g., a beginner receives clear definitions and simple examples; an advanced learner receives integration and application tasks).
+    Score 4: cognitive demand is mostly appropriate, with minor over- or under-shooting in a few sections.
+    Score 3: cognitive demand is uneven — some sections match SOLO level well, while others are noticeably miscalibrated.
+    Score 2: cognitive demand is largely misaligned, with only limited portions matching the learner's SOLO level.
     Score 1: the content is dramatically misaligned with the current SOLO level (e.g., abstract critical evaluation tasks for a total beginner, or trivially simple definitions for a learner already at an advanced level).
 
 Respond with ONLY a single merged JSON object containing all 6 dimensions."""
@@ -121,6 +140,43 @@ def _api_learner_info(scenario: dict, version_key: str) -> str:
     """Return the version-specific prefixed learner_information for API calls."""
     key = f"learner_information_{version_key}"
     return scenario.get(key, scenario["learner_information"])
+
+
+def _unwrap_profile_body(profile_body: dict) -> dict:
+    """
+    Normalise profile response shape across systems:
+      - {"learner_profile": {...}} -> {...}
+      - {...} -> {...}
+    """
+    if not isinstance(profile_body, dict):
+        return {}
+    inner = profile_body.get("learner_profile")
+    if isinstance(inner, dict):
+        return inner
+    return profile_body
+
+
+def _count_skill_gaps(sg_body: dict) -> int:
+    """Best-effort count of identified skill gaps from API response body."""
+    if not isinstance(sg_body, dict):
+        return 0
+    raw = sg_body.get("skill_gaps", [])
+    if isinstance(raw, list):
+        return len(raw)
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return len(parsed)
+        except Exception:
+            pass
+        try:
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, list):
+                return len(parsed)
+        except Exception:
+            pass
+    return 0
 
 
 def _prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts) -> str:
@@ -172,7 +228,7 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
       Stage 3: integrate-learning-document
       Stage 4: generate-document-quizzes
 
-    Returns dict with: profile_body, path_body, session, content_body
+    Returns dict with: profile_body, path_body, session, knowledge_points, content_body
     content_body keys: learning_document (markdown str), quizzes (dict)
     """
     with httpx.Client(timeout=300.0) as client:
@@ -183,6 +239,14 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         )
         sg_resp.raise_for_status()
         sg_body = sg_resp.json()
+        skill_gap_count = _count_skill_gaps(sg_body)
+        if skill_gap_count == 0:
+            return {
+                "not_applicable": True,
+                "not_applicable_reason": "zero_skill_gaps",
+                "skill_gaps_body": sg_body,
+                "skill_gap_count": 0,
+            }
 
         # Profile
         profile_resp = client.post(
@@ -194,7 +258,7 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
             }),
         )
         profile_resp.raise_for_status()
-        profile_body = profile_resp.json()
+        profile_body = _unwrap_profile_body(profile_resp.json())
 
         # Learning path
         path_resp = client.post(
@@ -290,11 +354,24 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         }
 
     return {
+        "skill_gaps_body": sg_body,
+        "skill_gap_count": skill_gap_count,
         "profile_body": profile_body,
         "path_body": path_body,
         "session": first_session,
+        "knowledge_points": knowledge_points,
         "content_body": content_body,
     }
+
+
+def _is_ok_timing_entry(entry: dict | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("error"):
+        return False
+    if entry.get("status_code", 200) >= 400:
+        return False
+    return isinstance(entry.get("body"), dict)
 
 
 def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> dict:
@@ -312,8 +389,20 @@ def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> di
         print(f"    ERROR: {e}")
         return {"scenario_id": sid, "version": version_key, "error": str(e)}
 
+    if pipeline_out.get("not_applicable_reason") == "zero_skill_gaps":
+        return {
+            "scenario_id": sid,
+            "version": version_key,
+            "not_applicable": True,
+            "not_applicable_reason": "zero_skill_gaps",
+            "pipeline_outputs": {
+                "skill_gap_count": 0,
+            },
+        }
+
     profile_body = pipeline_out["profile_body"]
     session = pipeline_out["session"]
+    explored_knowledge_points = pipeline_out.get("knowledge_points", [])
     content_body = pipeline_out["content_body"]
 
     # Extract content fields — content_body is always {"learning_document": str, "quizzes": dict}
@@ -323,7 +412,8 @@ def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> di
     content_excerpt = str(content_md)[:3000]
 
     quizzes = content_body.get("quizzes", {})
-    knowledge_points = session.get("associated_skills", [])
+    # Match frontend flow: this should reflect Stage-1 explored knowledge points.
+    knowledge_points = explored_knowledge_points or session.get("associated_skills", [])
 
     user_prompt = SHARED_JUDGE_USER.format(
         learner_information=info,
@@ -348,17 +438,122 @@ def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> di
         "scenario_id": sid,
         "version": version_key,
         "session_title": session.get("title"),
+        "pipeline_outputs": {
+            "skill_gap_count": pipeline_out.get("skill_gap_count"),
+        },
         "scores": scores,
     }
 
 
-def run_eval_content(scenarios: list[dict]) -> dict:
+def run_eval_content(scenarios: list[dict], prefetched_runs: dict | None = None) -> dict:
     all_results = {}
+
+    # Optional index from API perf results:
+    # prefetched_runs[version_key]["raw_runs"] = [{"scenario_id": ..., "timings": {...}}, ...]
+    prefetched_index: dict[str, dict[str, dict]] = {}
+    if prefetched_runs:
+        for v_key, v_data in prefetched_runs.items():
+            scenario_map = {}
+            for run in (v_data or {}).get("raw_runs", []):
+                sid = run.get("scenario_id")
+                if sid:
+                    scenario_map[sid] = run.get("timings", {})
+            prefetched_index[v_key] = scenario_map
+
     for version_key, version_cfg in VERSIONS.items():
         print(f"\n=== Content Eval: {version_cfg['label']} ===")
         version_results = []
         for scenario in scenarios:
-            result = evaluate_scenario(scenario, version_key, version_cfg)
+            sid = scenario["id"]
+            timings = prefetched_index.get(version_key, {}).get(sid, {})
+            sg_t = timings.get("identify_skill_gap")
+            profile_t = timings.get("create_learner_profile")
+            path_t = timings.get("schedule_learning_path")
+            integrate_t = timings.get("integrate_learning_document")
+            quiz_t = timings.get("generate_document_quizzes")
+
+            if _is_ok_timing_entry(sg_t):
+                skill_gap_count = _count_skill_gaps(sg_t["body"])
+                if skill_gap_count == 0:
+                    result = {
+                        "scenario_id": sid,
+                        "version": version_key,
+                        "not_applicable": True,
+                        "not_applicable_reason": "zero_skill_gaps",
+                        "pipeline_outputs": {
+                            "skill_gap_count": 0,
+                        },
+                        "used_prefetched_api_output": True,
+                    }
+                    version_results.append(result)
+                    continue
+
+            if (
+                _is_ok_timing_entry(profile_t)
+                and _is_ok_timing_entry(path_t)
+                and _is_ok_timing_entry(integrate_t)
+                and _is_ok_timing_entry(quiz_t)
+            ):
+                profile_body = _unwrap_profile_body(profile_t["body"])
+                path_body = path_t["body"]
+                sessions = path_body.get("learning_path", [])
+                first_session = sessions[0] if sessions else {}
+                explore_t = timings.get("explore_knowledge_points")
+                integrate_body = integrate_t["body"] or {}
+                learning_document = integrate_body.get("learning_document", "")
+                quizzes = (quiz_t["body"] or {}).get("document_quiz", {})
+
+                # Validate essential fields; otherwise fallback to live pipeline.
+                if first_session and learning_document is not None:
+                    # Keep formatting logic consistent with run_content_pipeline().
+                    if not (integrate_body.get("document_is_markdown", False) or isinstance(learning_document, str)):
+                        draft_t = timings.get("draft_knowledge_points")
+                        if _is_ok_timing_entry(explore_t) and _is_ok_timing_entry(draft_t):
+                            kp_list = (explore_t["body"] or {}).get("knowledge_points", [])
+                            kd_list = (draft_t["body"] or {}).get("knowledge_drafts", [])
+                            learning_document = _prepare_markdown_document(learning_document, kp_list, kd_list)
+
+                    info = scenario["learner_information"]  # plain text — for judge context only
+                    is_enhanced = version_cfg["has_fslsm"]
+
+                    content_md = learning_document
+                    if isinstance(content_md, dict):
+                        content_md = json.dumps(content_md)
+                    content_excerpt = str(content_md)[:3000]
+                    explored_kps = (explore_t["body"] or {}).get("knowledge_points", []) if _is_ok_timing_entry(explore_t) else []
+                    knowledge_points = explored_kps or first_session.get("associated_skills", [])
+
+                    user_prompt = SHARED_JUDGE_USER.format(
+                        learner_information=info,
+                        session_title=first_session.get("title", "Session 1"),
+                        knowledge_points=json.dumps(knowledge_points, indent=2),
+                        content_excerpt=content_excerpt,
+                        quizzes=json.dumps(quizzes, indent=2)[:2000],
+                    )
+                    if is_enhanced:
+                        fslsm = extract_fslsm_dimensions(profile_body)
+                        solo_level = extract_current_solo_level(profile_body)
+                        user_prompt += "\n\n" + ENHANCED_JUDGE_USER_EXTENSION.format(
+                            fslsm_dimensions=json.dumps(fslsm, indent=2) if fslsm else "N/A",
+                            solo_level=solo_level,
+                        )
+
+                    print(f"  [{version_key}] {sid} — judging (using prefetched content pipeline outputs)...")
+                    scores = judge(SHARED_JUDGE_SYSTEM, user_prompt)
+                    result = {
+                        "scenario_id": sid,
+                        "version": version_key,
+                        "session_title": first_session.get("title"),
+                        "pipeline_outputs": {
+                            "skill_gap_count": _count_skill_gaps(sg_t["body"]) if _is_ok_timing_entry(sg_t) else None,
+                        },
+                        "scores": scores,
+                        "used_prefetched_api_output": True,
+                    }
+                else:
+                    result = evaluate_scenario(scenario, version_key, version_cfg)
+            else:
+                result = evaluate_scenario(scenario, version_key, version_cfg)
             version_results.append(result)
         all_results[version_key] = version_results
     return all_results
@@ -376,6 +571,12 @@ def summarise(all_results: dict) -> dict:
         if VERSIONS[version_key]["has_fslsm"]:
             for dim in enhanced_dims:
                 version_summary[dim] = average_score(scores_list, dim)
+        version_summary["scenario_count"] = len(results)
+        version_summary["scored_scenario_count"] = len(scores_list)
+        version_summary["not_applicable_zero_gap_count"] = sum(
+            1 for r in results if r.get("not_applicable_reason") == "zero_skill_gaps"
+        )
+        version_summary["error_count"] = sum(1 for r in results if "error" in r)
         summary[version_key] = version_summary
     return summary
 

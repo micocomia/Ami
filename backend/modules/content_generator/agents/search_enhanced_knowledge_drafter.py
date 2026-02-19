@@ -72,15 +72,17 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
                         "lecture_number": meta.get("lecture_number"),
                         "page_number": meta.get("page_number"),
                         "file_name": meta.get("file_name", ""),
+                        "page_content": doc.page_content,
                     }
                 elif st == "web_search":
                     ref = {
                         "source_type": "web_search",
                         "title": meta.get("title", ""),
                         "url": meta.get("source", ""),
+                        "page_content": doc.page_content,
                     }
                 else:
-                    ref = {"source_type": st or "unknown"}
+                    ref = {"source_type": st or "unknown", "page_content": doc.page_content}
                 sources_used.append(ref)
             context = format_docs(docs)
             if context:
