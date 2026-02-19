@@ -45,15 +45,28 @@ Rate 1-5 for each dimension. Respond with JSON only:
   "session_abstraction_quality": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-Scoring rubric:
-- pedagogical_sequencing: 1=random order ignoring prerequisites, 5=ideal prerequisite order
-- skill_coverage: 1=many skill gaps unaddressed, 5=every gap maps to at least one session
-- scope_appropriateness: 1=wildly too shallow or too deep for N sessions, 5=realistic depth
-- session_abstraction_quality: 1=session titles/abstracts vague/redundant, 5=distinct and meaningful"""
+Scoring rubric — higher is always better:
+- pedagogical_sequencing: Are sessions ordered so that foundational skills are taught before dependent ones?
+    Score 5: sessions build on each other correctly — prerequisites appear before the skills that depend on them, and no session requires knowledge not yet covered.
+    Score 1: sessions are ordered with no regard for prerequisites — advanced topics appear before foundational ones are established.
+    Note: if the skill gaps are largely independent of each other, any coherent grouping is acceptable and should score 4 or 5.
+- skill_coverage: Does the learning path address all the listed skill gaps, directly or thematically?
+    Score 5: every skill gap in the list is covered in at least one session, either by exact topic or by a closely related session focus.
+    Score 1: one or more major skill gaps from the list are entirely absent from the learning path with no related session covering them.
+- scope_appropriateness: Is the depth and breadth of the plan realistic given the session count and learner background?
+    Score 5: the plan covers a sensible amount of material — each session has a clear, achievable focus that suits the given number of sessions and the learner's starting level.
+    Score 1: the plan is obviously overloaded (far too many distinct topics crammed into too few sessions) or obviously trivial (sessions contain near-empty or redundant content) for the requested session count.
+- session_abstraction_quality: Are session titles and descriptions distinct, specific, and informative?
+    Score 5: each session has a unique, clearly scoped focus; titles and descriptions communicate what the learner will concretely do or learn.
+    Score 1: sessions are vaguely titled (e.g., "Introduction", "More learning"), nearly identical to each other, or their descriptions fail to convey any concrete learning objective.
+
+Important: verify that your score and reason are consistent before writing the JSON.
+A positive reason (e.g., "sessions are well-ordered", "all gaps covered") must map to a HIGH score (4 or 5).
+A negative reason (e.g., "prerequisite ordering violated", "major gaps missing") must map to a LOW score (1 or 2)."""
 
 ENHANCED_JUDGE_USER_EXTENSION = """\
 
-Also evaluate these enhanced-only dimensions given the learner's FSLSM profile:
+Also evaluate these two enhanced-only dimensions and merge them into the same JSON object:
 FSLSM Dimensions: {fslsm_dimensions}
 (Scale: -1.0 to +1.0; processing: -1=active, +1=reflective; perception: -1=sensing, +1=intuitive;
  input: -1=visual, +1=verbal; understanding: -1=sequential, +1=global)
@@ -63,14 +76,21 @@ FSLSM Dimensions: {fslsm_dimensions}
   "solo_outcome_progression": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-FSLSM structural alignment guide (check session-level fields):
-- Active learner (processing ≤ -0.5): should have has_checkpoint_challenges=true
-- Reflective learner (processing ≥ 0.5): should have thinking_time_buffer_minutes > 0
+FSLSM structural alignment — check the session-level fields against the expected values:
+- Active learner (processing ≤ -0.5): sessions should have has_checkpoint_challenges=true
+- Reflective learner (processing ≥ 0.5): sessions should have thinking_time_buffer_minutes > 0
 - Sequential learner (understanding ≤ -0.5): navigation_mode should be "linear"
 - Global learner (understanding ≥ 0.5): navigation_mode should be "free"
+- Balanced learner (all dimensions near 0.0): any consistent structural choice is acceptable
 
-SOLO outcome progression: desired_outcome_when_completed proficiency levels should not skip
-levels (beginner → intermediate → advanced → expert), or justify if they do.
+- fslsm_structural_alignment:
+    Score 5: the session-level structural fields match what the FSLSM profile calls for, or the learner is balanced and the fields are internally consistent.
+    Score 1: the structural fields directly contradict the FSLSM profile (e.g., an active learner has no checkpoint challenges, or a sequential learner is assigned free navigation).
+
+SOLO outcome progression — do the desired_outcome_when_completed proficiency levels advance sensibly?
+- solo_outcome_progression:
+    Score 5: proficiency levels step up gradually across sessions (e.g., unlearned → beginner → intermediate), matching the learner's starting level with no unjustified skips.
+    Score 1: proficiency levels jump irrationally (e.g., unlearned directly to expert) or regress (a later session targets a lower level than an earlier one) with no clear justification.
 
 Respond with ONLY a single merged JSON object containing all 6 dimensions."""
 

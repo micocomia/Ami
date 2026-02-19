@@ -1,9 +1,16 @@
 """
 Content Generator Evaluation — LLM-as-a-Judge
 
-For each scenario, runs the full pipeline through /tailor-knowledge-content
-(which internally calls explore → draft → integrate → quiz) and judges the
-result on shared and enhanced-only dimensions.
+For each scenario, runs the full 4-stage content pipeline:
+  1. explore-knowledge-points
+  2. draft-knowledge-points
+  3. integrate-learning-document
+  4. generate-document-quizzes
+
+This mirrors exactly what the frontend knowledge_document.py does in
+render_content_preparation() for both the baseline (GenMentor) and the
+enhanced (5902Group5) versions.  The assembled document and quizzes are
+then judged on shared and enhanced-only dimensions.
 
 Usage:
     python -m evals.eval_content
@@ -44,15 +51,27 @@ Rate 1-5 for each dimension. Respond with JSON only:
   "engagement_quality": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-Scoring rubric:
-- cognitive_level_match: 1=assumes far too much/little prior knowledge, 5=perfectly calibrated to background
-- factual_accuracy: 1=significant factual errors, 5=all claims accurate
-- quiz_alignment: 1=quiz questions unrelated to content, 5=every question maps to a knowledge point in content
-- engagement_quality: 1=dry/confusing/unsupported, 5=clear structure, appropriate depth, motivating examples"""
+Scoring rubric — higher is always better:
+- cognitive_level_match: Does the content complexity match the learner's stated background?
+    Score 5: explanations and examples are pitched at exactly the right level — neither over-simplified for an experienced learner nor assuming knowledge a beginner does not have.
+    Score 1: the content is severely mismatched — either far too advanced (assumes expertise the learner clearly lacks) or far too basic (condescendingly simple for a learner with stated experience).
+- factual_accuracy: Are the claims made in the content correct?
+    Score 5: all statements are factually accurate with no misleading simplifications or errors.
+    Score 1: the content contains clear factual errors or significantly misleading statements that would cause the learner to form incorrect understanding.
+- quiz_alignment: Do the quiz questions test concepts that were actually explained in this session's content?
+    Score 5: every quiz question directly tests a concept or skill that was covered and explained in the content excerpt for this session.
+    Score 1: the quiz questions ask about topics not covered in the content, or are entirely disconnected from the session's stated knowledge points.
+- engagement_quality: Is the content clearly structured, well-explained, and supported by concrete examples?
+    Score 5: the content has a logical flow, uses concrete examples to illustrate concepts, and is written in an accessible way that would motivate a learner to continue.
+    Score 1: the content is disorganised or relies on unexplained jargon, lacks any illustrative examples, or is written in a way that would actively discourage a learner.
+
+Important: verify that your score and reason are consistent before writing the JSON.
+A positive reason (e.g., "content well-matched", "all questions aligned") must map to a HIGH score (4 or 5).
+A negative reason (e.g., "factual errors present", "quiz unrelated to content") must map to a LOW score (1 or 2)."""
 
 ENHANCED_JUDGE_USER_EXTENSION = """\
 
-Also evaluate these enhanced-only dimensions:
+Also evaluate these two enhanced-only dimensions and merge them into the same JSON object:
 FSLSM Dimensions: {fslsm_dimensions}
 (Scale: -1.0 to +1.0; processing: -1=active, +1=reflective; perception: -1=sensing, +1=intuitive;
  input: -1=visual, +1=verbal; understanding: -1=sequential, +1=global)
@@ -63,19 +82,28 @@ Current SOLO Level: {solo_level}
   "solo_cognitive_alignment": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-FSLSM content adaptation guide:
-- Visual learner (input ≤ -0.5): should include diagrams, tables, visual examples
-- Verbal learner (input ≥ 0.5): text-heavy, narrative explanations
-- Active learner (processing ≤ -0.5): hands-on exercises, code challenges, interactive elements
-- Reflective learner (processing ≥ 0.5): reflection prompts, analysis tasks, compare-and-contrast
-- Sensing learner (perception ≤ -0.5): concrete examples presented before abstract concepts
-- Intuitive learner (perception ≥ 0.5): theory and concepts presented before concrete examples
+FSLSM content adaptation — check whether the content format reflects the learner's style preferences:
+- Visual learner (input ≤ -0.5): content should include diagrams, tables, or visual examples
+- Verbal learner (input ≥ 0.5): content should use text-heavy narrative explanations
+- Active learner (processing ≤ -0.5): content should include hands-on exercises, code challenges, or interactive tasks
+- Reflective learner (processing ≥ 0.5): content should include reflection prompts, analysis tasks, or compare-and-contrast sections
+- Sensing learner (perception ≤ -0.5): concrete examples should appear before abstract concepts
+- Intuitive learner (perception ≥ 0.5): theory and concepts should appear before concrete examples
+- Balanced learner (all dimensions near 0.0): any well-structured mixed approach is acceptable
 
-SOLO cognitive alignment:
-- Beginner (unistructural): simple definitions, one concept at a time
-- Intermediate (multistructural): multiple concepts side-by-side, lists, comparisons
-- Advanced (relational): integration, cause-effect, applying concepts to scenarios
-- Expert (extended abstract): generalisation, critical evaluation, novel applications
+- fslsm_content_adaptation:
+    Score 5: the content format clearly reflects the learner's FSLSM profile (e.g., a visual learner's content includes visual elements; an active learner's content includes exercises), or the learner is balanced and the content is well-structured overall.
+    Score 1: the content format directly contradicts the FSLSM profile (e.g., a visual learner receives pure text with no visual elements; an active learner receives only passive reading with no tasks).
+
+SOLO cognitive alignment — does the content's cognitive demand match the learner's current level?
+- unlearned / beginner (unistructural): simple definitions, one concept at a time, abundant concrete examples
+- intermediate (multistructural): multiple concepts covered side-by-side, comparisons, structured lists
+- advanced (relational): integration of concepts, cause-effect reasoning, applying knowledge to realistic scenarios
+- expert (extended abstract): generalisation, critical evaluation, novel problem-solving beyond taught examples
+
+- solo_cognitive_alignment:
+    Score 5: the content's depth, complexity, and cognitive tasks closely match the learner's current SOLO level (e.g., a beginner receives clear definitions and simple examples; an advanced learner receives integration and application tasks).
+    Score 1: the content is dramatically misaligned with the current SOLO level (e.g., abstract critical evaluation tasks for a total beginner, or trivially simple definitions for a learner already at an advanced level).
 
 Respond with ONLY a single merged JSON object containing all 6 dimensions."""
 
@@ -95,12 +123,59 @@ def _api_learner_info(scenario: dict, version_key: str) -> str:
     return scenario.get(key, scenario["learner_information"])
 
 
+def _prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts) -> str:
+    """
+    Inline equivalent of the frontend's prepare_markdown_document().
+    Converts the structured document dict returned by integrate-learning-document
+    into a flat markdown string for use by the LLM judge.
+    """
+    if isinstance(document_structure, str):
+        try:
+            import ast
+            document_structure = ast.literal_eval(document_structure)
+        except Exception:
+            return document_structure  # already a string, return as-is
+
+    if not isinstance(document_structure, dict):
+        return json.dumps(document_structure)
+
+    part_titles = {
+        "foundational": "## Foundational Concepts",
+        "practical": "## Practical Applications",
+        "strategic": "## Strategic Insights",
+    }
+
+    doc = f"# {document_structure.get('title', '')}"
+    doc += f"\n\n{document_structure.get('overview', '')}"
+
+    for k_type, part_title in part_titles.items():
+        doc += f"\n\n{part_title}\n"
+        for k_id, kp in enumerate(knowledge_points):
+            if kp.get("type") != k_type:
+                continue
+            if k_id >= len(knowledge_drafts):
+                continue
+            kd = knowledge_drafts[k_id]
+            doc += f"\n\n### {kd.get('title', '')}\n"
+            doc += f"\n\n{kd.get('content', '')}\n"
+
+    doc += f"\n\n## Summary\n\n{document_structure.get('summary', '')}"
+    return doc
+
+
 def run_content_pipeline(base_url: str, learning_goal: str, learner_information: str) -> dict:
     """
-    Run onboarding + content generation for the first session of the learning path.
+    Run onboarding + content generation for the first session of the learning path,
+    mirroring the 4-stage pipeline in the frontend's render_content_preparation():
+      Stage 1: explore-knowledge-points
+      Stage 2: draft-knowledge-points
+      Stage 3: integrate-learning-document
+      Stage 4: generate-document-quizzes
+
     Returns dict with: profile_body, path_body, session, content_body
+    content_body keys: learning_document (markdown str), quizzes (dict)
     """
-    with httpx.Client(timeout=180.0) as client:
+    with httpx.Client(timeout=300.0) as client:
         # Skill gap
         sg_resp = client.post(
             f"{base_url}/identify-skill-gap-with-info",
@@ -115,7 +190,7 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
             json=_base_payload({
                 "learning_goal": learning_goal,
                 "learner_information": learner_information,
-                "skill_gaps": json.dumps(sg_body.get("skill_gaps", [])),
+                "skill_gaps": repr(sg_body.get("skill_gaps", [])),
             }),
         )
         profile_resp.raise_for_status()
@@ -125,7 +200,7 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         path_resp = client.post(
             f"{base_url}/schedule-learning-path",
             json=_base_payload({
-                "learner_profile": json.dumps(profile_body),
+                "learner_profile": repr(profile_body),
                 "session_count": DEFAULT_SESSION_COUNT,
             }),
         )
@@ -139,19 +214,80 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         # Evaluate content for session 1 only (cost control)
         first_session = sessions[0]
 
-        content_resp = client.post(
-            f"{base_url}/tailor-knowledge-content",
+        learner_profile_str = repr(profile_body)
+        learning_path_str = repr(path_body)
+        session_str = repr(first_session)
+
+        # Stage 1/4: Explore knowledge points
+        explore_resp = client.post(
+            f"{base_url}/explore-knowledge-points",
             json=_base_payload({
-                "learner_profile": json.dumps(profile_body),
-                "learning_path": json.dumps(path_body),
-                "learning_session": json.dumps(first_session),
-                "use_search": True,
-                "allow_parallel": False,
-                "with_quiz": True,
+                "learner_profile": learner_profile_str,
+                "learning_path": learning_path_str,
+                "learning_session": session_str,
             }),
         )
-        content_resp.raise_for_status()
-        content_body = content_resp.json()
+        explore_resp.raise_for_status()
+        knowledge_points = explore_resp.json().get("knowledge_points", [])
+
+        # Stage 2/4: Draft knowledge points
+        draft_resp = client.post(
+            f"{base_url}/draft-knowledge-points",
+            json=_base_payload({
+                "learner_profile": learner_profile_str,
+                "learning_path": learning_path_str,
+                "learning_session": session_str,
+                "knowledge_points": json.dumps(knowledge_points),
+                "use_search": True,
+                "allow_parallel": False,
+            }),
+        )
+        draft_resp.raise_for_status()
+        knowledge_drafts = draft_resp.json().get("knowledge_drafts", [])
+
+        # Stage 3/4: Integrate learning document
+        integrate_resp = client.post(
+            f"{base_url}/integrate-learning-document",
+            json=_base_payload({
+                "learner_profile": learner_profile_str,
+                "learning_path": learning_path_str,
+                "learning_session": session_str,
+                "knowledge_points": json.dumps(knowledge_points),
+                "knowledge_drafts": json.dumps(knowledge_drafts),
+                "output_markdown": False,
+            }),
+        )
+        integrate_resp.raise_for_status()
+        integrate_body = integrate_resp.json()
+
+        doc_structure = integrate_body.get("learning_document")
+        document_is_markdown = integrate_body.get("document_is_markdown", False)
+
+        if document_is_markdown or isinstance(doc_structure, str):
+            learning_document = doc_structure or ""
+        else:
+            learning_document = _prepare_markdown_document(doc_structure, knowledge_points, knowledge_drafts)
+
+        # Stage 4/4: Generate document quizzes
+        quiz_resp = client.post(
+            f"{base_url}/generate-document-quizzes",
+            json=_base_payload({
+                "learner_profile": learner_profile_str,
+                "learning_document": str(learning_document),
+                "single_choice_count": 3,
+                "multiple_choice_count": 1,
+                "true_false_count": 1,
+                "short_answer_count": 1,
+                "open_ended_count": 0,
+            }),
+        )
+        quiz_resp.raise_for_status()
+        quizzes = quiz_resp.json().get("document_quiz", {})
+
+        content_body = {
+            "learning_document": learning_document,
+            "quizzes": quizzes,
+        }
 
     return {
         "profile_body": profile_body,
@@ -180,13 +316,13 @@ def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> di
     session = pipeline_out["session"]
     content_body = pipeline_out["content_body"]
 
-    # Extract content fields (structure may vary slightly)
-    content_md = content_body.get("content", content_body.get("learning_document", ""))
+    # Extract content fields — content_body is always {"learning_document": str, "quizzes": dict}
+    content_md = content_body.get("learning_document", "")
     if isinstance(content_md, dict):
         content_md = json.dumps(content_md)
     content_excerpt = str(content_md)[:3000]
 
-    quizzes = content_body.get("quizzes", content_body.get("quiz", []))
+    quizzes = content_body.get("quizzes", {})
     knowledge_points = session.get("associated_skills", [])
 
     user_prompt = SHARED_JUDGE_USER.format(

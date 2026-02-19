@@ -45,29 +45,46 @@ Rate 1-5 for each dimension. Respond with JSON only:
   "confidence_validity": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-Scoring rubric:
-- completeness: 1=major relevant skills missing, 5=all key skills present
-- gap_calibration: 1=proficiency levels inconsistent with background, 5=well-calibrated
-- goal_refinement_quality: 1=vague/off-topic refinement, 5=specific and actionable
-- confidence_validity: 1=confidence scores seem arbitrary, 5=correlated with info availability"""
+Scoring rubric — higher is always better:
+- completeness: Does the skill list cover ALL areas a learner needs for this goal?
+    Score 5: the list is comprehensive and no major skill area is missing.
+    Score 1: one or more major skill areas needed to achieve the goal are absent from the list.
+- gap_calibration: Are the current_level and required_level values plausible given the learner's stated background?
+    Score 5: every gap level is directly justified by the background (e.g., a total beginner is unlearned, an experienced practitioner is intermediate).
+    Score 1: gap levels directly contradict the stated background (e.g., a stated expert is marked unlearned, or a total beginner is marked advanced).
+- goal_refinement_quality: Is the Refined Goal specific and actionable? If the Refined Goal is the same as the Learning Goal (no refinement was needed), evaluate the Learning Goal itself.
+    Score 5: the goal is specific, scoped, and clearly actionable.
+    Score 1: the goal is vague, generic, or off-topic relative to the identified skills.
+- confidence_validity: Are the level_confidence values (high/medium/low) appropriate given the information available?
+    Score 5: confidence ratings match the certainty warranted by the background evidence (e.g., high confidence when background is detailed and unambiguous).
+    Score 1: confidence values seem arbitrary or systematically wrong (e.g., high confidence despite very sparse background).
+
+Important: verify that your score and reason are consistent before writing the JSON.
+A positive reason (e.g., "levels are accurate", "all skills covered") must map to a HIGH score (4 or 5).
+A negative reason (e.g., "skills are missing", "levels contradict background") must map to a LOW score (1 or 2)."""
 
 ENHANCED_JUDGE_USER_EXTENSION = """\
 
-Additionally evaluate these enhanced-only dimensions:
+Additionally evaluate these two enhanced-only dimensions and merge them into the same JSON object:
 {{
   "expert_calibration": {{"score": <int 1-5>, "reason": "<one sentence>"}},
   "solo_level_accuracy": {{"score": <int 1-5>, "reason": "<one sentence>"}}
 }}
 
-SOLO rubric:
-- Prestructural / unlearned: no relevant knowledge
-- Unistructural (beginner): one relevant aspect known
-- Multistructural (intermediate): several aspects known but not integrated
-- Relational (advanced): aspects integrated into a coherent understanding
-- Extended Abstract (expert): can generalise and innovate beyond the domain
+SOLO taxonomy — how current_level values map to cognitive levels:
+- unlearned (Prestructural): learner has no relevant knowledge at all
+- beginner (Unistructural): learner knows one or two isolated relevant facts
+- intermediate (Multistructural): learner knows several aspects but cannot integrate them
+- advanced (Relational): learner integrates knowledge into a coherent whole
+- expert (Extended Abstract): learner can generalise and innovate beyond the domain
 
-- expert_calibration: 1=expert never used even when background clearly warrants it, 5=expert correctly applied
-- solo_level_accuracy: 1=current SOLO levels inconsistent with stated background, 5=precisely SOLO-grounded
+- expert_calibration: Evaluates whether the expert current_level is used correctly.
+    Score 5 when: (a) expert is correctly withheld because the learner's background shows no prior mastery of the skill, OR (b) expert is correctly assigned to a skill the learner demonstrably already masters.
+    Score 1 when: expert is withheld for a skill that the learner's background clearly shows they have already mastered at an expert level (i.e., the system missed an existing expert-level competency).
+    Note: a complete beginner having no expert-level skills is CORRECT — that earns a score of 5, not 1.
+- solo_level_accuracy: Are the current_level values consistent with what the learner explicitly stated about their background?
+    Score 5: all current_level values match what the learner's stated experience directly implies (e.g., unlearned for skills never mentioned, beginner for skills briefly touched on).
+    Score 1: current_level values systematically contradict the learner's stated experience (e.g., marking a self-described expert as unlearned, or a stated novice as advanced).
 
 Respond with ONLY a single merged JSON object containing all 6 dimensions."""
 
@@ -76,8 +93,8 @@ def _api_learner_info(scenario: dict, version_key: str) -> str:
     """
     Return the learner_information string that matches how each system's
     real onboarding flow constructs it:
-      - genmentor:  occupation_label + background_text  (onboarding.py:149)
-      - enhanced:   persona_prefix (with FSLSM vector) + background_text  (onboarding.py:245)
+      - genmentor:  occupation_label + background_text
+      - enhanced:   persona label + persona description + background_text
     The plain 'learner_information' key (background text only) is reserved for
     judge prompts so the evaluator sees neutral context without system-specific prefixes.
     """

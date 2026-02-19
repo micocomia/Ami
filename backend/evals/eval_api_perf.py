@@ -52,7 +52,7 @@ def run_skill_gap(base_url: str, scenario: dict, version_key: str) -> dict:
 
 
 def run_create_profile(base_url: str, scenario: dict, skill_gaps_body: dict, version_key: str) -> dict:
-    skill_gaps_str = json.dumps(skill_gaps_body.get("skill_gaps", []))
+    skill_gaps_str = repr(skill_gaps_body.get("skill_gaps", []))
     return timed_post(
         httpx.Client(timeout=90.0),
         f"{base_url}/create-learner-profile-with-info",
@@ -69,7 +69,7 @@ def run_schedule_path(base_url: str, profile_body: dict) -> dict:
         httpx.Client(timeout=90.0),
         f"{base_url}/schedule-learning-path",
         _base_payload({
-            "learner_profile": json.dumps(profile_body),
+            "learner_profile": repr(profile_body),
             "session_count": DEFAULT_SESSION_COUNT,
         }),
     )
@@ -82,26 +82,59 @@ def run_explore_kps(base_url: str, profile_body: dict, path_body: dict) -> dict:
         httpx.Client(timeout=90.0),
         f"{base_url}/explore-knowledge-points",
         _base_payload({
-            "learner_profile": json.dumps(profile_body),
-            "learning_path": json.dumps(path_body),
-            "learning_session": json.dumps(first_session),
+            "learner_profile": repr(profile_body),
+            "learning_path": repr(path_body),
+            "learning_session": repr(first_session),
         }),
     )
 
 
-def run_tailor_content(base_url: str, profile_body: dict, path_body: dict) -> dict:
+def run_draft_kps(base_url: str, profile_body: dict, path_body: dict, knowledge_points: list) -> dict:
     sessions = path_body.get("learning_path", [])
     first_session = sessions[0] if sessions else {}
     return timed_post(
         httpx.Client(timeout=180.0),
-        f"{base_url}/tailor-knowledge-content",
+        f"{base_url}/draft-knowledge-points",
         _base_payload({
-            "learner_profile": json.dumps(profile_body),
-            "learning_path": json.dumps(path_body),
-            "learning_session": json.dumps(first_session),
+            "learner_profile": repr(profile_body),
+            "learning_path": repr(path_body),
+            "learning_session": repr(first_session),
+            "knowledge_points": repr(knowledge_points),
             "use_search": True,
             "allow_parallel": False,
-            "with_quiz": True,
+        }),
+    )
+
+
+def run_integrate_doc(base_url: str, profile_body: dict, path_body: dict, knowledge_points: list, knowledge_drafts: list) -> dict:
+    sessions = path_body.get("learning_path", [])
+    first_session = sessions[0] if sessions else {}
+    return timed_post(
+        httpx.Client(timeout=120.0),
+        f"{base_url}/integrate-learning-document",
+        _base_payload({
+            "learner_profile": repr(profile_body),
+            "learning_path": repr(path_body),
+            "learning_session": repr(first_session),
+            "knowledge_points": repr(knowledge_points),
+            "knowledge_drafts": repr(knowledge_drafts),
+            "output_markdown": False,
+        }),
+    )
+
+
+def run_generate_quizzes(base_url: str, profile_body: dict, learning_document: str) -> dict:
+    return timed_post(
+        httpx.Client(timeout=90.0),
+        f"{base_url}/generate-document-quizzes",
+        _base_payload({
+            "learner_profile": repr(profile_body),
+            "learning_document": learning_document,
+            "single_choice_count": 3,
+            "multiple_choice_count": 1,
+            "true_false_count": 1,
+            "short_answer_count": 1,
+            "open_ended_count": 0,
         }),
     )
 
@@ -111,8 +144,8 @@ def run_chat(base_url: str, profile_body: dict) -> dict:
         httpx.Client(timeout=60.0),
         f"{base_url}/chat-with-tutor",
         _base_payload({
-            "messages": json.dumps([{"role": "user", "content": "What should I focus on first?"}]),
-            "learner_profile": json.dumps(profile_body),
+            "messages": repr([{"role": "user", "content": "What should I focus on first?"}]),
+            "learner_profile": repr(profile_body),
         }),
     )
 
@@ -127,7 +160,9 @@ ENDPOINT_NAMES = [
     "create_learner_profile",
     "schedule_learning_path",
     "explore_knowledge_points",
-    "tailor_knowledge_content",
+    "draft_knowledge_points",
+    "integrate_learning_document",
+    "generate_document_quizzes",
     "chat_with_tutor",
 ]
 
@@ -164,12 +199,23 @@ def run_scenario_perf(base_url: str, scenario: dict, version_key: str) -> dict[s
     # 5. Explore knowledge points
     r = run_explore_kps(base_url, profile_body, path_body)
     timings["explore_knowledge_points"] = r
+    knowledge_points = (r.get("body") or {}).get("knowledge_points", [])
 
-    # 6. Full content generation (session 1)
-    r = run_tailor_content(base_url, profile_body, path_body)
-    timings["tailor_knowledge_content"] = r
+    # 6. Draft knowledge points
+    r = run_draft_kps(base_url, profile_body, path_body, knowledge_points)
+    timings["draft_knowledge_points"] = r
+    knowledge_drafts = (r.get("body") or {}).get("knowledge_drafts", [])
 
-    # 7. Chat
+    # 7. Integrate learning document
+    r = run_integrate_doc(base_url, profile_body, path_body, knowledge_points, knowledge_drafts)
+    timings["integrate_learning_document"] = r
+    learning_document = str((r.get("body") or {}).get("learning_document", ""))
+
+    # 8. Generate document quizzes
+    r = run_generate_quizzes(base_url, profile_body, learning_document)
+    timings["generate_document_quizzes"] = r
+
+    # 9. Chat
     r = run_chat(base_url, profile_body)
     timings["chat_with_tutor"] = r
 

@@ -12,6 +12,12 @@ Set environment variables before running:
 """
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from the backend root (two levels up from this file)
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 GENMENTOR_BASE_URL = os.getenv("GENMENTOR_BASE_URL", "http://localhost:8000")
 ENHANCED_BASE_URL = os.getenv("ENHANCED_BASE_URL", "http://localhost:8001")

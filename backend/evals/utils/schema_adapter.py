@@ -30,12 +30,19 @@ def extract_refined_goal(skill_gap_body: dict) -> str:
     Both versions embed the refined goal inside the skill gap response.
     Field name differs: GenMentor uses 'refined_goal', enhanced may use
     'goal_assessment.refined_goal'. Fall back to raw learning_goal if absent.
+
+    Note: the enhanced system sets goal_assessment.refined_goal to None when
+    no refinement was needed (goal was already specific). Treat None as absent
+    so we fall through to the learning_goal fallback, which the judge can then
+    correctly score as specific and actionable.
     """
     if "refined_goal" in skill_gap_body:
         return skill_gap_body["refined_goal"]
     goal_assessment = skill_gap_body.get("goal_assessment", {})
-    if isinstance(goal_assessment, dict) and "refined_goal" in goal_assessment:
-        return goal_assessment["refined_goal"]
+    if isinstance(goal_assessment, dict):
+        refined = goal_assessment.get("refined_goal")
+        if refined:  # skip None (not auto-refined) or empty string
+            return refined
     return skill_gap_body.get("learning_goal", "")
 
 
