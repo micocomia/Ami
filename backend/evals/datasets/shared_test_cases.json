@@ -1,0 +1,179 @@
+{
+  "notes": {
+    "learner_information_genmentor": "Mirrors GenMentor's real onboarding: occupation_label + background_text (from onboarding.py:149). Occupation is the required dropdown seed; no FSLSM.",
+    "learner_information_enhanced": "Mirrors enhanced onboarding: persona_prefix (with FSLSM vector serialized as text) + background_text (from onboarding.py:200-245). Persona selection is required; no free-text field.",
+    "learner_information": "Plain background text only — used as context in judge prompts to avoid polluting the evaluation with system-specific prefixes."
+  },
+  "learning_goals": {
+    "G1": "I want to learn full-stack web development using React and Node.js",
+    "G2": "I want to master machine learning fundamentals and apply them to real datasets",
+    "G3": "I want to build and deploy a REST API to the cloud"
+  },
+  "learner_backgrounds": {
+    "B1": {
+      "label": "Complete beginner",
+      "occupation_genmentor": "Software Engineer",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      },
+      "text": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning."
+    },
+    "B2": {
+      "label": "Intermediate",
+      "occupation_genmentor": "Software Engineer",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.7,
+        "fslsm_perception": -0.5,
+        "fslsm_input": -0.5,
+        "fslsm_understanding": -0.5
+      },
+      "text": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases."
+    },
+    "B3": {
+      "label": "Career switcher",
+      "occupation_genmentor": "Product Manager",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.2,
+        "fslsm_perception": -0.3,
+        "fslsm_input": -0.8,
+        "fslsm_understanding": -0.3
+      },
+      "text": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning."
+    }
+  },
+  "scenarios": [
+    {
+      "id": "S01",
+      "goal_id": "G1",
+      "background_id": "B1",
+      "learning_goal": "I want to learn full-stack web development using React and Node.js",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner (initial FSLSM: processing=0.0, perception=0.0, input=0.0, understanding=0.0). I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {"fslsm_processing": 0.0, "fslsm_perception": 0.0, "fslsm_input": 0.0, "fslsm_understanding": 0.0}
+    },
+    {
+      "id": "S02",
+      "goal_id": "G1",
+      "background_id": "B2",
+      "learning_goal": "I want to learn full-stack web development using React and Node.js",
+      "learner_information": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_genmentor": "Software Engineer I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_enhanced": "Learning Persona: Hands-on Explorer (initial FSLSM: processing=-0.7, perception=-0.5, input=-0.5, understanding=-0.5). I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {"fslsm_processing": -0.7, "fslsm_perception": -0.5, "fslsm_input": -0.5, "fslsm_understanding": -0.5}
+    },
+    {
+      "id": "S03",
+      "goal_id": "G1",
+      "background_id": "B3",
+      "learning_goal": "I want to learn full-stack web development using React and Node.js",
+      "learner_information": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_genmentor": "Product Manager I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_enhanced": "Learning Persona: Visual Learner (initial FSLSM: processing=-0.2, perception=-0.3, input=-0.8, understanding=-0.3). I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {"fslsm_processing": -0.2, "fslsm_perception": -0.3, "fslsm_input": -0.8, "fslsm_understanding": -0.3}
+    },
+    {
+      "id": "S04",
+      "goal_id": "G2",
+      "background_id": "B1",
+      "learning_goal": "I want to master machine learning fundamentals and apply them to real datasets",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner (initial FSLSM: processing=0.0, perception=0.0, input=0.0, understanding=0.0). I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {"fslsm_processing": 0.0, "fslsm_perception": 0.0, "fslsm_input": 0.0, "fslsm_understanding": 0.0}
+    },
+    {
+      "id": "S05",
+      "goal_id": "G2",
+      "background_id": "B2",
+      "learning_goal": "I want to master machine learning fundamentals and apply them to real datasets",
+      "learner_information": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_genmentor": "Software Engineer I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_enhanced": "Learning Persona: Hands-on Explorer (initial FSLSM: processing=-0.7, perception=-0.5, input=-0.5, understanding=-0.5). I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {"fslsm_processing": -0.7, "fslsm_perception": -0.5, "fslsm_input": -0.5, "fslsm_understanding": -0.5}
+    },
+    {
+      "id": "S06",
+      "goal_id": "G2",
+      "background_id": "B3",
+      "learning_goal": "I want to master machine learning fundamentals and apply them to real datasets",
+      "learner_information": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_genmentor": "Product Manager I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_enhanced": "Learning Persona: Visual Learner (initial FSLSM: processing=-0.2, perception=-0.3, input=-0.8, understanding=-0.3). I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {"fslsm_processing": -0.2, "fslsm_perception": -0.3, "fslsm_input": -0.8, "fslsm_understanding": -0.3}
+    },
+    {
+      "id": "S07",
+      "goal_id": "G3",
+      "background_id": "B1",
+      "learning_goal": "I want to build and deploy a REST API to the cloud",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner (initial FSLSM: processing=0.0, perception=0.0, input=0.0, understanding=0.0). I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {"fslsm_processing": 0.0, "fslsm_perception": 0.0, "fslsm_input": 0.0, "fslsm_understanding": 0.0}
+    },
+    {
+      "id": "S08",
+      "goal_id": "G3",
+      "background_id": "B2",
+      "learning_goal": "I want to build and deploy a REST API to the cloud",
+      "learner_information": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_genmentor": "Software Engineer I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_enhanced": "Learning Persona: Hands-on Explorer (initial FSLSM: processing=-0.7, perception=-0.5, input=-0.5, understanding=-0.5). I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {"fslsm_processing": -0.7, "fslsm_perception": -0.5, "fslsm_input": -0.5, "fslsm_understanding": -0.5}
+    },
+    {
+      "id": "S09",
+      "goal_id": "G3",
+      "background_id": "B3",
+      "learning_goal": "I want to build and deploy a REST API to the cloud",
+      "learner_information": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_genmentor": "Product Manager I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_enhanced": "Learning Persona: Visual Learner (initial FSLSM: processing=-0.2, perception=-0.3, input=-0.8, understanding=-0.3). I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {"fslsm_processing": -0.2, "fslsm_perception": -0.3, "fslsm_input": -0.8, "fslsm_understanding": -0.3}
+    }
+  ],
+  "rag_knowledge_points": {
+    "G1": [
+      "React component lifecycle and hooks",
+      "RESTful API design with Express.js",
+      "State management in React with Context API"
+    ],
+    "G2": [
+      "Supervised learning: linear regression and classification",
+      "Feature engineering and data preprocessing",
+      "Model evaluation: cross-validation and metrics"
+    ],
+    "G3": [
+      "HTTP methods and REST API conventions",
+      "Authentication and authorization with JWT",
+      "Deploying a Node.js app to cloud with Docker"
+    ]
+  },
+  "rag_ground_truths": {
+    "G1_React component lifecycle and hooks": "React hooks include useState for local state, useEffect for side effects, useContext for context consumption, and useRef for DOM references. The component lifecycle phases are mounting, updating, and unmounting. useEffect with an empty dependency array runs only once on mount. Cleanup functions returned from useEffect run on unmount.",
+    "G1_RESTful API design with Express.js": "REST APIs use HTTP methods: GET (read), POST (create), PUT/PATCH (update), DELETE (remove). Express.js uses app.get(), app.post() etc. to define routes. Middleware functions process requests before handlers. Status codes: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Internal Server Error.",
+    "G1_State management in React with Context API": "React Context API uses React.createContext(), a Provider component to supply values, and useContext() hook to consume them. It avoids prop drilling. For complex state, useReducer is paired with Context. Redux is an alternative for larger applications with actions, reducers, and a single store.",
+    "G2_Supervised learning: linear regression and classification": "Supervised learning trains on labeled data. Linear regression predicts continuous outputs using a best-fit line minimizing mean squared error. Logistic regression and SVMs handle binary classification. Decision trees and random forests handle multi-class classification. Key concepts: hypothesis function, cost function, gradient descent optimization.",
+    "G2_Feature engineering and data preprocessing": "Feature engineering includes normalization (min-max scaling), standardization (z-score), one-hot encoding for categoricals, and handling missing values via imputation or deletion. Feature selection methods include correlation analysis, mutual information, and recursive feature elimination.",
+    "G2_Model evaluation: cross-validation and metrics": "Cross-validation splits data into k folds; train on k-1, test on 1, repeat k times. Metrics for classification: accuracy, precision, recall, F1-score, ROC-AUC. Metrics for regression: MAE, MSE, RMSE, R-squared. Overfitting is detected when training accuracy >> validation accuracy.",
+    "G3_HTTP methods and REST API conventions": "REST uses stateless HTTP. GET retrieves resources, POST creates, PUT replaces, PATCH partially updates, DELETE removes. Resources are nouns in URLs (e.g., /users/123). Versioning uses /v1/ prefix. JSON is the standard response format. Status codes 2xx success, 4xx client errors, 5xx server errors.",
+    "G3_Authentication and authorization with JWT": "JWT (JSON Web Token) consists of header, payload, and signature, base64-encoded and dot-separated. The server signs tokens with a secret key (HMAC) or private key (RSA). Clients send tokens in the Authorization: Bearer header. Access tokens are short-lived; refresh tokens long-lived. Authorization checks user roles/permissions after authentication.",
+    "G3_Deploying a Node.js app to cloud with Docker": "Docker packages apps into containers with a Dockerfile specifying the base image, working directory, dependency installation, and start command. docker build creates an image; docker run starts a container. Cloud platforms (AWS ECS, GCP Cloud Run, Heroku) pull images from registries (Docker Hub, ECR). Environment variables are passed at runtime, not baked into images."
+  }
+}
