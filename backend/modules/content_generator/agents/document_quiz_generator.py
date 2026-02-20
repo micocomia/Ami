@@ -19,6 +19,7 @@ class DocumentQuizPayload(BaseModel):
     multiple_choice_count: int = 0
     true_false_count: int = 0
     short_answer_count: int = 0
+    open_ended_count: int = 0
 
     @field_validator("learner_profile", "learning_document")
     @classmethod
@@ -54,6 +55,7 @@ def generate_document_quizzes_with_llm(
     multiple_choice_count: int = 0,
     true_false_count: int = 0,
     short_answer_count: int = 0,
+    open_ended_count: int = 0,
 ):
     payload = {
         "learner_profile": learner_profile,
@@ -62,6 +64,7 @@ def generate_document_quizzes_with_llm(
         "multiple_choice_count": multiple_choice_count,
         "true_false_count": true_false_count,
         "short_answer_count": short_answer_count,
+        "open_ended_count": open_ended_count,
     }
     gen = DocumentQuizGenerator(llm)
     return gen.generate(payload)

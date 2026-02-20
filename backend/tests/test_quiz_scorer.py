@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
+from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session, get_quiz_mix_for_session
 
 
 # ── Sample quiz data ──────────────────────────────────────────────────────────
@@ -156,6 +156,112 @@ class TestComputeQuizScore:
         assert total == 0
         assert correct == 0
         assert pct == 0.0
+
+
+class TestComputeQuizScoreWithLLMEvaluations:
+    """Tests for hybrid scoring with LLM evaluations."""
+
+    OPEN_ENDED_QUIZ = {
+        "open_ended_questions": [
+            {"question": "Explain X.", "rubric": "...", "example_answer": "..."},
+            {"question": "Synthesize Y.", "rubric": "...", "example_answer": "..."},
+        ],
+    }
+
+    MIXED_QUIZ = {
+        "single_choice_questions": [
+            {"question": "Q1", "options": ["A", "B", "C"], "correct_option": 0, "explanation": ""},
+        ],
+        "short_answer_questions": [
+            {"question": "Q2", "expected_answer": "Python", "explanation": ""},
+        ],
+        "open_ended_questions": [
+            {"question": "Q3", "rubric": "...", "example_answer": "..."},
+        ],
+    }
+
+    def test_open_ended_scoring_with_evaluations(self):
+        """Open-ended fractional scores contribute to total."""
+        quiz = self.OPEN_ENDED_QUIZ
+        answers = {"open_ended_questions": ["Some answer.", "Another answer."]}
+        evals = {
+            "open_ended_evaluations": [
+                {"solo_level": "relational", "score": 0.75, "feedback": "Good."},
+                {"solo_level": "extended_abstract", "score": 1.0, "feedback": "Excellent."},
+            ]
+        }
+        correct, total, pct = compute_quiz_score(quiz, answers, evals)
+        assert total == 2
+        assert correct == pytest.approx(1.75)
+        assert pct == pytest.approx(87.5)
+
+    def test_short_answer_with_llm_evaluation(self):
+        """LLM-evaluated short answer overrides exact match."""
+        quiz = {
+            "short_answer_questions": [
+                {"question": "Q", "expected_answer": "Python", "explanation": ""},
+            ],
+        }
+        # Student writes "python language" which doesn't match exactly but LLM says correct
+        answers = {"short_answer_questions": ["python language"]}
+        evals = {"short_answer_evaluations": [{"is_correct": True, "feedback": "Correct meaning."}]}
+        correct, total, pct = compute_quiz_score(quiz, answers, evals)
+        assert correct == pytest.approx(1)
+        assert pct == pytest.approx(100.0)
+
+    def test_backward_compat_no_llm_evaluations(self):
+        """None llm_evaluations falls back to exact string match for short answers."""
+        quiz = {
+            "short_answer_questions": [
+                {"question": "Q", "expected_answer": "Python", "explanation": ""},
+            ],
+        }
+        correct_ans = {"short_answer_questions": ["python"]}
+        wrong_ans = {"short_answer_questions": ["java"]}
+        c1, _, _ = compute_quiz_score(quiz, correct_ans, None)
+        c2, _, _ = compute_quiz_score(quiz, wrong_ans, None)
+        assert c1 == pytest.approx(1)
+        assert c2 == pytest.approx(0)
+
+    def test_mixed_types_with_open_ended(self):
+        """All 5 types scored together correctly."""
+        quiz = self.MIXED_QUIZ
+        answers = {
+            "single_choice_questions": ["A"],   # correct
+            "short_answer_questions": ["Python"],  # correct via LLM eval
+            "open_ended_questions": ["Some synthesis."],  # 0.75 score
+        }
+        evals = {
+            "short_answer_evaluations": [{"is_correct": True, "feedback": "Correct."}],
+            "open_ended_evaluations": [{"solo_level": "relational", "score": 0.75, "feedback": "Good."}],
+        }
+        correct, total, pct = compute_quiz_score(quiz, answers, evals)
+        assert total == 3
+        assert correct == pytest.approx(2.75)
+        assert pct == pytest.approx(2.75 / 3 * 100)
+
+    def test_open_ended_no_answer_scores_zero(self):
+        """Missing open-ended answer contributes 0 to score."""
+        quiz = self.OPEN_ENDED_QUIZ
+        answers = {"open_ended_questions": [None, None]}
+        evals = {
+            "open_ended_evaluations": [
+                {"solo_level": "relational", "score": 0.75, "feedback": "Good."},
+                {"solo_level": "relational", "score": 0.75, "feedback": "Good."},
+            ]
+        }
+        correct, total, pct = compute_quiz_score(quiz, answers, evals)
+        assert total == 2
+        assert correct == pytest.approx(0.0)
+        assert pct == pytest.approx(0.0)
+
+    def test_open_ended_skipped_when_no_llm_evals(self):
+        """Open-ended questions with no evals still count toward total but score 0."""
+        quiz = self.OPEN_ENDED_QUIZ
+        answers = {"open_ended_questions": ["An answer.", "Another."]}
+        correct, total, pct = compute_quiz_score(quiz, answers, None)
+        assert total == 2
+        assert correct == pytest.approx(0.0)
 
 
 class TestGetMasteryThreshold:

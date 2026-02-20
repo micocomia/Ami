@@ -7,7 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
-from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery
+from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
 from config import use_mock_data, use_search
@@ -43,6 +43,17 @@ def render_learning_content():
     else:
         track_session_learning_start_time()
         learning_content = st.session_state["document_caches"].get(session_uid, "")
+
+        # Show content format badge and audio player (Sprint 3: audio-visual adaptive content)
+        content_format = learning_content.get("content_format", "standard")
+        audio_url = learning_content.get("audio_url")
+        if content_format == "podcast":
+            st.info("🎙️ This content has been adapted into a podcast-style format for auditory learners.")
+            if audio_url:
+                full_audio_url = audio_url if audio_url.startswith("http") else f"{__import__('config').backend_endpoint.rstrip('/')}{audio_url}"
+                st.audio(full_audio_url, format="audio/mp3")
+        elif content_format == "visual_enhanced":
+            st.info("📊 This content includes visual resources (diagrams, videos, images) for visual learners.")
 
         render_type = "by_section"
         document = learning_content["document"]
@@ -232,7 +243,7 @@ def render_content_preparation(goal):
     sources_used = extract_sources_used(knowledge_drafts)
     st.success("Stage 2/4 📝 Knowledge points drafted successfully.")
     with st.spinner("Stage 3/4 - Integrating knowledge document..."):
-        document_structure = integrate_learning_document(
+        integration_result = integrate_learning_document(
             goal["learner_profile"],
             goal["learning_path"],
             learning_session,
@@ -241,20 +252,41 @@ def render_content_preparation(goal):
             llm_type="gpt4o",
             output_markdown=False
         )
+    if integration_result is None:
+        st.error("Failed to integrate knowledge document.")
+        return
+    document_structure = integration_result["learning_document"]
+    content_format = integration_result.get("content_format", "standard")
+    audio_url = integration_result.get("audio_url")
+    if integration_result.get("document_is_markdown", False):
+        # Backend already rendered the markdown (audio-visual pipeline ran server-side)
+        learning_document = document_structure
+    else:
         learning_document = prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
     if learning_document is None:
         st.error("Failed to integrate knowledge document.")
         return
     st.success("Stage 3/4 📚 Knowledge document integrated successfully.")
-    learning_content = {"document": learning_document, "sources_used": sources_used}
+    learning_content = {
+        "document": learning_document,
+        "sources_used": sources_used,
+        "content_format": content_format,
+        "audio_url": audio_url,
+    }
     with st.spinner("Stage 4/4 - Generating document quizzes..."):
+        quiz_mix = get_quiz_mix(
+            user_id=st.session_state.get("userId", ""),
+            goal_id=st.session_state["selected_goal_id"],
+            session_index=selected_sid,
+        )
         quizzes = generate_document_quizzes(
             goal["learner_profile"],
             learning_document,
-            single_choice_count=3,
-            multiple_choice_count=1,
-            true_false_count=1,
-            short_answer_count=1,
+            single_choice_count=quiz_mix["single_choice_count"],
+            multiple_choice_count=quiz_mix["multiple_choice_count"],
+            true_false_count=quiz_mix["true_false_count"],
+            short_answer_count=quiz_mix["short_answer_count"],
+            open_ended_count=quiz_mix.get("open_ended_count", 0),
             llm_type="gpt4o"
         )
     learning_content["quizzes"] = quizzes
@@ -451,6 +483,7 @@ def render_questions(quiz_data):
             "multiple_choice_questions": [[] for _ in quiz_data.get("multiple_choice_questions", [])],
             "true_false_questions": [None] * len(quiz_data.get("true_false_questions", [])),
             "short_answer_questions": [None] * len(quiz_data.get("short_answer_questions", [])),
+            "open_ended_questions": [None] * len(quiz_data.get("open_ended_questions", [])),
         }
 
     answers = st.session_state["quiz_answers"][session_uid]
@@ -500,6 +533,20 @@ def render_questions(quiz_data):
         )
         answers["short_answer_questions"][i] = user_answer if user_answer else None
 
+    # Open-ended questions (Sprint 3: SOLO taxonomy — Relational / Extended Abstract)
+    if quiz_data.get("open_ended_questions"):
+        st.divider()
+        st.caption("The following questions require a detailed written response and will be evaluated using the SOLO Taxonomy.")
+    for i, q in enumerate(quiz_data.get("open_ended_questions", [])):
+        q_num += 1
+        st.write(f"**{q_num}. {q['question']}**")
+        st.caption("Write a detailed response demonstrating your understanding.")
+        user_answer = st.text_area(
+            "Your Response", key=f"oe_{session_uid}_{i}",
+            height=150, label_visibility="hidden", disabled=quiz_submitted,
+        )
+        answers["open_ended_questions"][i] = user_answer if user_answer else None
+
     try:
         save_persistent_state()
     except Exception:
@@ -512,7 +559,7 @@ def render_questions(quiz_data):
             f"(threshold: {mastery_info.get('threshold', 70):.0f}%)"
         )
         # Show explanations after mastery
-        _render_quiz_explanations(quiz_data)
+        _render_quiz_explanations(quiz_data, mastery_info)
     elif quiz_submitted and not mastery_info.get("is_mastered"):
         st.warning(
             f"Score: {mastery_info['score']:.0f}%. "
@@ -520,7 +567,7 @@ def render_questions(quiz_data):
             f"Review the material and try again."
         )
         # Show explanations after attempt
-        _render_quiz_explanations(quiz_data)
+        _render_quiz_explanations(quiz_data, mastery_info)
         if st.button("Retake Quiz", icon=":material/refresh:", type="primary"):
             st.session_state["quiz_answers"].pop(session_uid, None)
             st.session_state["mastery_status"].pop(session_uid, None)
@@ -531,17 +578,20 @@ def render_questions(quiz_data):
             st.rerun()
     else:
         if st.button("Submit Quiz", type="primary", icon=":material/check_circle:"):
-            result = evaluate_mastery(
-                user_id=st.session_state.get("userId", ""),
-                goal_id=st.session_state["selected_goal_id"],
-                session_index=st.session_state["selected_session_id"],
-                quiz_answers=answers,
-            )
+            with st.spinner("Evaluating your responses..."):
+                result = evaluate_mastery(
+                    user_id=st.session_state.get("userId", ""),
+                    goal_id=st.session_state["selected_goal_id"],
+                    session_index=st.session_state["selected_session_id"],
+                    quiz_answers=answers,
+                )
             if result:
                 st.session_state.setdefault("mastery_status", {})[session_uid] = {
                     "score": result["score_percentage"],
                     "is_mastered": result["is_mastered"],
                     "threshold": result["threshold"],
+                    "short_answer_feedback": result.get("short_answer_feedback", []),
+                    "open_ended_feedback": result.get("open_ended_feedback", []),
                 }
                 # Mirror mastery data onto the learning path session so it
                 # survives save_persistent_state() and is available for the
@@ -564,8 +614,25 @@ def render_questions(quiz_data):
                 st.error("Failed to evaluate quiz. Please try again.")
 
 
-def _render_quiz_explanations(quiz_data):
-    """Show quiz explanations after submission."""
+_SOLO_LEVEL_COLORS = {
+    "prestructural": "#FF4444",
+    "unistructural": "#FF8800",
+    "multistructural": "#DDAA00",
+    "relational": "#2288FF",
+    "extended_abstract": "#22CC66",
+}
+
+_SOLO_LEVEL_LABELS = {
+    "prestructural": "Prestructural",
+    "unistructural": "Unistructural",
+    "multistructural": "Multistructural",
+    "relational": "Relational",
+    "extended_abstract": "Extended Abstract",
+}
+
+
+def _render_quiz_explanations(quiz_data, mastery_info=None):
+    """Show quiz explanations and SOLO-level feedback after submission."""
     with st.expander("View Explanations", expanded=False, icon=":material/info:"):
         q_num = 0
         for q in quiz_data.get("single_choice_questions", []):
@@ -583,10 +650,45 @@ def _render_quiz_explanations(quiz_data):
             correct = "True" if q["correct_answer"] else "False"
             st.write(f"**Q{q_num}.** Correct: {correct}")
             st.write(f"  {q['explanation']}")
-        for q in quiz_data.get("short_answer_questions", []):
+
+        # Short answer: show expected answer plus LLM semantic evaluation feedback
+        sa_feedback = (mastery_info or {}).get("short_answer_feedback", [])
+        for i, q in enumerate(quiz_data.get("short_answer_questions", [])):
             q_num += 1
             st.write(f"**Q{q_num}.** Expected: {q['expected_answer']}")
             st.write(f"  {q['explanation']}")
+            if i < len(sa_feedback):
+                fb = sa_feedback[i]
+                icon = "✓" if fb.get("is_correct") else "✗"
+                color = "#22CC66" if fb.get("is_correct") else "#FF4444"
+                st.markdown(
+                    f"<span style='color:{color}'>{icon} {fb.get('feedback', '')}</span>",
+                    unsafe_allow_html=True,
+                )
+
+        # Open-ended: show rubric and SOLO-level evaluation feedback
+        oe_feedback = (mastery_info or {}).get("open_ended_feedback", [])
+        for i, q in enumerate(quiz_data.get("open_ended_questions", [])):
+            q_num += 1
+            st.write(f"**Q{q_num}.** (Open-ended)")
+            with st.container(border=True):
+                st.caption("Rubric")
+                st.write(q.get("rubric", ""))
+                if q.get("example_answer"):
+                    st.caption("Example answer")
+                    st.write(q["example_answer"])
+            if i < len(oe_feedback):
+                fb = oe_feedback[i]
+                solo_level = fb.get("solo_level", "")
+                score = fb.get("score", 0.0)
+                label = _SOLO_LEVEL_LABELS.get(solo_level, solo_level.title())
+                color = _SOLO_LEVEL_COLORS.get(solo_level, "#999999")
+                st.markdown(
+                    f"**SOLO Level:** <span style='color:{color};font-weight:bold'>{label}</span> "
+                    f"— Score: {score:.0%}",
+                    unsafe_allow_html=True,
+                )
+                st.write(f"Feedback: {fb.get('feedback', '')}")
 
 def render_content_feedback_form(goal):
     st.header("🌟 Value Your Feedback!") 

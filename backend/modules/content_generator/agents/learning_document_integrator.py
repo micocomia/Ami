@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping
+from typing import Any, List, Mapping, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -19,6 +19,7 @@ class IntegratedDocPayload(BaseModel):
     learning_session: Any
     knowledge_points: Any
     knowledge_drafts: Any
+    understanding_hints: str = ""
 
     @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_drafts")
     @classmethod
@@ -45,24 +46,35 @@ class LearningDocumentIntegrator(BaseAgent):
         return validated_output.model_dump()
 
 
-def integrate_learning_document_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown=True):
+def integrate_learning_document_with_llm(
+    llm,
+    learner_profile,
+    learning_path,
+    learning_session,
+    knowledge_points,
+    knowledge_drafts,
+    output_markdown=True,
+    media_resources: Optional[List[dict]] = None,
+    understanding_hints: str = "",
+):
     logger.info(f'Integrating learning document with {len(knowledge_points)} knowledge points and {len(knowledge_drafts)} drafts...')
     input_dict = {
         'learner_profile': learner_profile,
         'learning_path': learning_path,
         'learning_session': learning_session,
         'knowledge_points': knowledge_points,
-        'knowledge_drafts': knowledge_drafts
+        'knowledge_drafts': knowledge_drafts,
+        'understanding_hints': understanding_hints,
     }
     learning_document_integrator = LearningDocumentIntegrator(llm)
     document_structure = learning_document_integrator.integrate(input_dict)
     if not output_markdown:
         return document_structure
     logger.info('Preparing markdown document...')
-    return prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
+    return prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts, media_resources=media_resources)
 
 
-def prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts):
+def prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts, media_resources: Optional[List[dict]] = None):
     """Render a markdown learning document from the integrated structure and drafts.
 
     Expects document_structure with keys: title, overview, summary.
@@ -111,4 +123,30 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
             if isinstance(kd, dict):
                 md += f"\n\n### {kd.get('title','')}\n\n{kd.get('content','')}\n"
     md += f"\n\n## Summary\n\n{document_structure.get('summary','') if isinstance(document_structure, dict) else ''}"
+
+    # Append media resources section if provided
+    if media_resources:
+        md += "\n\n## 📺 Visual Learning Resources\n"
+        for resource in media_resources:
+            r_type = resource.get("type", "")
+            r_title = resource.get("title", "Resource")
+            if r_type == "video":
+                video_id = resource.get("video_id", "")
+                url = resource.get("url", f"https://www.youtube.com/watch?v={video_id}")
+                thumb_url = resource.get("thumbnail_url", "")
+                md += f"\n### 🎬 {r_title}\n"
+                if thumb_url:
+                    md += f"[![{r_title}]({thumb_url})]({url})\n"
+                else:
+                    md += f"[Watch on YouTube]({url})\n"
+            elif r_type == "image":
+                url = resource.get("url", "")
+                image_url = resource.get("image_url", "")
+                description = resource.get("description", "")
+                md += f"\n### 🖼️ {r_title}\n"
+                if image_url:
+                    md += f"[![{r_title}]({image_url})]({url})\n"
+                if description:
+                    md += f"*{description}*\n"
+
     return md

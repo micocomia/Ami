@@ -41,6 +41,10 @@ app_config = load_config(config_name="main")
 search_rag_manager = SearchRagManager.from_config(app_config)
 
 app = FastAPI()
+from fastapi.staticfiles import StaticFiles
+import os
+os.makedirs("data/audio", exist_ok=True)
+app.mount("/static/audio", StaticFiles(directory="data/audio"), name="audio")
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -300,6 +304,7 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
 async def evaluate_mastery(request: MasteryEvaluationRequest):
     """Evaluate quiz answers, compute score, and determine mastery status."""
     from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
+    from utils.solo_evaluator import evaluate_free_text_response, evaluate_short_answer_response
 
     state = store.get_user_state(request.user_id)
     if state is None:
@@ -328,8 +333,67 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     if not quiz_data:
         raise HTTPException(status_code=404, detail="No quiz data found for this session")
 
-    # Score
-    correct, total, score_pct = compute_quiz_score(quiz_data, request.quiz_answers)
+    # LLM evaluation for free-text question types
+    llm_evaluations: Dict[str, Any] = {}
+    short_answer_feedback: List[Dict[str, Any]] = []
+    open_ended_feedback: List[Dict[str, Any]] = []
+
+    short_answer_qs = quiz_data.get("short_answer_questions", [])
+    short_answer_answers = request.quiz_answers.get("short_answer_questions", [])
+    if short_answer_qs and any(a is not None for a in short_answer_answers):
+        llm = get_llm()
+        for i, q in enumerate(short_answer_qs):
+            student_ans = short_answer_answers[i] if i < len(short_answer_answers) else None
+            if student_ans is None:
+                short_answer_feedback.append({"is_correct": False, "feedback": "No answer provided."})
+            else:
+                try:
+                    is_correct, feedback = evaluate_short_answer_response(
+                        llm, q["question"], q["expected_answer"], str(student_ans)
+                    )
+                    short_answer_feedback.append({"is_correct": is_correct, "feedback": feedback})
+                except Exception:
+                    # Fallback to exact match on LLM error
+                    is_correct = str(student_ans).strip().lower() == q["expected_answer"].strip().lower()
+                    short_answer_feedback.append({"is_correct": is_correct, "feedback": ""})
+        llm_evaluations["short_answer_evaluations"] = short_answer_feedback
+
+    open_ended_qs = quiz_data.get("open_ended_questions", [])
+    open_ended_answers = request.quiz_answers.get("open_ended_questions", [])
+    if open_ended_qs and any(a is not None for a in open_ended_answers):
+        llm = get_llm()
+        for i, q in enumerate(open_ended_qs):
+            student_ans = open_ended_answers[i] if i < len(open_ended_answers) else None
+            if student_ans is None:
+                open_ended_feedback.append({
+                    "solo_level": "prestructural",
+                    "score": 0.0,
+                    "feedback": "No answer provided.",
+                })
+            else:
+                try:
+                    evaluation = evaluate_free_text_response(
+                        llm,
+                        q["question"],
+                        q["rubric"],
+                        q["example_answer"],
+                        str(student_ans),
+                    )
+                    open_ended_feedback.append(evaluation.model_dump())
+                except Exception:
+                    open_ended_feedback.append({
+                        "solo_level": "prestructural",
+                        "score": 0.0,
+                        "feedback": "Evaluation unavailable.",
+                    })
+        llm_evaluations["open_ended_evaluations"] = open_ended_feedback
+
+    # Score (passing llm_evaluations for semantic short-answer and open-ended scoring)
+    correct, total, score_pct = compute_quiz_score(
+        quiz_data,
+        request.quiz_answers,
+        llm_evaluations if llm_evaluations else None,
+    )
 
     # Determine threshold
     threshold = get_mastery_threshold_for_session(
@@ -348,7 +412,7 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     # Flag adaptation suggestion if score is significantly below threshold
     plan_adaptation_suggested = (not is_mastered) and (score_pct < threshold * 0.8)
 
-    return {
+    response: Dict[str, Any] = {
         "score_percentage": round(score_pct, 1),
         "is_mastered": is_mastered,
         "threshold": threshold,
@@ -357,6 +421,38 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
         "session_id": session.get("id", ""),
         "plan_adaptation_suggested": plan_adaptation_suggested,
     }
+    if short_answer_feedback:
+        response["short_answer_feedback"] = short_answer_feedback
+    if open_ended_feedback:
+        response["open_ended_feedback"] = open_ended_feedback
+    return response
+
+
+@app.get("/quiz-mix/{user_id}")
+async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
+    """Return the question type counts for a session based on its proficiency level."""
+    from utils.quiz_scorer import get_quiz_mix_for_session
+
+    state = store.get_user_state(user_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="No state found for this user_id")
+
+    goals = state.get("goals", [])
+    goal = None
+    for g in goals:
+        if isinstance(g, dict) and g.get("id") == goal_id:
+            goal = g
+            break
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    learning_path = goal.get("learning_path", [])
+    if session_index < 0 or session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = learning_path[session_index]
+    mix = get_quiz_mix_for_session(session, APP_CONFIG["quiz_mix_by_proficiency"])
+    return mix
 
 
 @app.get("/session-mastery-status/{user_id}")
@@ -650,6 +746,36 @@ APP_CONFIG = {
         "intermediate": 70,
         "advanced": 80,
         "expert": 90,
+    },
+    "quiz_mix_by_proficiency": {
+        "beginner": {
+            "single_choice_count": 4,
+            "multiple_choice_count": 0,
+            "true_false_count": 1,
+            "short_answer_count": 0,
+            "open_ended_count": 0,
+        },
+        "intermediate": {
+            "single_choice_count": 2,
+            "multiple_choice_count": 2,
+            "true_false_count": 1,
+            "short_answer_count": 0,
+            "open_ended_count": 0,
+        },
+        "advanced": {
+            "single_choice_count": 1,
+            "multiple_choice_count": 1,
+            "true_false_count": 0,
+            "short_answer_count": 2,
+            "open_ended_count": 1,
+        },
+        "expert": {
+            "single_choice_count": 0,
+            "multiple_choice_count": 1,
+            "true_false_count": 0,
+            "short_answer_count": 1,
+            "open_ended_count": 3,
+        },
     },
     "fslsm_activation_threshold": 0.7,
     "fslsm_thresholds": {
@@ -1048,6 +1174,9 @@ async def explore_knowledge_points(request: KnowledgePointExplorationRequest):
 
 @app.post("/draft-knowledge-point")
 async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1055,14 +1184,28 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     knowledge_points = request.knowledge_points
     knowledge_point = request.knowledge_point
     use_search = request.use_search
+    fslsm_input = _get_fslsm_input(learner_profile)
+    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
+    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+    visual_hints = _visual_formatting_hints(fslsm_input)
+    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
     try:
-        knowledge_draft = draft_knowledge_point_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search)
+        knowledge_draft = draft_knowledge_point_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
+            use_search,
+            visual_formatting_hints=visual_hints,
+            processing_perception_hints=proc_perc_hints,
+            search_rag_manager=search_rag_manager,
+        )
         return {"knowledge_draft": knowledge_draft}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/draft-knowledge-points")
 async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1070,14 +1213,29 @@ async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
     knowledge_points = request.knowledge_points
     use_search = request.use_search
     allow_parallel = request.allow_parallel
+    fslsm_input = _get_fslsm_input(learner_profile)
+    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
+    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+    visual_hints = _visual_formatting_hints(fslsm_input)
+    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
     try:
-        knowledge_drafts = draft_knowledge_points_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search)
+        knowledge_drafts = draft_knowledge_points_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points,
+            allow_parallel, use_search,
+            visual_formatting_hints=visual_hints,
+            processing_perception_hints=proc_perc_hints,
+            search_rag_manager=search_rag_manager,
+        )
         return {"knowledge_drafts": knowledge_drafts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/integrate-learning-document")
 async def integrate_learning_document(request: LearningDocumentIntegrationRequest):
+    from modules.content_generator.agents.learning_content_creator import (
+        _get_fslsm_dim, _get_fslsm_input, _understanding_hints,
+        _FSLSM_STRONG, _FSLSM_MODERATE,
+    )
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1085,9 +1243,77 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
     knowledge_points = request.knowledge_points
     knowledge_drafts = request.knowledge_drafts
     output_markdown = request.output_markdown
+    fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
+    fslsm_input = _get_fslsm_input(learner_profile)
+    und_hints = _understanding_hints(fslsm_understanding)
+
+    # Audio-visual pipeline requires a rendered markdown string to operate on.
+    # When any adaptation applies, force output_markdown=True so the integrator
+    # returns a string rather than a raw document_structure dict.
+    needs_av = fslsm_input <= -_FSLSM_MODERATE or fslsm_input >= _FSLSM_MODERATE
+    effective_output_markdown = True if needs_av else output_markdown
+
+    # Find media resources for visual learners before integration
+    media_resources = []
+    if fslsm_input <= -_FSLSM_MODERATE:
+        from modules.content_generator.agents.media_resource_finder import find_media_resources
+        _search_runner = getattr(search_rag_manager, "search_runner", None)
+        if _search_runner is None:
+            try:
+                from config.loader import default_config
+                from base.searcher_factory import SearchRunner
+                _search_runner = SearchRunner.from_config(default_config)
+            except Exception:
+                pass
+        if _search_runner is not None:
+            max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
+            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+            try:
+                media_resources = find_media_resources(
+                    _search_runner,
+                    knowledge_points,
+                    max_videos=max_videos,
+                    max_images=max_images,
+                )
+            except Exception:
+                media_resources = []
+
     try:
-        learning_document = integrate_learning_document_with_llm(llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown)
-        return {"learning_document": learning_document}
+        learning_document = integrate_learning_document_with_llm(
+            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts,
+            effective_output_markdown,
+            understanding_hints=und_hints,
+            media_resources=media_resources if media_resources else None,
+        )
+
+        # Determine content format and apply audio-visual adaptations
+        content_format = "standard"
+        audio_url = None
+
+        if fslsm_input <= -_FSLSM_MODERATE:
+            content_format = "visual_enhanced"
+
+        if fslsm_input >= _FSLSM_MODERATE:
+            from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
+            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
+            learning_document = convert_to_podcast_with_llm(llm, learning_document, learner_profile, mode=mode)
+            content_format = "podcast"
+
+            if fslsm_input >= _FSLSM_STRONG:
+                from modules.content_generator.agents.tts_generator import generate_tts_audio
+                try:
+                    audio_url = generate_tts_audio(learning_document)
+                except Exception:
+                    audio_url = None
+
+        return {
+            "learning_document": learning_document,
+            "content_format": content_format,
+            "audio_url": audio_url,
+            # Tells the frontend whether learning_document is already a rendered
+            # markdown string (True) or still a raw document_structure dict (False).
+            "document_is_markdown": needs_av,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1100,8 +1326,9 @@ async def generate_document_quizzes(request: KnowledgeQuizGenerationRequest):
     multiple_choice_count = request.multiple_choice_count
     true_false_count = request.true_false_count
     short_answer_count = request.short_answer_count
+    open_ended_count = request.open_ended_count
     try:
-        document_quiz = generate_document_quizzes_with_llm(llm, learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count)
+        document_quiz = generate_document_quizzes_with_llm(llm, learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count)
         return {"document_quiz": document_quiz}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1117,7 +1344,9 @@ async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
     with_quiz = request.with_quiz
     try:
         tailored_content = create_learning_content_with_llm(
-            llm, learner_profile, learning_path, learning_session, allow_parallel=allow_parallel, with_quiz=with_quiz, use_search=use_search
+            llm, learner_profile, learning_path, learning_session,
+            allow_parallel=allow_parallel, with_quiz=with_quiz, use_search=use_search,
+            quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
         )
         return {"tailored_content": tailored_content}
     except Exception as e:

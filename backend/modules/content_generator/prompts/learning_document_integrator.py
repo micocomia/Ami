@@ -55,4 +55,4 @@ Ensure the final document is aligned with the learner's profile and session goal
 
 **Knowledge Drafts to Integrate**:
 {knowledge_drafts}
-"""
+{understanding_hints}"""

@@ -29,6 +29,14 @@ document_quiz_output_format = """
             "expected_answer": "Expected answer",
             "explanation": "Explanation of the correct answer."
         }
+    ],
+    "open_ended_questions": [
+        {
+            "question": "Explain how X relates to Y and predict what would happen if Z.",
+            "rubric": "Prestructural: irrelevant/no answer. Unistructural: mentions one concept. Multistructural: lists multiple concepts without connecting them. Relational: integrates concepts and explains relationships. Extended Abstract: generalizes to new contexts or predicts outcomes.",
+            "example_answer": "A model answer demonstrating Relational or Extended Abstract thinking...",
+            "explanation": "Key points that should be addressed..."
+        }
     ]
 }
 """.strip()
@@ -42,6 +50,12 @@ Your sole task is to create a set of quiz questions based *only* on the provided
 1.  **Content Alignment**: All questions MUST be derived directly from the `learning_document`. Do not test for knowledge outside this document.
 2.  **Test Comprehension**: Questions should test the learner's understanding of core concepts, practical applications, and strategic insights from the document.
 3.  **Tailor Difficulty**: Adjust the difficulty of the questions based on the `learner_profile` (e.g., more foundational questions for beginners, more strategic/complex questions for advanced learners).
+3b. **SOLO-Aligned Question Design**:
+    - Single choice / True-False: Test recall and recognition (Unistructural level).
+    - Multiple choice: Test identification of multiple relevant aspects (Multistructural level).
+    - Short answer: Test ability to explain relationships briefly (Relational level).
+    - Open-ended: Require synthesis, integration, or generalization (Relational / Extended Abstract level).
+      Each open-ended question MUST include a `rubric` field that describes what a response at each SOLO level looks like for that specific question. Also include an `example_answer` showing a Relational or Extended Abstract response.
 4.  **Provide Feedback**: Every question MUST include a clear `explanation` to reinforce learning.
 5.  **Follow Counts**: You MUST generate the exact number of questions specified for each type (`single_choice_count`, etc.). If a count is 0, that question type's list should be empty.
 
@@ -66,4 +80,5 @@ Generate an interactive quiz based on the provided document and learner profile.
 * Multiple Choice: {multiple_choice_count}
 * True/False: {true_false_count}
 * Short Answer: {short_answer_count}
+* Open-Ended: {open_ended_count}
 """

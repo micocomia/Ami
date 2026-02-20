@@ -27,6 +27,9 @@ from .search_enhanced_knowledge_drafter import (
 	draft_knowledge_point_with_llm,
 	draft_knowledge_points_with_llm,
 )
+from .media_resource_finder import find_media_resources
+from .podcast_style_converter import PodcastStyleConverter, convert_to_podcast_with_llm
+from .tts_generator import generate_tts_audio
 
 __all__ = [
 	# Content creation pipeline
@@ -49,4 +52,9 @@ __all__ = [
 	"ContentDraftPayload",
 	"prepare_content_outline_with_llm",
 	"create_learning_content_with_llm",
+	# Adaptive content delivery
+	"find_media_resources",
+	"PodcastStyleConverter",
+	"convert_to_podcast_with_llm",
+	"generate_tts_audio",
 ]
