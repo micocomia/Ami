@@ -176,6 +176,57 @@ class SearchRagManager:
         )
         return combined
 
+    def invoke_hybrid_filtered(
+        self,
+        query: str,
+        k: Optional[int] = None,
+        *,
+        course_code: Optional[str] = None,
+        content_category: Optional[str] = None,
+        lecture_number: Optional[int] = None,
+        exclude_file_names: Optional[List[str]] = None,
+        require_lecture: bool = False,
+        allow_web_fallback: bool = True,
+    ) -> List[Document]:
+        """Hybrid retrieval with metadata-constrained verified-content lookup."""
+        k = k or self.max_retrieval_results
+
+        verified_docs: List[Document] = []
+        if self.verified_content_manager is not None:
+            if hasattr(self.verified_content_manager, "retrieve_filtered"):
+                verified_docs = self.verified_content_manager.retrieve_filtered(
+                    query,
+                    k=k,
+                    course_code=course_code,
+                    content_category=content_category,
+                    lecture_number=lecture_number,
+                    exclude_file_names=exclude_file_names,
+                    require_lecture=require_lecture,
+                )
+            else:
+                verified_docs = self.verified_content_manager.retrieve(query, k=k)
+            logger.info(f"Filtered verified retrieval returned {len(verified_docs)} results for query: {query[:80]}")
+
+        if len(verified_docs) >= k or not allow_web_fallback:
+            return verified_docs[:k]
+
+        remaining = k - len(verified_docs)
+        try:
+            web_docs = self.invoke(query)
+            for doc in web_docs:
+                if "source_type" not in doc.metadata:
+                    doc.metadata["source_type"] = "web_search"
+        except Exception as e:
+            logger.warning(f"Web search failed during filtered hybrid retrieval: {e}")
+            web_docs = []
+
+        combined = verified_docs + web_docs[:remaining]
+        logger.info(
+            f"Filtered hybrid retrieval: {len(verified_docs)} verified + "
+            f"{min(len(web_docs), remaining)} web = {len(combined)} total"
+        )
+        return combined
+
 
 def format_docs(docs: List[Document]) -> str:
     formatted_chunks: List[str] = []
