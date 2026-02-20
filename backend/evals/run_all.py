@@ -28,7 +28,7 @@ from evals.config import VERSIONS, DATASETS_DIR, RESULTS_DIR
 from evals.eval_skill_gap import run_eval_skill_gap, summarise as summarise_skill_gap
 from evals.eval_plan import run_eval_plan, summarise as summarise_plan
 from evals.eval_content import run_eval_content, summarise as summarise_content
-from evals.eval_api_perf import run_eval_api_perf
+from evals.eval_api_perf import run_eval_api_perf, run_eval_rag_drafts
 
 
 def load_dataset(scenario_filter: list[str] | None = None) -> dict:
@@ -38,6 +38,19 @@ def load_dataset(scenario_filter: list[str] | None = None) -> dict:
     if scenario_filter:
         dataset["scenarios"] = [s for s in dataset["scenarios"] if s["id"] in scenario_filter]
     return dataset
+
+
+def load_cached_rag_summary(rag_results_path: str) -> dict | None:
+    """Load RAG summary from rag_results.json when RAG phase is skipped."""
+    if not os.path.exists(rag_results_path):
+        return None
+    try:
+        with open(rag_results_path) as f:
+            body = json.load(f)
+        summary = body.get("summary")
+        return summary if isinstance(summary, dict) else None
+    except Exception:
+        return None
 
 
 def format_score(val) -> str:
@@ -102,6 +115,9 @@ def build_report(
             "metadata_course_hit_rate",
             "metadata_verified_source_rate",
             "metadata_keyword_coverage",
+            "metadata_fact_coverage_answer",
+            "metadata_fact_coverage_context",
+            "metadata_expected_lecture_hit_rate",
         ]
         b = rag_summary.get("genmentor", {})
         e = rag_summary.get("enhanced", {})
@@ -313,10 +329,49 @@ def main():
         print("\n" + "="*60)
         print("PHASE 5: RAG Evaluation (RAGAS)")
         print("="*60)
-        from evals.eval_rag import build_rag_cases, run_eval_rag, compute_ragas_scores
+        from evals.eval_rag import (
+            build_rag_cases,
+            run_eval_rag,
+            compute_ragas_scores,
+            load_rag_checkpoint,
+        )
         rag_cases = build_rag_cases(dataset)
-        rag_rows = run_eval_rag(rag_cases)
-        rag_summary = {v: compute_ragas_scores(rows, version_key=v) for v, rows in rag_rows.items()}
+        rag_checkpoint = load_rag_checkpoint(args.perf_cache_path)
+        enhanced_drafts = rag_checkpoint.get("enhanced", {}).get("rag_drafts", {}) if rag_checkpoint else {}
+        missing_cases = [
+            c for c in rag_cases
+            if f"{c['goal_id']}_{c['knowledge_point']}" not in enhanced_drafts
+        ]
+        if missing_cases:
+            print(f"RAG checkpoint missing {len(missing_cases)} draft(s); generating pipeline-backed drafts...")
+            draft_cases = [
+                {
+                    "goal_id": c["goal_id"],
+                    "learning_goal": c["learning_goal"],
+                    "knowledge_point": c["knowledge_point"],
+                }
+                for c in missing_cases
+            ]
+            run_eval_rag_drafts(
+                draft_cases,
+                dataset,
+                cache_path=args.perf_cache_path,
+                resume=True,
+            )
+            rag_checkpoint = load_rag_checkpoint(args.perf_cache_path)
+
+        if not rag_checkpoint:
+            raise RuntimeError(
+                f"RAG phase requires api_perf checkpoint with rag_drafts at: {args.perf_cache_path}"
+            )
+        rag_rows = run_eval_rag(rag_cases, rag_checkpoint)
+        rag_summary = {v: compute_ragas_scores(rows) for v, rows in rag_rows.items()}
+    else:
+        rag_results_path = os.path.join(RESULTS_DIR, "rag_results.json")
+        cached_rag_summary = load_cached_rag_summary(rag_results_path)
+        if cached_rag_summary:
+            print(f"Using cached RAG summary from {rag_results_path}")
+            rag_summary = cached_rag_summary
 
     # --- Save raw results ---
     os.makedirs(RESULTS_DIR, exist_ok=True)

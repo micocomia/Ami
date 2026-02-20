@@ -20,6 +20,7 @@ Usage:
 
 import json
 import os
+import re
 
 from evals.config import DATASETS_DIR, RESULTS_DIR
 
@@ -45,16 +46,28 @@ def build_rag_cases(dataset: dict) -> list[dict]:
     """
     cases = []
     for case in dataset.get("rag_metadata_cases", []):
+        ground_truth_facts = [
+            str(f).strip()
+            for f in case.get("ground_truth_facts", [])
+            if str(f).strip()
+        ]
+        if ground_truth_facts:
+            ref_parts = [f if f.endswith((".", "!", "?")) else f"{f}." for f in ground_truth_facts]
+            ground_truth = " ".join(ref_parts)
+        else:
+            ground_truth = case.get("ground_truth", "")
         cases.append({
             "goal_id": case.get("goal_id", "META"),
             "learning_goal": case["learning_goal"],
             "knowledge_point": case["knowledge_point"],
-            "ground_truth": case["ground_truth"],
+            "ground_truth": ground_truth,
+            "ground_truth_facts": ground_truth_facts,
             "case_type": "metadata",
             "case_id": case.get("case_id", ""),
             "expected_course_code": case.get("expected_course_code", ""),
             "expected_keywords": case.get("expected_keywords", []),
             "query": case.get("query", ""),
+            "expected_lecture_numbers": case.get("expected_lecture_numbers", []),
         })
     return cases
 
@@ -112,6 +125,14 @@ def extract_ragas_fields(
         # Last-resort fallback if schema changes
         answer = draft_body.get("content", draft_body.get("draft", json.dumps(draft_body)))
 
+    retrieval_query_primary = str(kd.get("retrieval_query_primary", "")).strip()
+    retrieval_queries = [
+        str(q).strip() for q in (kd.get("retrieval_queries") or [])
+        if str(q).strip()
+    ]
+    retrieval_intent_text = str(kd.get("retrieval_intent_text", "")).strip()
+    question_for_eval = retrieval_query_primary or question
+
     # Use retrieved source content when available. If schema changes or sources are
     # absent, fall back to draft text as a single context to keep evaluation robust.
     sources = kd.get("sources_used") or []
@@ -129,23 +150,70 @@ def extract_ragas_fields(
         contexts = [str(answer)]
 
     row = {
-        "question": question,
+        "question": question_for_eval,
         "answer": str(answer),
         "contexts": [str(c) for c in contexts],
         "ground_truth": ground_truth,
+        "question_source": "retrieval_query" if retrieval_query_primary else "dataset_query",
+        "dataset_query": question,
+        "retrieval_query_primary": retrieval_query_primary,
+        "retrieval_queries": retrieval_queries,
+        "retrieval_intent_text": retrieval_intent_text,
     }
     if case:
         row["case_type"] = case.get("case_type", "metadata")
         row["case_id"] = case.get("case_id", "")
         row["expected_course_code"] = case.get("expected_course_code", "")
         row["expected_keywords"] = case.get("expected_keywords", [])
+        row["expected_lecture_numbers"] = case.get("expected_lecture_numbers", [])
+        row["ground_truth_facts"] = case.get("ground_truth_facts", [])
         row["source_types"] = [str(s.get("source_type", "")).lower() for s in sources if isinstance(s, dict)]
         row["source_course_codes"] = [str(s.get("course_code", "")).lower() for s in sources if isinstance(s, dict)]
+        row["source_file_names"] = [str(s.get("file_name", "")).lower() for s in sources if isinstance(s, dict)]
+        row["source_lecture_numbers"] = [
+            int(s.get("lecture_number"))
+            for s in sources
+            if isinstance(s, dict) and str(s.get("lecture_number", "")).isdigit()
+        ]
     return row
 
 
 def _metadata_case_metrics(rows: list[dict]) -> dict:
     """Compute metadata-aware diagnostics on metadata-targeted RAG cases."""
+    def _tokenize(text: str) -> set[str]:
+        return {
+            t for t in re.findall(r"[a-z0-9][a-z0-9\.\-_]+", str(text).lower())
+            if len(t) > 2
+        }
+
+    def _fact_hit(fact: str, text: str) -> bool:
+        f = str(fact).strip().lower()
+        if not f:
+            return False
+        t = str(text).lower()
+        if f in t:
+            return True
+        ft = _tokenize(f)
+        if not ft:
+            return False
+        overlap = len(ft & _tokenize(t))
+        return (overlap / len(ft)) >= 0.5
+
+    def _to_int_set(values: list) -> set[int]:
+        out = set()
+        for v in values or []:
+            try:
+                out.add(int(v))
+            except Exception:
+                continue
+        return out
+
+    def _lecture_from_file_name(file_name: str) -> int | None:
+        m = re.search(r"lec_(\d+)\.pdf", str(file_name).lower())
+        if m:
+            return int(m.group(1))
+        return None
+
     meta_rows = [r for r in rows if r.get("case_type") == "metadata" and "error" not in r]
     if not meta_rows:
         return {}
@@ -153,6 +221,11 @@ def _metadata_case_metrics(rows: list[dict]) -> dict:
     hit_total = 0
     verified_total = 0
     keyword_cov_total = 0.0
+    fact_cov_answer_total = 0.0
+    fact_cov_context_total = 0.0
+    fact_case_count = 0
+    lecture_hit_total = 0
+    lecture_case_count = 0
 
     for row in meta_rows:
         expected_course = str(row.get("expected_course_code", "")).lower().strip()
@@ -170,6 +243,27 @@ def _metadata_case_metrics(rows: list[dict]) -> dict:
             matched = sum(1 for k in expected_keywords if k in answer_text)
             keyword_cov_total += (matched / len(expected_keywords))
 
+        facts = [str(f).strip() for f in row.get("ground_truth_facts", []) if str(f).strip()]
+        if facts:
+            fact_case_count += 1
+            contexts_text = "\n".join(str(c) for c in row.get("contexts", []))
+            answer_hits = sum(1 for f in facts if _fact_hit(f, answer_text))
+            context_hits = sum(1 for f in facts if _fact_hit(f, contexts_text))
+            fact_cov_answer_total += (answer_hits / len(facts))
+            fact_cov_context_total += (context_hits / len(facts))
+
+        expected_lectures = _to_int_set(row.get("expected_lecture_numbers", []))
+        if expected_lectures:
+            lecture_case_count += 1
+            retrieved_lectures = _to_int_set(row.get("source_lecture_numbers", []))
+            if not retrieved_lectures:
+                for fn in row.get("source_file_names", []):
+                    ln = _lecture_from_file_name(fn)
+                    if ln is not None:
+                        retrieved_lectures.add(ln)
+            if expected_lectures.issubset(retrieved_lectures):
+                lecture_hit_total += 1
+
     n = len(meta_rows)
     out = {
         "metadata_case_count": float(n),
@@ -178,6 +272,11 @@ def _metadata_case_metrics(rows: list[dict]) -> dict:
     }
     if keyword_cov_total > 0:
         out["metadata_keyword_coverage"] = keyword_cov_total / n
+    if fact_case_count > 0:
+        out["metadata_fact_coverage_answer"] = fact_cov_answer_total / fact_case_count
+        out["metadata_fact_coverage_context"] = fact_cov_context_total / fact_case_count
+    if lecture_case_count > 0:
+        out["metadata_expected_lecture_hit_rate"] = lecture_hit_total / lecture_case_count
     return out
 
 
@@ -246,24 +345,31 @@ def run_eval_rag(rag_cases: list[dict], checkpoint: dict) -> dict:
     ragas_rows = []
 
     for case in rag_cases:
-        question = case.get("query") or f"{case['learning_goal']} — {case['knowledge_point']}"
+        dataset_query = case.get("query") or f"{case['learning_goal']} — {case['knowledge_point']}"
         print(f"  Loading: {case['knowledge_point'][:60]}...")
         draft_body = get_draft_from_checkpoint(checkpoint, version_key, case)
         if "error" in draft_body:
             print(f"    MISS: {draft_body['error']}")
             ragas_rows.append({
-                "question": question,
+                "question": dataset_query,
                 "answer": "",
                 "contexts": [""],
                 "ground_truth": case["ground_truth"],
+                "question_source": "dataset_query",
+                "dataset_query": dataset_query,
+                "retrieval_query_primary": "",
+                "retrieval_queries": [],
+                "retrieval_intent_text": "",
                 "case_type": case.get("case_type", "metadata"),
                 "case_id": case.get("case_id", ""),
                 "expected_course_code": case.get("expected_course_code", ""),
                 "expected_keywords": case.get("expected_keywords", []),
+                "expected_lecture_numbers": case.get("expected_lecture_numbers", []),
+                "ground_truth_facts": case.get("ground_truth_facts", []),
                 "error": draft_body["error"],
             })
         else:
-            row = extract_ragas_fields(draft_body, question, case["ground_truth"], case=case)
+            row = extract_ragas_fields(draft_body, dataset_query, case["ground_truth"], case=case)
             ragas_rows.append(row)
 
     return {"enhanced": ragas_rows}

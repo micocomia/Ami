@@ -242,7 +242,7 @@ def run_eval_rag_drafts(
     resume: bool = False,
 ) -> dict[str, dict]:
     """
-    Run pipeline-backed /draft-knowledge-points for every RAG test case KP on both systems.
+    Run pipeline-backed /draft-knowledge-points for every RAG test case KP on enhanced only.
     Saves results under rag_drafts in the checkpoint file.
 
     goal_id_to_scenario maps G1-G4 and META_60001 to a representative scenario so the
@@ -269,7 +269,8 @@ def run_eval_rag_drafts(
 
     all_rag_drafts: dict[str, dict] = {}
 
-    for version_key, version_cfg in VERSIONS.items():
+    rag_versions = [("enhanced", VERSIONS["enhanced"])] if "enhanced" in VERSIONS else []
+    for version_key, version_cfg in rag_versions:
         print(f"\n=== RAG Drafts: {version_cfg['label']} ===")
         base_url = version_cfg["base_url"]
 

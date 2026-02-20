@@ -248,6 +248,17 @@
         "loops",
         "conditionals"
       ],
+      "expected_lecture_numbers": [
+        2,
+        4
+      ],
+      "ground_truth_facts": [
+        "6.0001 teaches while and for as core control-flow loop constructs.",
+        "Function-based decomposition and abstraction are introduced as good programming practice.",
+        "Functions are described with a name, parameters, optional docstring/specification, body, and return value.",
+        "The lectures distinguish return from print when writing functions.",
+        "Function calls create a new scope/frame where formal parameters bind to actual arguments."
+      ],
       "ground_truth": "In 6.0001 Lecture 4, control flow is taught with while loops and for loops, and program structure is improved by introducing functions to achieve decomposition and abstraction. Lecture examples define functions with a name, parameters, optional docstring/specification, body, and return value, and distinguish return from print. The same lecture emphasizes scope: calling a function creates a new frame where formal parameters are bound to actual arguments."
     },
     {
@@ -266,6 +277,16 @@
         "bisection",
         "complexity",
         "abstraction"
+      ],
+      "expected_lecture_numbers": [
+        6
+      ],
+      "ground_truth_facts": [
+        "6.0001 frames computational thinking around abstraction and algorithm design.",
+        "Early lectures include guess-and-check and bisection as algorithmic strategies.",
+        "Lecture 6 contrasts iterative algorithms with recursion.",
+        "Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style.",
+        "Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion."
       ],
       "ground_truth": "In 6.0001, computational thinking is framed through abstraction and algorithm design, with early lectures introducing algorithmic approaches such as guess-and-check and bisection. Lecture 6 contrasts iterative algorithms with recursion and presents recursion as divide/decrease-and-conquer with base and recursive steps. The lectures also connect algorithm design to efficiency, for example showing how naive Fibonacci recursion is expensive and memoized recursion reduces calls."
     },
@@ -289,6 +310,16 @@
         "split",
         "join",
         "dictionary"
+      ],
+      "expected_lecture_numbers": [
+        5
+      ],
+      "ground_truth_facts": [
+        "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns.",
+        "Tuples are immutable while lists are mutable.",
+        "List mutation is shown via index updates and methods like append, extend, remove, pop, and del.",
+        "String and list transformations are covered using list(s), split, and join.",
+        "Dictionary usage is introduced as key-based mapping-style data handling."
       ],
       "ground_truth": "6.0001 Lecture 5 introduces tuples and lists as ordered sequences with indexing from 0 to len(L)-1, and shows slicing and iteration patterns. The lecture distinguishes immutability (tuples) from mutability (lists), including list updates by index and list methods such as append, extend, remove, pop, and del. It also covers string/list transformations with list(s), split, and join, while later lecture material introduces dictionary indexing by keys for mapping-style data storage."
     }
