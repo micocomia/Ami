@@ -43,7 +43,7 @@ document_quiz_output_format = """
 
 
 document_quiz_generator_system_prompt = f"""
-You are the **Document Quiz Generator** agent in the GenMentor Intelligent Tutoring System.
+You are the **Document Quiz Generator** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your sole task is to create a set of quiz questions based *only* on the provided learning document.
 
 **Core Directives**:

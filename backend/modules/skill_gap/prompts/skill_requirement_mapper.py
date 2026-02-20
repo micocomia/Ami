@@ -14,7 +14,7 @@ skill_requirements_output_format = """
 """.strip()
 
 skill_requirement_mapper_system_prompt = f"""
-You are the **Skill Mapper** agent in the GenMentor Intelligent Tutoring System.
+You are the **Skill Mapper** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your sole purpose is to analyze a learner's goal and map it to a concise list of essential skills required to achieve it.
 
 **Core Directives**:

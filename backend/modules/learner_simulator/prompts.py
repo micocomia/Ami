@@ -178,7 +178,7 @@ learner_feedback_content_output_format = """
 """
 
 learner_feedback_simulator_system_prompt = f"""
-You are the **Learner Feedback Simulator** agent in the GenMentor Intelligent Tutoring System.
+You are the **Learner Feedback Simulator** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to mimic a learner's responses and provide proactive, qualitative feedback on learning resources. You are *not* a helpful assistant; you are *role-playing* a specific learner.
 
 **Core Directives**:

@@ -270,6 +270,81 @@ class TestVerifiedContentManager:
         codes = {c["course_code"] for c in courses}
         assert codes == {"CS101", "CS201"}
 
+    def test_sync_skips_when_manifest_unchanged(self, manager, tmp_path):
+        content_dir = tmp_path / "courses"
+        course_dir = _make_course_dir(str(content_dir), "TEST", "course", "2024")
+        _write_text(
+            os.path.join(course_dir, "Lectures", "Lec_4.py"),
+            "def topic_four():\n    return 'loops and complexity'\n",
+        )
+
+        manifest = manager._build_manifest(str(content_dir))
+        manager._save_manifest(manifest)
+
+        manager.vectorstore = MagicMock()
+        manager.vectorstore._collection.count.return_value = 7
+
+        with patch.object(manager, "index_verified_content") as mock_index, patch.object(manager, "_clear_collection") as mock_clear:
+            result = manager.sync_verified_content(str(content_dir))
+
+        assert result["reindexed"] is False
+        assert result["reason"] == "unchanged"
+        mock_clear.assert_not_called()
+        mock_index.assert_not_called()
+
+    def test_sync_reindexes_when_manifest_changed(self, manager, tmp_path):
+        content_dir = tmp_path / "courses"
+        course_dir = _make_course_dir(str(content_dir), "TEST", "course", "2024")
+        lecture_file = os.path.join(course_dir, "Lectures", "Lec_4.py")
+        _write_text(
+            lecture_file,
+            "def topic_four():\n    return 'version-one'\n",
+        )
+
+        manifest = manager._build_manifest(str(content_dir))
+        manager._save_manifest(manifest)
+
+        # Update file contents to trigger manifest hash change.
+        _write_text(
+            lecture_file,
+            "def topic_four():\n    return 'version-two'\n",
+        )
+
+        manager.vectorstore = MagicMock()
+        manager.vectorstore._collection.count.return_value = 7
+
+        with patch.object(manager, "_clear_collection") as mock_clear, patch.object(
+            manager, "index_verified_content", return_value=11
+        ) as mock_index:
+            result = manager.sync_verified_content(str(content_dir))
+
+        assert result["reindexed"] is True
+        assert result["reason"] == "manifest_changed"
+        mock_clear.assert_called_once()
+        mock_index.assert_called_once_with(str(content_dir))
+
+    def test_sync_reindexes_when_manifest_missing(self, manager, tmp_path):
+        content_dir = tmp_path / "courses"
+        course_dir = _make_course_dir(str(content_dir), "TEST", "course", "2024")
+        _write_json(
+            os.path.join(course_dir, "Syllabus", "syllabus.json"),
+            title="Test Syllabus",
+            content="Course content.",
+        )
+
+        manager.vectorstore = MagicMock()
+        manager.vectorstore._collection.count.return_value = 5
+
+        with patch.object(manager, "_clear_collection") as mock_clear, patch.object(
+            manager, "index_verified_content", return_value=9
+        ) as mock_index:
+            result = manager.sync_verified_content(str(content_dir))
+
+        assert result["reindexed"] is True
+        assert result["reason"] == "missing_manifest"
+        mock_clear.assert_called_once()
+        mock_index.assert_called_once_with(str(content_dir))
+
 
 # ===========================================================================
 # TestHybridRetrieval

@@ -8,7 +8,7 @@ integrated_document_output_format = """
 """.strip()
 
 integrated_document_generator_system_prompt = f"""
-You are the **Integrated Document Generator** agent in the GenMentor Intelligent Tutoring System.
+You are the **Integrated Document Generator** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to perform the "Integration" step by synthesizing multiple `knowledge_drafts` into a single, cohesive learning document.
 
 **Input Components**:

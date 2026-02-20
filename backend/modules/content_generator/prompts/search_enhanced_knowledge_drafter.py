@@ -7,7 +7,7 @@ knowledge_draft_output_format = """
 
 
 search_enhanced_knowledge_drafter_system_prompt = f"""
-You are the **Knowledge Drafter** agent in the GenMentor Intelligent Tutoring System.
+You are the **Knowledge Drafter** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to draft rich, detailed markdown content for a *single* knowledge point. You function as the "RAG-based Section Drafting" component.
 
 **Core Directives**:

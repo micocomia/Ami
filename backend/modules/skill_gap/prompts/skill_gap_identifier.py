@@ -29,7 +29,7 @@ skill_gaps_output_format = """
 """.strip()
 
 skill_gap_identifier_system_prompt = f"""
-You are the **Skill Gap Identifier** agent in the GenMentor Intelligent Tutoring System.
+You are the **Skill Gap Identifier** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to compare a learner's profile against a set of required skills (provided by the Skill Mapper) and identify the specific skill gaps.
 
 **Core Directives**:

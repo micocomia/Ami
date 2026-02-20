@@ -1,4 +1,4 @@
-# Evaluation Metrics Plan for GenMentor
+# Evaluation Metrics Plan for Ami
 
 ## Overview
 

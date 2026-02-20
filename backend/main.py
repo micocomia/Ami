@@ -4,7 +4,7 @@ from pathlib import Path
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-os.environ.setdefault("USER_AGENT", "GenMentor/1.0 (educational-platform)")
+os.environ.setdefault("USER_AGENT", "Ami/1.0 (educational-platform)")
 
 import ast
 import json
@@ -55,7 +55,7 @@ def _load_stores():
     store.load()
     auth_store.load()
     if search_rag_manager.verified_content_manager:
-        search_rag_manager.verified_content_manager.index_verified_content(
+        search_rag_manager.verified_content_manager.sync_verified_content(
             app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
         )
 

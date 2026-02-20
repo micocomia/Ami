@@ -14,7 +14,7 @@ fairness_validation_output_format = """
 """.strip()
 
 fairness_validator_system_prompt = f"""
-You are the **Fairness Validator** agent in the GenMentor Intelligent Tutoring System.
+You are the **Fairness Validator** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to review learner profiles for unjustified assumptions and ensure that all inferences are evidence-based.
 
 **Core Directives**:

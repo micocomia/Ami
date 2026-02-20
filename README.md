@@ -7,7 +7,7 @@
 
 ## Overview
 
-This repository is a **fork of [GenMentor](https://arxiv.org/pdf/2501.15749)** (WWW 2025, Industry Track — Oral Presentation), an LLM-powered multi-agent framework for goal-oriented learning in Intelligent Tutoring Systems (ITS). Our group is building upon GenMentor to create a **Cognitive-Style Adaptive AI Tutor** that delivers truly personalized learning experiences.
+This repository is a **fork of [GenMentor](https://arxiv.org/pdf/2501.15749)** (WWW 2025, Industry Track — Oral Presentation), an LLM-powered multi-agent framework for goal-oriented learning in Intelligent Tutoring Systems (ITS). Our group is building upon GenMentor to create a **Cognitive-Style Adaptive AI Tutor** that delivers truly personalized learning experiences. We are calling this enhanced fork Ami: Adaptive Mentoring Intelligence system.
 
 Modern digital education often adopts a "one-size-fits-all" approach, failing to account for the diverse cognitive needs of individual learners. Students, professionals, and lifelong learners frequently struggle with content that is either too complex for their current knowledge level or presented in a format that does not align with their unique cognitive styles. This leads to disengagement, fragmented learning progress, and time wasted on inefficient study methods.
 
@@ -16,16 +16,16 @@ Our project addresses this gap by enhancing GenMentor with:
 - **Verified educational content** as the source for content generation (via RAG and web search)
 - **Pedagogically-grounded learner profiling** based on the Felder-Silverman learning styles model and the SOLO Taxonomy
 - **More granular evaluation of students** through improved assessment mechanisms
-- **A React-based frontend** for a responsive, accessible user experience (replacing the original Streamlit-only interface)
+- **A React-based frontend** being developed in parallel for a responsive, accessible user experience, while this repository maintains a Streamlit frontend as an alternative
 
 ## Key Improvements Over GenMentor
 
-| Area | Original GenMentor | Our Enhancement |
+| Area | Original GenMentor | Ami |
 |---|---|---|
 | Content Sources | LLM-generated only | Verified materials via RAG + web search |
 | Learner Profiling | Basic profile | Grounded in Felder-Silverman & SOLO Taxonomy |
 | Student Evaluation | Coarse assessment | More granular, rubric-based evaluation |
-| Frontend | Streamlit | React SPA + Streamlit fallback |
+| Frontend | Streamlit | React SPA (in parallel development) + Streamlit alternative maintained in this repository |
 | Learner Simulation | N/A | Learner simulator agent for content quality feedback loop |
 
 ## System Architecture
@@ -51,7 +51,7 @@ Our project addresses this gap by enhancing GenMentor with:
 ## Tech Stack
 
 - **Backend**: Python, FastAPI, LangChain, OpenAI/Google/Meta LLMs
-- **Frontend**: React (primary), Streamlit (fallback demo)
+- **Frontend**: React (in parallel development), Streamlit (maintained alternative in this repository)
 - **Content Retrieval**: RAG (Retrieval Augmented Generation) via LangChain vector stores
 - **Evaluation**: BERTScore (recall & precision) for content adaptation quality
 - **Design**: Figma for prototyping and design system
@@ -80,6 +80,91 @@ For setup and usage instructions, see the respective directories:
 
 - [`backend/`](backend/) — Backend installation, configuration, and running instructions
 - [`frontend/`](frontend/) — Frontend installation, configuration, and running instructions
+
+## MVP Interface Walkthrough
+
+The screenshots below show the current MVP interfaces and key adaptive behaviors.
+
+### 1. Login
+
+![Login page](resources/MVP/1.%20Login.png)
+
+Login interface for returning users to authenticate and access personalized learning sessions.
+
+### 2. Onboarding
+
+![Onboarding page](resources/MVP/2.%20Onboarding.png)
+
+Onboarding flow where learners select a persona, define a learning goal, and optionally upload a resume.
+
+### 3. Skill Gap Identification
+
+| Verified Content Context | Resume-Aware Skill Gap |
+|---|---|
+| ![Skill gap with verified content](resources/MVP/3a.%20Skill%20Gap%20-%20Verified%20Content.png) | ![Skill gap adjusted with resume](resources/MVP/3b.%20Skill%20Gap%20-%20with%20Resume.png) |
+
+Left: skill gap analysis grounded in verified course materials, demonstrating accurate context retrieval.  
+Right: skill gap output after resume ingestion, showing automatic recalibration of inferred proficiency.
+
+![Skill gap bias audit](resources/MVP/3c.%20Skill%20Gap%20-%20Bias.png)
+
+Bias-auditor view flagging potentially biased assumptions in skill gap analysis.
+
+### 4. Learning Path Personalization (FSLSM)
+
+| Visual-Leaning Persona | Verbal-Leaning Persona |
+|---|---|
+| ![Learning path visual persona](resources/MVP/4a.%20Learning%20Path%20Page%20-%20Visual.png) | ![Learning path verbal persona](resources/MVP/4b.%20Learning%20Path%20-%20Verbal.png) |
+
+Left: learning path page for a visual-leaning persona, emphasizing visual structure and cues.  
+Right: learning path page for a verbal-leaning persona, emphasizing text-forward guidance.
+
+### 5. Content Delivery Personalization
+
+| Visual Persona Content | Verbal Persona Content |
+|---|---|
+| ![Visual content delivery](resources/MVP/5a.%20Content%20-%20Visual.png) | ![Verbal content delivery](resources/MVP/5b.%20Content%20-%20Verbal.png) |
+
+Left: content delivery for a visual persona, with stronger visual organization and representation.  
+Right: content delivery for a verbal persona, prioritizing narrative and text-based explanation.
+
+### 6. Adaptive Quizzes and SOLO-based Assessment
+
+| Beginner-Level Quiz | Intermediate-Level Quiz |
+|---|---|
+| ![Beginner quiz](resources/MVP/6a.%20Quiz%20beginner.png) | ![Intermediate quiz](resources/MVP/6b.%20Quiz%20-%20intermediate.png) |
+
+Left: quiz set for beginner-level proficiency, focused on foundational difficulty.  
+Right: quiz set for intermediate-level proficiency, with higher conceptual depth.
+
+![SOLO-based open-ended assessment](resources/MVP/6c.%20Quiz%20-%20Assessment%20using%20SOLO.png)
+
+Open-ended response assessment using an LLM grader aligned with SOLO taxonomy rubrics.
+
+### 7. Learner Profile Views
+
+| Cognitive Status | Learning Preference and Behavior |
+|---|---|
+| ![Learner profile cognitive status](resources/MVP/7a.%20Learner%20Profile%20-%20Cognitive%20Status.png) | ![Learner profile preferences and behavior](resources/MVP/7b.%20Learner%20Profile%20-%20Learning%20PReference%20and%20Behavior.png) |
+
+Left: learner profile view summarizing current cognitive status indicators.  
+Right: learner profile view summarizing learning preferences and behavioral signals.
+
+![Learner profile with resume](resources/MVP/7c.%20Learner%20Profile%20-%20Resume.png)
+
+Profile enrichment after resume upload, showing additional inferred background attributes.
+
+### 8. Goal Management
+
+![Goal management page](resources/MVP/8a.%20Goal%20Management%20Page.png)
+
+Goal Management page for creating, selecting, and switching among multiple learning goals.
+
+### 9. Learning Analytics
+
+![Learning analytics page](resources/MVP/9.%20Learning%20Analytics.png)
+
+Learning Analytics dashboard showing progress, performance, and engagement metrics over time.
 
 ## References
 

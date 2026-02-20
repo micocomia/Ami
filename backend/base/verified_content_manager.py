@@ -1,4 +1,7 @@
+import hashlib
+import json
 import logging
+import os
 import re
 from typing import List, Dict, Any, Optional, Union
 
@@ -10,13 +13,19 @@ from langchain_text_splitters.base import TextSplitter
 
 from base.embedder_factory import EmbedderFactory
 from base.rag_factory import TextSplitterFactory, VectorStoreFactory
-from base.verified_content_loader import load_all_verified_content, scan_courses
+from base.verified_content_loader import (
+    SKIP_FILES,
+    SUPPORTED_EXTENSIONS,
+    load_all_verified_content,
+    scan_courses,
+)
 from utils.config import ensure_config_dict
 
 logger = logging.getLogger(__name__)
 
 
 class VerifiedContentManager:
+    MANIFEST_VERSION = 1
 
     def __init__(
         self,
@@ -57,6 +66,165 @@ class VerifiedContentManager:
             persist_directory=config.get("vectorstore", {}).get("persist_directory", "./data/vectorstore"),
             collection_name=verified_cfg.get("collection_name", "verified_content"),
         )
+
+    def _manifest_path(self) -> str:
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", self.collection_name)
+        return os.path.join(self.persist_directory, f"{safe_name}_manifest.json")
+
+    @staticmethod
+    def _hash_file(file_path: str) -> str:
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _iter_supported_files(base_dir: str) -> List[str]:
+        if not os.path.isdir(base_dir):
+            return []
+        paths: List[str] = []
+        for root, _dirs, files in os.walk(base_dir):
+            for fname in files:
+                if fname in SKIP_FILES or fname.startswith("."):
+                    continue
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in SUPPORTED_EXTENSIONS:
+                    continue
+                paths.append(os.path.join(root, fname))
+        return sorted(paths)
+
+    def _build_manifest(self, base_dir: str) -> Dict[str, Any]:
+        files: List[Dict[str, Any]] = []
+        base_dir_abs = os.path.abspath(base_dir)
+        for file_path in self._iter_supported_files(base_dir_abs):
+            stat = os.stat(file_path)
+            rel_path = os.path.relpath(file_path, base_dir_abs).replace(os.sep, "/")
+            files.append(
+                {
+                    "path": rel_path,
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "sha256": self._hash_file(file_path),
+                }
+            )
+
+        hash_input = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        manifest_hash = hashlib.sha256(hash_input).hexdigest()
+        return {
+            "version": self.MANIFEST_VERSION,
+            "collection_name": self.collection_name,
+            "base_dir": base_dir_abs,
+            "file_count": len(files),
+            "manifest_hash": manifest_hash,
+            "files": files,
+        }
+
+    def _load_manifest(self) -> Optional[Dict[str, Any]]:
+        manifest_path = self._manifest_path()
+        if not os.path.exists(manifest_path):
+            return None
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to load verified content manifest '{manifest_path}': {e}")
+            return None
+
+    def _save_manifest(self, manifest: Dict[str, Any]) -> None:
+        os.makedirs(self.persist_directory, exist_ok=True)
+        manifest_path = self._manifest_path()
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, sort_keys=True)
+
+    def _clear_collection(self) -> None:
+        # Preferred path: drop and recreate collection handle.
+        if hasattr(self.vectorstore, "delete_collection"):
+            try:
+                self.vectorstore.delete_collection()
+                self.vectorstore = VectorStoreFactory.create(
+                    vectorstore_type="chroma",
+                    collection_name=self.collection_name,
+                    persist_directory=self.persist_directory,
+                    embedder=self.embedder,
+                )
+                return
+            except Exception as e:
+                logger.warning(f"delete_collection() failed for '{self.collection_name}': {e}")
+
+        # Fallback: delete all entries in-place.
+        try:
+            if hasattr(self.vectorstore, "_collection"):
+                self.vectorstore._collection.delete(where={})
+                return
+        except Exception as e:
+            logger.warning(f"_collection.delete(where={{}}) failed for '{self.collection_name}': {e}")
+
+        # Last-resort fallback: enumerate IDs and delete.
+        try:
+            ids: List[str] = []
+            if hasattr(self.vectorstore, "get"):
+                payload = self.vectorstore.get(include=[])
+                if isinstance(payload, dict):
+                    ids = payload.get("ids", []) or []
+            if ids and hasattr(self.vectorstore, "delete"):
+                self.vectorstore.delete(ids=ids)
+        except Exception as e:
+            raise RuntimeError(f"Unable to clear collection '{self.collection_name}': {e}") from e
+
+    def sync_verified_content(self, base_dir: str, *, force: bool = False) -> Dict[str, Any]:
+        """Sync verified-content index to disk resources.
+
+        Reindexes the verified collection when files are added, deleted, or updated.
+        """
+        current_manifest = self._build_manifest(base_dir)
+        stored_manifest = self._load_manifest()
+        existing_count = self.vectorstore._collection.count()
+
+        reason = "unchanged"
+        should_reindex = force
+        if force:
+            reason = "force"
+        elif existing_count == 0:
+            should_reindex = True
+            reason = "empty_collection"
+        elif stored_manifest is None:
+            should_reindex = True
+            reason = "missing_manifest"
+        elif stored_manifest.get("manifest_hash") != current_manifest.get("manifest_hash"):
+            should_reindex = True
+            reason = "manifest_changed"
+
+        if not should_reindex:
+            logger.info(
+                f"Verified content unchanged for collection '{self.collection_name}' "
+                f"({current_manifest.get('file_count', 0)} file(s)); skipping re-index."
+            )
+            return {
+                "reindexed": False,
+                "reason": reason,
+                "collection_count": existing_count,
+                "manifest_hash": current_manifest.get("manifest_hash"),
+            }
+
+        if existing_count > 0:
+            self._clear_collection()
+
+        indexed_count = self.index_verified_content(base_dir)
+        self._save_manifest(current_manifest)
+        logger.info(
+            f"Verified content sync completed for '{self.collection_name}' "
+            f"(reason={reason}, indexed={indexed_count}, files={current_manifest.get('file_count', 0)})."
+        )
+        return {
+            "reindexed": True,
+            "reason": reason,
+            "collection_count": indexed_count,
+            "manifest_hash": current_manifest.get("manifest_hash"),
+        }
 
     def index_verified_content(self, base_dir: str) -> int:
         """Loads, splits, and adds verified content to vectorstore. Skips if collection already has documents."""

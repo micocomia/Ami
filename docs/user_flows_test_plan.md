@@ -1,4 +1,4 @@
-# GenMentor — User Flows, Backend Tests & Frontend Verification Plan
+# Ami — User Flows, Backend Tests & Frontend Verification Plan
 
 > **Purpose:** This document lists each user flow's **user story**, the **backend test script** that covers it, and the **Streamlit frontend test steps** to manually verify the flow end-to-end.
 >

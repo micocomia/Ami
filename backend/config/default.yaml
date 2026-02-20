@@ -21,7 +21,7 @@ search:
 
 vectorstore:
   persist_directory: data/vectorstore
-  collection_name: genmentor
+  collection_name: non-verified-content
 
 rag:
   chunk_size: 1000

@@ -2,7 +2,7 @@
 
 **Branch:** `sprint-2-ethics-bias-enhancement`
 **Date:** 2026-02-17
-**Project:** GenMentor (5902Group5)
+**Project:** Ami (5902Group5)
 
 ---
 

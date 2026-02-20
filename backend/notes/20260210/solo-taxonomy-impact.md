@@ -1,4 +1,4 @@
-# SOLO Taxonomy Impact on GenMentor Agents
+# SOLO Taxonomy Impact on Ami Agents
 
 ## Overview
 

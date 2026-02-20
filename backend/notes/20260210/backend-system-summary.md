@@ -1,4 +1,4 @@
-# GenMentor Backend System Summary
+# Ami Backend System Summary
 
 Preparation doc for AI engineer role interviews. Covers the tech stack, multi-agent architecture, agent interaction patterns, and productionization considerations.
 

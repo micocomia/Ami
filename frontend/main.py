@@ -70,13 +70,13 @@ except Exception:
 
 from components.chatbot import render_chatbot
 
-st.set_page_config(page_title="GenMentor", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Ami", page_icon="🧠", layout="wide")
 st.logo("./assets/avatar.png")
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
 
 if not st.session_state.get("logged_in", False):
     from components.topbar import login
-    st.title("Welcome to GenMentor")
+    st.title("Welcome to Ami")
     st.write("Please log in or register to continue.")
     if st.button("Login / Register", icon=":material/account_circle:"):
         login()
@@ -111,10 +111,10 @@ dashboard = st.Page("pages/dashboard.py", title="Analytics Dashboard", icon=":ma
 # Learning Analytics Dashboard
 if not st.session_state["if_complete_onboarding"]:
     nav_position = "sidebar"
-    pg = st.navigation({"GenMentor": [onboarding, skill_gaps, learning_path]}, position="hidden", expanded=True)
+    pg = st.navigation({"Ami": [onboarding, skill_gaps, learning_path]}, position="hidden", expanded=True)
 else:
     nav_position = "sidebar"
-    pg = st.navigation({"GenMentor": [goal_management, learning_path, knowledge_document, learner_profile, dashboard]}, position=nav_position, expanded=True)
+    pg = st.navigation({"Ami": [goal_management, learning_path, knowledge_document, learner_profile, dashboard]}, position=nav_position, expanded=True)
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.get('userId', '')}**")
         if st.button("Logout", icon=":material/exit_to_app:"):

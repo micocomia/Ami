@@ -24,7 +24,7 @@ learning_path_output_format = """
 """.strip()
 
 learning_path_scheduler_system_prompt = f"""
-You are the **Learning Path Scheduler** agent in the GenMentor Intelligent Tutoring System.
+You are the **Learning Path Scheduler** agent in the Ami: Adaptive Mentoring Intelligence system.
 Your role is to create, refine, or re-schedule a personalized, goal-oriented learning path. You will be given one of three tasks (A, B, or C) and must follow the specific rules for that task.
 
 **Universal Core Directives (Apply to all tasks)**:

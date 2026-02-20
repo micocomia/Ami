@@ -1,6 +1,6 @@
-# Frontend of GenMentor
+# Frontend of Ami
 
-A Streamlit-based UI for GenMentor that guides learners through onboarding, goal refinement, skill-gaps analysis, learning-path scheduling, and in-session knowledge documents with quizzes. It talks to the Python backend over simple HTTP endpoints and can also run in a mock/offline mode using sample JSONs.
+A Streamlit-based UI for Ami that guides learners through onboarding, goal refinement, skill-gaps analysis, learning-path scheduling, and in-session knowledge documents with quizzes. It talks to the Python backend over simple HTTP endpoints and can also run in a mock/offline mode using sample JSONs.
 
 ## Quickstart
 
@@ -77,7 +77,7 @@ Open your web browser and go to:
 http://localhost:8501
 ```
 
-You should see the **GenMentor onboarding page**. If you see this, the frontend is running correctly.
+You should see the **Ami onboarding page**. If you see this, the frontend is running correctly.
 
 #### Connecting to the Backend
 
@@ -140,8 +140,8 @@ docker compose -f docker/docker-compose.yml up --build
 
 ```bash
 # 1. Create and activate a conda environment
-conda create -n genmentor python=3.13 -y
-conda activate genmentor
+conda create -n ami-frontend python=3.13 -y
+conda activate ami-frontend
 
 # 2. Install dependencies
 cd frontend
@@ -179,7 +179,6 @@ frontend/
   main.py                 # Streamlit entry. Builds navigation and loads CSS/logo
   config.py               # Frontend configuration flags and API base URL
   requirements.txt        # Python dependencies (Streamlit + extras)
-  data_store.json         # Persistent UI state (created/updated by the app)
   .streamlit/config.toml  # Streamlit theme/layout defaults
 
   docker/                 # Docker setup
@@ -206,7 +205,7 @@ Key pages:
 
 ## How it works
 
-- UI state is stored in Streamlit `st.session_state` and persisted to `data_store.json` via utilities in `utils/state.py`.
+- UI state is stored in Streamlit `st.session_state` and persisted through backend state endpoints (for example `/user-state/{user_id}`) via utilities in `utils/state.py`.
 - Backend calls are made with `httpx` via `utils/request_api.py` using endpoints under `config.backend_endpoint`.
 - When `use_mock_data=True`, the app reads JSON fixtures from `assets/data_example/` instead of calling the backend.
 - The knowledge document page supports section-by-section pagination, a clickable sidebar TOC, and auto-scroll to anchors.
