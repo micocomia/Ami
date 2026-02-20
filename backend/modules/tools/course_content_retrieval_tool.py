@@ -1,7 +1,8 @@
 """
 Course Content Retrieval Tool for skill gap agents.
 
-Wraps VerifiedContentManager.retrieve() with in-memory metadata filtering
+Uses metadata-aware verified-content retrieval when available
+(`retrieve_filtered`), with fallback to `retrieve()` plus in-memory filtering,
 so agents can query syllabus, lectures, or any verified course content.
 """
 
@@ -77,7 +78,20 @@ def create_course_content_retrieval_tool(
             return "No verified course content available. Proceed using your own knowledge."
 
         vcm = search_rag_manager.verified_content_manager
-        docs = vcm.retrieve(query, k=k * 4)  # over-fetch for filtering
+        # Use metadata-aware retrieval if the manager supports it.
+        # `type(...)` check avoids MagicMock attribute auto-generation in tests.
+        if hasattr(type(vcm), "retrieve_filtered"):
+            docs = vcm.retrieve_filtered(
+                query,
+                k=k * 4,  # over-fetch for any remaining post-filters
+                course_code=course_code,
+                content_category=content_category,
+                lecture_number=lecture_number,
+                exclude_file_names=["syllabus.json"] if (content_category or "").lower() == "lectures" else None,
+                require_lecture=(content_category or "").lower() == "lectures",
+            )
+        else:
+            docs = vcm.retrieve(query, k=k * 4)  # fallback
 
         if course_code:
             docs = [

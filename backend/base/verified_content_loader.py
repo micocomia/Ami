@@ -17,6 +17,18 @@ CONTENT_CATEGORIES = {"Syllabus", "Lectures", "Exercises", "References"}
 _LECTURE_NUMBER_RE = re.compile(r"[Ll]ec_?(\d+)")
 
 
+def _effective_content_category(category: str, file_name: str) -> str:
+    """Map files to effective categories for retrieval metadata.
+
+    Keep .py files indexed, but treat lecture-adjacent code files as References
+    so lecture-only retrieval can prioritize explanatory slide text.
+    """
+    _, ext = os.path.splitext(file_name.lower())
+    if category == "Lectures" and ext == ".py":
+        return "References"
+    return category
+
+
 def _extract_lecture_number(file_name: str) -> Optional[int]:
     """Extract lecture number from filename patterns like Lec_1.pdf, MIT11_437F16_Lec3.pdf, MIT6_831S11_lec01.pdf."""
     match = _LECTURE_NUMBER_RE.search(file_name)
@@ -213,13 +225,14 @@ def load_course_documents(
                 file_path = os.path.join(root, fname)
                 docs = load_file(file_path)
                 lecture_number = _extract_lecture_number(fname)
+                effective_category = _effective_content_category(category, fname)
                 for doc in docs:
                     doc.metadata.update({
                         "source_type": "verified_content",
                         "course_code": course_metadata["course_code"],
                         "course_name": course_metadata["course_name"],
                         "term": course_metadata["term"],
-                        "content_category": category,
+                        "content_category": effective_category,
                         "file_name": fname,
                         "lecture_number": lecture_number,
                     })
@@ -254,7 +267,7 @@ def load_all_verified_content(base_dir: str, max_workers: int = 4) -> List[Docum
                         "course_code": course["course_code"],
                         "course_name": course["course_name"],
                         "term": course["term"],
-                        "content_category": category,
+                        "content_category": _effective_content_category(category, fname),
                         "file_name": fname,
                         "lecture_number": _extract_lecture_number(fname),
                     }

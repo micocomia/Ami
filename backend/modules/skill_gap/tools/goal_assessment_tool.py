@@ -56,7 +56,16 @@ def create_goal_assessment_tool(search_rag_manager: Optional[SearchRagManager] =
             )
             if not course_code_pattern.search(learning_goal):
                 vcm = search_rag_manager.verified_content_manager
-                docs = vcm.retrieve(learning_goal, k=3)
+                if hasattr(type(vcm), "retrieve_filtered"):
+                    docs = vcm.retrieve_filtered(
+                        learning_goal,
+                        k=3,
+                        content_category="Lectures",
+                        exclude_file_names=["syllabus.json"],
+                        require_lecture=True,
+                    )
+                else:
+                    docs = vcm.retrieve(learning_goal, k=3)
                 if not docs:
                     is_vague = True
         # Without verified content, we cannot assess vagueness via retrieval

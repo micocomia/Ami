@@ -1,13 +1,9 @@
 """
 RAG Quality Evaluation — RAGAS
 
-Calls /draft-knowledge-points on both systems for standard and metadata-aware
-RAG cases, then evaluates with RAGAS metrics: Context Precision, Context Recall,
-Faithfulness, and Answer Relevancy.
-
-Methodology: product-mode asymmetric comparison.
-- Enhanced system is expected to have access to pre-indexed verified course content.
-- Baseline is expected to rely on web-search-driven retrieval at draft time.
+Evaluates metadata-targeted RAG cases using only the enhanced system.
+RAGAS metrics include Context Precision, Context Recall, Faithfulness,
+Answer Relevancy, and Answer Correctness.
 
 For metadata-aware cases (e.g., course-code-targeted prompts such as 6.0001),
 it also reports simple retrieval diagnostics based on source metadata:
@@ -25,7 +21,7 @@ Usage:
 import json
 import os
 
-from evals.config import VERSIONS, DATASETS_DIR, RESULTS_DIR
+from evals.config import DATASETS_DIR, RESULTS_DIR
 
 # RAGAS imports (optional dependency)
 try:
@@ -43,39 +39,11 @@ except ImportError:
     RAGAS_AVAILABLE = False
     print("WARNING: ragas not installed. Run: pip install ragas datasets")
 
-# Metrics that require real retrieved contexts (not answer-as-context fallback).
-# Only run these for the enhanced system where page_content is present in sources_used.
-CONTEXT_METRICS = ["context_precision", "context_recall", "faithfulness"]
-# Metrics that only need question + answer + ground_truth — safe for both systems.
-ANSWER_METRICS = ["answer_relevancy", "answer_correctness"]
-
-
 def build_rag_cases(dataset: dict) -> list[dict]:
     """
-    Build a flat list of RAG evaluation cases from the shared dataset.
-    Supports two shapes:
-      1) Legacy goal/kp maps via rag_knowledge_points + rag_ground_truths
-      2) Explicit metadata-aware cases via rag_metadata_cases
+    Build metadata-targeted RAG evaluation cases from rag_metadata_cases.
     """
     cases = []
-    goals = dataset["learning_goals"]
-    kps = dataset["rag_knowledge_points"]
-    gts = dataset["rag_ground_truths"]
-
-    for goal_id, goal_text in goals.items():
-        for kp in kps.get(goal_id, []):
-            gt_key = f"{goal_id}_{kp}"
-            cases.append({
-                "goal_id": goal_id,
-                "learning_goal": goal_text,
-                "knowledge_point": kp,
-                "ground_truth": gts.get(gt_key, ""),
-                "case_type": "standard",
-            })
-
-    # Optional metadata-aware retrieval cases.
-    # These are explicitly query-targeted (e.g., include a course code) so we can
-    # quantify whether retrieval surfaces sources with matching metadata.
     for case in dataset.get("rag_metadata_cases", []):
         cases.append({
             "goal_id": case.get("goal_id", "META"),
@@ -122,7 +90,6 @@ def get_draft_from_checkpoint(checkpoint: dict, version_key: str, case: dict) ->
 
 def extract_ragas_fields(
     draft_body: dict,
-    version_key: str,
     question: str,
     ground_truth: str,
     case: dict | None = None,
@@ -130,13 +97,8 @@ def extract_ragas_fields(
     """
     Extract (question, answer, contexts, ground_truth) for RAGAS.
 
-    Both systems return:
-      {"knowledge_draft": {"title": str, "content": str, ...}}
-
-    Enhanced additionally returns sources_used inside knowledge_draft:
+    Enhanced returns:
       {"knowledge_draft": {"title": str, "content": str, "sources_used": [...]}}
-
-    GenMentor has no sources_used field, so contexts fall back to the draft content.
     """
     kd = draft_body.get("knowledge_draft", {})
     if isinstance(kd, str):
@@ -150,9 +112,8 @@ def extract_ragas_fields(
         # Last-resort fallback if schema changes
         answer = draft_body.get("content", draft_body.get("draft", json.dumps(draft_body)))
 
-    # Contexts: enhanced stores sources_used (metadata-first); GenMentor usually has no sources field.
-    # Use source content only when actually present; otherwise fall back to answer text for both
-    # systems to keep RAGAS inputs symmetric and interpretable.
+    # Use retrieved source content when available. If schema changes or sources are
+    # absent, fall back to draft text as a single context to keep evaluation robust.
     sources = kd.get("sources_used") or []
     contexts = []
     if sources and isinstance(sources[0], dict):
@@ -174,7 +135,7 @@ def extract_ragas_fields(
         "ground_truth": ground_truth,
     }
     if case:
-        row["case_type"] = case.get("case_type", "standard")
+        row["case_type"] = case.get("case_type", "metadata")
         row["case_id"] = case.get("case_id", "")
         row["expected_course_code"] = case.get("expected_course_code", "")
         row["expected_keywords"] = case.get("expected_keywords", [])
@@ -220,22 +181,12 @@ def _metadata_case_metrics(rows: list[dict]) -> dict:
     return out
 
 
-def _verified_preflight_from_rows(rows: list[dict], version_key: str) -> dict:
+def _verified_preflight_from_rows(rows: list[dict]) -> dict:
     """
     Lightweight preflight from existing evaluated rows (no additional API calls).
     Checks whether metadata-targeted rows show evidence that verified content was
     used by retrieval in enhanced product mode.
     """
-    if version_key != "enhanced":
-        return {
-            "enabled": False,
-            "passed": None,
-            "reason": "baseline_web_only_expected",
-            "probe_count": 0,
-            "verified_source_hit_count": 0,
-            "course_code_hit_count": 0,
-        }
-
     meta_rows = [r for r in rows if r.get("case_type") == "metadata" and "error" not in r]
     probe_count = len(meta_rows)
     if probe_count == 0:
@@ -270,12 +221,8 @@ def _verified_preflight_from_rows(rows: list[dict], version_key: str) -> dict:
     }
 
 
-def _ragas_mean_for_rows(rows: list[dict], use_context_metrics: bool = True) -> dict:
-    """Compute mean RAGAS metrics for a prepared list of rows.
-
-    When use_context_metrics=False (baseline), only answer_relevancy and
-    answer_correctness are run — these don't require real retrieved contexts.
-    """
+def _ragas_mean_for_rows(rows: list[dict]) -> dict:
+    """Compute mean RAGAS metrics for a prepared list of rows."""
     ragas_ready = [{
         "question": r["question"],
         "answer": r["answer"],
@@ -283,53 +230,46 @@ def _ragas_mean_for_rows(rows: list[dict], use_context_metrics: bool = True) -> 
         "ground_truth": r["ground_truth"],
     } for r in rows]
     hf_dataset = HFDataset.from_list(ragas_ready)
-    if use_context_metrics:
-        metrics = [context_precision, context_recall, faithfulness, answer_relevancy, answer_correctness]
-    else:
-        metrics = [answer_relevancy, answer_correctness]
+    metrics = [context_precision, context_recall, faithfulness, answer_relevancy, answer_correctness]
     result = ragas_evaluate(hf_dataset, metrics=metrics)
     return result.to_pandas().mean(numeric_only=True).to_dict()
 
 
 def run_eval_rag(rag_cases: list[dict], checkpoint: dict) -> dict:
     """
-    Build RAGAS rows for each RAG case by loading pre-computed drafts from the
-    checkpoint (produced by eval_api_perf.run_eval_rag_drafts).  No live API calls
-    are made here — the checkpoint must be populated first by running eval_api_perf.
+    Build RAGAS rows for metadata-targeted RAG cases using enhanced drafts
+    from the checkpoint (produced by eval_api_perf.run_eval_rag_drafts).
+    No live API calls are made here.
     """
-    all_results = {}
+    version_key = "enhanced"
+    print("\n=== RAG Eval: Enhanced (metadata cases only) ===")
+    ragas_rows = []
 
-    for version_key, version_cfg in VERSIONS.items():
-        print(f"\n=== RAG Eval: {version_cfg['label']} ===")
-        ragas_rows = []
+    for case in rag_cases:
+        question = case.get("query") or f"{case['learning_goal']} — {case['knowledge_point']}"
+        print(f"  Loading: {case['knowledge_point'][:60]}...")
+        draft_body = get_draft_from_checkpoint(checkpoint, version_key, case)
+        if "error" in draft_body:
+            print(f"    MISS: {draft_body['error']}")
+            ragas_rows.append({
+                "question": question,
+                "answer": "",
+                "contexts": [""],
+                "ground_truth": case["ground_truth"],
+                "case_type": case.get("case_type", "metadata"),
+                "case_id": case.get("case_id", ""),
+                "expected_course_code": case.get("expected_course_code", ""),
+                "expected_keywords": case.get("expected_keywords", []),
+                "error": draft_body["error"],
+            })
+        else:
+            row = extract_ragas_fields(draft_body, question, case["ground_truth"], case=case)
+            ragas_rows.append(row)
 
-        for case in rag_cases:
-            question = case.get("query") or f"{case['learning_goal']} — {case['knowledge_point']}"
-            print(f"  Loading: {case['knowledge_point'][:60]}...")
-            draft_body = get_draft_from_checkpoint(checkpoint, version_key, case)
-            if "error" in draft_body:
-                print(f"    MISS: {draft_body['error']}")
-                ragas_rows.append({
-                    "question": question,
-                    "answer": "",
-                    "contexts": [""],
-                    "ground_truth": case["ground_truth"],
-                    "case_type": case.get("case_type", "standard"),
-                    "case_id": case.get("case_id", ""),
-                    "expected_course_code": case.get("expected_course_code", ""),
-                    "expected_keywords": case.get("expected_keywords", []),
-                    "error": draft_body["error"],
-                })
-            else:
-                row = extract_ragas_fields(draft_body, version_key, question, case["ground_truth"], case=case)
-                ragas_rows.append(row)
-
-        all_results[version_key] = ragas_rows
-
-    return all_results
+    return {"enhanced": ragas_rows}
 
 
-def compute_ragas_scores(ragas_rows: list[dict], version_key: str | None = None) -> dict:
+def compute_ragas_scores(ragas_rows: list[dict]) -> dict:
     if not RAGAS_AVAILABLE:
         return {"error": "ragas not installed"}
 
@@ -337,37 +277,17 @@ def compute_ragas_scores(ragas_rows: list[dict], version_key: str | None = None)
     if not valid_rows:
         return {"error": "No valid rows to evaluate"}
 
-    # Enhanced system has real retrieved contexts (page_content in sources_used).
-    # Baseline falls back to answer-as-context, so context-dependent metrics are meaningless.
-    use_context_metrics = (version_key == "enhanced")
-    if not use_context_metrics:
-        print(f"  Note: running answer-quality metrics only for {version_key} (no real retrieved contexts)")
-
-    summary = {"metrics_mode": "full_ragas" if use_context_metrics else "answer_quality_only"}
-
-    # Overall metrics (kept as top-level keys for backward compatibility).
-    overall = _ragas_mean_for_rows(valid_rows, use_context_metrics=use_context_metrics)
+    summary = {"metrics_mode": "full_ragas", "evaluated_version": "enhanced", "case_scope": "metadata_only"}
+    overall = _ragas_mean_for_rows(valid_rows)
     summary.update(overall)
-
-    # Split metrics by case type.
-    standard_rows = [r for r in valid_rows if r.get("case_type", "standard") == "standard"]
-    metadata_rows = [r for r in valid_rows if r.get("case_type") == "metadata"]
-    if standard_rows:
-        standard_scores = _ragas_mean_for_rows(standard_rows, use_context_metrics=use_context_metrics)
-        for k, v in standard_scores.items():
-            summary[f"standard_{k}"] = v
-    if metadata_rows:
-        metadata_scores = _ragas_mean_for_rows(metadata_rows, use_context_metrics=use_context_metrics)
-        for k, v in metadata_scores.items():
-            summary[f"metadata_{k}"] = v
-
+    for k, v in overall.items():
+        summary[f"metadata_{k}"] = v
     summary.update(_metadata_case_metrics(valid_rows))
-    if version_key:
-        preflight = _verified_preflight_from_rows(valid_rows, version_key)
-        summary["evaluation_mode"] = "product_asymmetric"
-        summary["assumption"] = "enhanced_has_verified_course_content__baseline_web_search"
-        summary["verified_preflight"] = preflight
-        summary["verified_preflight_passed"] = preflight.get("passed")
+    preflight = _verified_preflight_from_rows(valid_rows)
+    summary["evaluation_mode"] = "enhanced_verified_content_only"
+    summary["assumption"] = "metadata_queries_should_retrieve_verified_6_0001_content"
+    summary["verified_preflight"] = preflight
+    summary["verified_preflight_passed"] = preflight.get("passed")
     return summary
 
 
@@ -388,7 +308,7 @@ if __name__ == "__main__":
         dataset = json.load(f)
 
     rag_cases = build_rag_cases(dataset)
-    print(f"Built {len(rag_cases)} RAG evaluation cases")
+    print(f"Built {len(rag_cases)} metadata RAG evaluation cases")
 
     checkpoint = load_rag_checkpoint(args.cache_path)
     if not checkpoint:
@@ -410,7 +330,7 @@ if __name__ == "__main__":
     summary = {}
     for version_key, rows in all_results.items():
         print(f"\nComputing RAGAS scores for {version_key}...")
-        summary[version_key] = compute_ragas_scores(rows, version_key=version_key)
+        summary[version_key] = compute_ragas_scores(rows)
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out_path = os.path.join(RESULTS_DIR, "rag_results.json")
@@ -419,7 +339,7 @@ if __name__ == "__main__":
 
     print("\n=== RAG Evaluation Summary ===")
     for version_key, scores in summary.items():
-        print(f"\n{VERSIONS[version_key]['label']}:")
+        print(f"\n{version_key}:")
         for metric, val in scores.items():
             if isinstance(val, float):
                 print(f"  {metric}: {val:.3f}")

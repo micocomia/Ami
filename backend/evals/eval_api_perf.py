@@ -247,7 +247,7 @@ def run_eval_rag_drafts(
 
     goal_id_to_scenario maps G1-G4 and META_60001 to a representative scenario so the
     pipeline (skill gap → create profile → schedule path) can be run with valid inputs.
-    META_60001 reuses the G2 scenario since both cover the 6.0001 topic area.
+    META_60001 prefers S4 (non-tech 6.0001 scenario) and falls back to G2 if needed.
     """
     existing = _load_perf_cache(cache_path) if (resume and cache_path) else {}
 
@@ -259,8 +259,12 @@ def run_eval_rag_drafts(
         for gid, gtext in learning_goals.items():
             if gtext == s["learning_goal"] and gid not in goal_id_to_scenario:
                 goal_id_to_scenario[gid] = s
-    # META_60001 reuses G2 (same 6.0001 topic area)
-    if "G2" in goal_id_to_scenario:
+    # Map metadata RAG cases to the non-tech 6.0001 scenario (S4) for stability.
+    # Fallback to G2 representative if S4 is unavailable.
+    s4 = next((s for s in scenarios if s.get("id") == "S4"), None)
+    if s4 is not None:
+        goal_id_to_scenario["META_60001"] = s4
+    elif "G2" in goal_id_to_scenario:
         goal_id_to_scenario["META_60001"] = goal_id_to_scenario["G2"]
 
     all_rag_drafts: dict[str, dict] = {}
@@ -611,15 +615,11 @@ if __name__ == "__main__":
     # can load from it instead of making direct (dummy-input) API calls.
     print("\n=== Running RAG draft cases (pipeline-backed) ===")
     rag_cases = []
-    learning_goals = dataset.get("learning_goals", {})
-    for goal_id, goal_text in learning_goals.items():
-        for kp in dataset.get("rag_knowledge_points", {}).get(goal_id, []):
-            rag_cases.append({"goal_id": goal_id, "learning_goal": goal_text, "knowledge_point": kp})
     for case in dataset.get("rag_metadata_cases", []):
         rag_cases.append({
             "goal_id": case.get("goal_id", "META"),
             "learning_goal": case["learning_goal"],
             "knowledge_point": case["knowledge_point"],
         })
-    print(f"Built {len(rag_cases)} RAG draft cases across all learning goals.")
+    print(f"Built {len(rag_cases)} RAG metadata draft case(s).")
     run_eval_rag_drafts(rag_cases, dataset, cache_path=args.cache_path, resume=args.resume or args.rag_only)

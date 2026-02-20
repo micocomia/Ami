@@ -59,8 +59,37 @@ class SkillGapIdentifier(BaseAgent):
         payload_dict = SkillGapPayload(**input_dict).model_dump()
         task_prompt = skill_gap_identifier_task_prompt
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
-        validated = SkillGaps.model_validate(raw_output)
+        normalized_output = self._normalize_is_gap_flags(raw_output)
+        validated = SkillGaps.model_validate(normalized_output)
         return validated.model_dump()
+
+    @staticmethod
+    def _normalize_is_gap_flags(raw_output: Any) -> Any:
+        """Derive is_gap from levels to prevent contradictory LLM outputs."""
+        if not isinstance(raw_output, dict):
+            return raw_output
+
+        skill_gaps = raw_output.get("skill_gaps")
+        if not isinstance(skill_gaps, list):
+            return raw_output
+
+        order = {
+            "unlearned": 0,
+            "beginner": 1,
+            "intermediate": 2,
+            "advanced": 3,
+            "expert": 4,
+        }
+
+        for gap in skill_gaps:
+            if not isinstance(gap, dict):
+                continue
+            required = str(gap.get("required_level", "")).strip().lower()
+            current = str(gap.get("current_level", "")).strip().lower()
+            if required in order and current in order:
+                gap["is_gap"] = order[current] < order[required]
+
+        return raw_output
 
 def identify_skill_gap_with_llm(
     llm: Any,

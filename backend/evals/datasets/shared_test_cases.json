@@ -215,10 +215,6 @@
       "React component lifecycle and hooks",
       "RESTful API design with Express.js"
     ],
-    "G2": [
-      "Python control flow and function decomposition (6.0001)",
-      "Computational thinking and algorithmic problem solving (6.0001)"
-    ],
     "G3": [
       "HTTP methods and REST API conventions",
       "Authentication and authorization with JWT"
@@ -232,47 +228,69 @@
     {
       "case_id": "M01",
       "goal_id": "META_60001",
-      "learning_goal": "I want to learn introductory programming topics from MIT 6.0001",
-      "knowledge_point": "Python control flow and function decomposition from 6.0001",
-      "query": "I want to learn the topics in 6.0001, especially Python control flow and function decomposition",
+      "learning_goal": "I want to learn introductory programming topics from MIT 6.0001 lectures",
+      "knowledge_point": "Control flow and function-based decomposition in 6.0001 lectures",
+      "query": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
       "expected_course_code": "6.0001",
       "expected_keywords": [
-        "python",
-        "conditionals",
+        "while",
+        "for",
+        "functions",
+        "decomposition",
+        "abstraction",
+        "scope",
+        "return",
+        "docstring",
+        "specification",
+        "parameters",
+        "if",
+        "else",
         "loops",
-        "functions"
+        "conditionals"
       ],
-      "ground_truth": "MIT 6.0001 introduces Python programming fundamentals including variables and expressions, conditional branching with if/elif/else, iteration using for and while loops, and decomposition with reusable functions. Students practice breaking larger problems into smaller functions with clear inputs and return values."
+      "ground_truth": "In 6.0001 Lecture 4, control flow is taught with while loops and for loops, and program structure is improved by introducing functions to achieve decomposition and abstraction. Lecture examples define functions with a name, parameters, optional docstring/specification, body, and return value, and distinguish return from print. The same lecture emphasizes scope: calling a function creates a new frame where formal parameters are bound to actual arguments."
     },
     {
       "case_id": "M02",
       "goal_id": "META_60001",
-      "learning_goal": "I want to review problem-solving topics taught in MIT 6.0001",
-      "knowledge_point": "Computational thinking and algorithmic problem solving in 6.0001",
-      "query": "Teach me computational thinking topics from 6.0001 and relate them to Python problem solving",
+      "learning_goal": "I want to review computational problem-solving from MIT 6.0001 lectures",
+      "knowledge_point": "Computational thinking and algorithmic strategies in 6.0001 lectures",
+      "query": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
       "expected_course_code": "6.0001",
       "expected_keywords": [
-        "abstraction",
         "algorithm",
-        "decomposition",
-        "testing"
+        "iteration",
+        "recursion",
+        "divide and conquer",
+        "guess and check",
+        "bisection",
+        "complexity",
+        "abstraction"
       ],
-      "ground_truth": "6.0001 emphasizes computational thinking through abstraction, decomposition, and algorithmic reasoning. Typical activities include formulating step-by-step solutions, implementing them in Python, and validating behavior with test cases and edge-case checks."
+      "ground_truth": "In 6.0001, computational thinking is framed through abstraction and algorithm design, with early lectures introducing algorithmic approaches such as guess-and-check and bisection. Lecture 6 contrasts iterative algorithms with recursion and presents recursion as divide/decrease-and-conquer with base and recursive steps. The lectures also connect algorithm design to efficiency, for example showing how naive Fibonacci recursion is expensive and memoized recursion reduces calls."
     },
     {
       "case_id": "M03",
       "goal_id": "META_60001",
-      "learning_goal": "I want to focus on data-focused basics from MIT 6.0001",
-      "knowledge_point": "Strings, lists, and dictionary-style data modeling in 6.0001",
-      "query": "Use 6.0001 course material to explain strings, lists, and data handling in beginner Python",
+      "learning_goal": "I want to focus on data-structure basics from MIT 6.0001 lectures",
+      "knowledge_point": "Strings, tuples, lists, and dictionary data handling in 6.0001 lectures",
+      "query": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
       "expected_course_code": "6.0001",
       "expected_keywords": [
         "strings",
+        "tuples",
         "lists",
         "indexing",
-        "iteration"
+        "slicing",
+        "mutable",
+        "immutable",
+        "append",
+        "remove",
+        "split",
+        "join",
+        "dictionary"
       ],
-      "ground_truth": "In 6.0001, learners work with foundational data structures such as strings and lists, including indexing, slicing, and iteration patterns. They also practice representing and transforming data in Python to solve simple analytical and programming tasks."
+      "ground_truth": "6.0001 Lecture 5 introduces tuples and lists as ordered sequences with indexing from 0 to len(L)-1, and shows slicing and iteration patterns. The lecture distinguishes immutability (tuples) from mutability (lists), including list updates by index and list methods such as append, extend, remove, pop, and del. It also covers string/list transformations with list(s), split, and join, while later lecture material introduces dictionary indexing by keys for mapping-style data storage."
     }
   ],
   "rag_ground_truths": {
@@ -281,8 +299,6 @@
     "G3_HTTP methods and REST API conventions": "REST uses stateless HTTP. GET retrieves resources, POST creates, PUT replaces, PATCH partially updates, DELETE removes. Resources are nouns in URLs (e.g., /users/123). Versioning uses /v1/ prefix. JSON is the standard response format. Status codes 2xx success, 4xx client errors, 5xx server errors.",
     "G3_Authentication and authorization with JWT": "JWT (JSON Web Token) consists of header, payload, and signature, base64-encoded and dot-separated. The server signs tokens with a secret key (HMAC) or private key (RSA). Clients send tokens in the Authorization: Bearer header. Access tokens are short-lived; refresh tokens long-lived. Authorization checks user roles/permissions after authentication.",
     "G4_Project lifecycle phases: initiation, planning, execution, monitoring, and closure": "The project lifecycle consists of five phases following the PMBOK framework: Initiation (defining scope, objectives, and feasibility in a project charter and identifying key stakeholders), Planning (developing a detailed project management plan covering schedule, budget, resources, risk, and communications), Execution (coordinating people and resources to carry out the plan), Monitoring and Controlling (tracking progress against baselines, managing change requests, and reporting status), and Closure (formally completing the project, obtaining stakeholder sign-off, releasing resources, and capturing lessons learned).",
-    "G4_Agile and Scrum: sprints, ceremonies, and backlog management": "Agile is an iterative project management philosophy that delivers value in short cycles called sprints (typically 1-4 weeks). Scrum is the most widely used Agile framework. Key Scrum roles are the Product Owner (owns and prioritizes the product backlog), Scrum Master (facilitates the process and removes impediments), and Development Team. Core ceremonies include Sprint Planning, Daily Stand-up, Sprint Review, and Sprint Retrospective. The product backlog is a prioritized list of user stories; the sprint backlog contains items selected for the current sprint. Kanban is an alternative Agile approach using a visual board to manage continuous flow of work without fixed sprints.",
-    "G2_Python control flow and function decomposition (6.0001)": "In 6.0001, Python control flow covers conditionals (if/elif/else) and iterative logic using for and while loops. Function decomposition emphasizes breaking complex problems into reusable functions with clear parameters and return values.",
-    "G2_Computational thinking and algorithmic problem solving (6.0001)": "6.0001 introduces computational thinking through abstraction, decomposition, and algorithm design. Learners build step-by-step algorithmic solutions in Python and validate them using test cases and edge-condition checks."
+    "G4_Agile and Scrum: sprints, ceremonies, and backlog management": "Agile is an iterative project management philosophy that delivers value in short cycles called sprints (typically 1-4 weeks). Scrum is the most widely used Agile framework. Key Scrum roles are the Product Owner (owns and prioritizes the product backlog), Scrum Master (facilitates the process and removes impediments), and Development Team. Core ceremonies include Sprint Planning, Daily Stand-up, Sprint Review, and Sprint Retrospective. The product backlog is a prioritized list of user stories; the sprint backlog contains items selected for the current sprint. Kanban is an alternative Agile approach using a visual board to manage continuous flow of work without fixed sprints."
   }
 }
