@@ -1,0 +1,175 @@
+table,row,column,value
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_precision,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_precision,5902Group5,0.79
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_precision,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_recall,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_recall,5902Group5,0.47
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",context_recall,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",faithfulness,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",faithfulness,5902Group5,0.74
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",faithfulness,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",answer_relevancy,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",answer_relevancy,5902Group5,0.83
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Overall",answer_relevancy,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_precision,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_precision,5902Group5,0.79
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_precision,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_recall,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_recall,5902Group5,0.47
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",context_recall,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",faithfulness,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",faithfulness,5902Group5,0.74
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",faithfulness,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",answer_relevancy,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",answer_relevancy,5902Group5,0.83
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Cases Only",answer_relevancy,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_course_hit_rate,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_course_hit_rate,5902Group5,1.00
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_course_hit_rate,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_verified_source_rate,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_verified_source_rate,5902Group5,1.00
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_verified_source_rate,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_keyword_coverage,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_keyword_coverage,5902Group5,0.64
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_keyword_coverage,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_answer,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_answer,5902Group5,0.47
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_answer,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_context,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_context,5902Group5,0.20
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_fact_coverage_context,Delta,—
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_expected_lecture_hit_rate,GenMentor,N/A
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_expected_lecture_hit_rate,5902Group5,0.67
+"1. RAG Quality (RAGAS, 0–1 scale, Product Mode) > Metadata Diagnostics",metadata_expected_lecture_hit_rate,Delta,—
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",completeness,GenMentor,3.62
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",completeness,5902Group5,4.12
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",completeness,Delta,+0.50
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",gap_calibration,GenMentor,4.75
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",gap_calibration,5902Group5,4.88
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",gap_calibration,Delta,+0.13
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",goal_refinement_quality,GenMentor,3.50
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",goal_refinement_quality,5902Group5,4.00
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",goal_refinement_quality,Delta,+0.50
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",confidence_validity,GenMentor,4.62
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",confidence_validity,5902Group5,4.75
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",confidence_validity,Delta,+0.13
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",expert_calibration *(enhanced only)*,GenMentor,N/A
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",expert_calibration *(enhanced only)*,5902Group5,5.00
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",expert_calibration *(enhanced only)*,Delta,—
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",solo_level_accuracy *(enhanced only)*,GenMentor,N/A
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",solo_level_accuracy *(enhanced only)*,5902Group5,4.75
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale)",solo_level_accuracy *(enhanced only)*,Delta,—
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",completeness,GenMentor,3.62
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",completeness,GenMentor (Forced Refine),4.62
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",completeness,5902Group5,4.12
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",gap_calibration,GenMentor,4.75
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",gap_calibration,GenMentor (Forced Refine),4.88
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",gap_calibration,5902Group5,4.88
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",goal_refinement_quality,GenMentor,3.50
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",goal_refinement_quality,GenMentor (Forced Refine),4.00
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",goal_refinement_quality,5902Group5,4.00
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",confidence_validity,GenMentor,4.62
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",confidence_validity,GenMentor (Forced Refine),4.75
+"2. Skill Gap Quality (LLM-Judge, 1–5 scale) > Skill-Gap Mini Ablation (Baseline vs Forced Refine vs Enhanced)",confidence_validity,5902Group5,4.75
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",pedagogical_sequencing,GenMentor,5.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",pedagogical_sequencing,5902Group5,5.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",pedagogical_sequencing,Delta,+0.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",skill_coverage,GenMentor,4.75
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",skill_coverage,5902Group5,4.75
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",skill_coverage,Delta,+0.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",scope_appropriateness,GenMentor,4.38
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",scope_appropriateness,5902Group5,4.50
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",scope_appropriateness,Delta,+0.12
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",session_abstraction_quality,GenMentor,5.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",session_abstraction_quality,5902Group5,5.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",session_abstraction_quality,Delta,+0.00
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",fslsm_structural_alignment *(enhanced only)*,GenMentor,N/A
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",fslsm_structural_alignment *(enhanced only)*,5902Group5,4.25
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",fslsm_structural_alignment *(enhanced only)*,Delta,—
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",solo_outcome_progression *(enhanced only)*,GenMentor,N/A
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",solo_outcome_progression *(enhanced only)*,5902Group5,4.75
+"3. Learning Plan Quality (LLM-Judge, 1–5 scale)",solo_outcome_progression *(enhanced only)*,Delta,—
+"4. Content Quality (LLM-Judge, 1–5 scale)",cognitive_level_match,GenMentor,4.86
+"4. Content Quality (LLM-Judge, 1–5 scale)",cognitive_level_match,5902Group5,4.50
+"4. Content Quality (LLM-Judge, 1–5 scale)",cognitive_level_match,Delta,-0.36
+"4. Content Quality (LLM-Judge, 1–5 scale)",factual_accuracy,GenMentor,5.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",factual_accuracy,5902Group5,5.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",factual_accuracy,Delta,+0.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",quiz_alignment,GenMentor,5.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",quiz_alignment,5902Group5,5.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",quiz_alignment,Delta,+0.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",engagement_quality,GenMentor,4.14
+"4. Content Quality (LLM-Judge, 1–5 scale)",engagement_quality,5902Group5,4.00
+"4. Content Quality (LLM-Judge, 1–5 scale)",engagement_quality,Delta,-0.14
+"4. Content Quality (LLM-Judge, 1–5 scale)",fslsm_content_adaptation *(enhanced only)*,GenMentor,N/A
+"4. Content Quality (LLM-Judge, 1–5 scale)",fslsm_content_adaptation *(enhanced only)*,5902Group5,4.12
+"4. Content Quality (LLM-Judge, 1–5 scale)",fslsm_content_adaptation *(enhanced only)*,Delta,—
+"4. Content Quality (LLM-Judge, 1–5 scale)",solo_cognitive_alignment *(enhanced only)*,GenMentor,N/A
+"4. Content Quality (LLM-Judge, 1–5 scale)",solo_cognitive_alignment *(enhanced only)*,5902Group5,4.50
+"4. Content Quality (LLM-Judge, 1–5 scale)",solo_cognitive_alignment *(enhanced only)*,Delta,—
+5. API Performance (Latency in ms),chat_with_tutor,GenMentor p50,10947.9
+5. API Performance (Latency in ms),chat_with_tutor,GenMentor p95,15613.6
+5. API Performance (Latency in ms),chat_with_tutor,5902Group5 p50,12585.2
+5. API Performance (Latency in ms),chat_with_tutor,5902Group5 p95,16154.3
+5. API Performance (Latency in ms),chat_with_tutor,p50 Delta,+1637
+5. API Performance (Latency in ms),create_learner_profile,GenMentor p50,6858.9
+5. API Performance (Latency in ms),create_learner_profile,GenMentor p95,8288.9
+5. API Performance (Latency in ms),create_learner_profile,5902Group5 p50,6100.7
+5. API Performance (Latency in ms),create_learner_profile,5902Group5 p95,7241.4
+5. API Performance (Latency in ms),create_learner_profile,p50 Delta,-758
+5. API Performance (Latency in ms),draft_knowledge_points,GenMentor p50,53347.3
+5. API Performance (Latency in ms),draft_knowledge_points,GenMentor p95,71194.6
+5. API Performance (Latency in ms),draft_knowledge_points,5902Group5 p50,38073.5
+5. API Performance (Latency in ms),draft_knowledge_points,5902Group5 p95,65635.9
+5. API Performance (Latency in ms),draft_knowledge_points,p50 Delta,-15274
+5. API Performance (Latency in ms),explore_knowledge_points,GenMentor p50,1489.6
+5. API Performance (Latency in ms),explore_knowledge_points,GenMentor p95,2739.0
+5. API Performance (Latency in ms),explore_knowledge_points,5902Group5 p50,1862.2
+5. API Performance (Latency in ms),explore_knowledge_points,5902Group5 p95,2158.3
+5. API Performance (Latency in ms),explore_knowledge_points,p50 Delta,+373
+5. API Performance (Latency in ms),generate_document_quizzes,GenMentor p50,6486.2
+5. API Performance (Latency in ms),generate_document_quizzes,GenMentor p95,8246.4
+5. API Performance (Latency in ms),generate_document_quizzes,5902Group5 p50,6517.5
+5. API Performance (Latency in ms),generate_document_quizzes,5902Group5 p95,7558.0
+5. API Performance (Latency in ms),generate_document_quizzes,p50 Delta,+31
+5. API Performance (Latency in ms),identify_skill_gap,GenMentor p50,7755.0
+5. API Performance (Latency in ms),identify_skill_gap,GenMentor p95,10235.8
+5. API Performance (Latency in ms),identify_skill_gap,5902Group5 p50,9081.5
+5. API Performance (Latency in ms),identify_skill_gap,5902Group5 p95,10621.9
+5. API Performance (Latency in ms),identify_skill_gap,p50 Delta,+1326
+5. API Performance (Latency in ms),integrate_learning_document,GenMentor p50,15002.3
+5. API Performance (Latency in ms),integrate_learning_document,GenMentor p95,20672.0
+5. API Performance (Latency in ms),integrate_learning_document,5902Group5 p50,60785.0
+5. API Performance (Latency in ms),integrate_learning_document,5902Group5 p95,91589.3
+5. API Performance (Latency in ms),integrate_learning_document,p50 Delta,+45783
+5. API Performance (Latency in ms),refine_learning_goal,GenMentor p50,1232.7
+5. API Performance (Latency in ms),refine_learning_goal,GenMentor p95,1858.1
+5. API Performance (Latency in ms),refine_learning_goal,5902Group5 p50,1384.3
+5. API Performance (Latency in ms),refine_learning_goal,5902Group5 p95,1648.3
+5. API Performance (Latency in ms),refine_learning_goal,p50 Delta,+152
+5. API Performance (Latency in ms),schedule_learning_path,GenMentor p50,9179.1
+5. API Performance (Latency in ms),schedule_learning_path,GenMentor p95,18522.4
+5. API Performance (Latency in ms),schedule_learning_path,5902Group5 p50,14711.4
+5. API Performance (Latency in ms),schedule_learning_path,5902Group5 p95,18828.5
+5. API Performance (Latency in ms),schedule_learning_path,p50 Delta,+5532
+5. API Performance (Latency in ms) > Error Rates,chat_with_tutor,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,chat_with_tutor,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,create_learner_profile,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,create_learner_profile,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,draft_knowledge_points,GenMentor error%,25.0%
+5. API Performance (Latency in ms) > Error Rates,draft_knowledge_points,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,explore_knowledge_points,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,explore_knowledge_points,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,generate_document_quizzes,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,generate_document_quizzes,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,identify_skill_gap,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,identify_skill_gap,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,integrate_learning_document,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,integrate_learning_document,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,refine_learning_goal,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,refine_learning_goal,5902Group5 error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,schedule_learning_path,GenMentor error%,0.0%
+5. API Performance (Latency in ms) > Error Rates,schedule_learning_path,5902Group5 error%,0.0%
+Overall Summary,GenMentor (Baseline),Shared-Dimension Average (1–5),4.55
+Overall Summary,5902Group5 (Enhanced),Shared-Dimension Average (1–5),4.62
+Overall Summary,Delta,Shared-Dimension Average (1–5),+0.07
