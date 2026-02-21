@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import bcrypt
 
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "users"
 _USERS_PATH = _DATA_DIR / "users.json"
 
 _lock = threading.Lock()

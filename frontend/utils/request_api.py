@@ -114,8 +114,12 @@ API_NAMES = {
     "identify_skill_gap": "identify-skill-gap-with-info",
     "create_profile": "create-learner-profile-with-info",
     "update_profile": "update-learner-profile",
+    "update_cognitive_status": "update-cognitive-status",
+    "update_learning_preferences": "update-learning-preferences",
     "schedule_path": "schedule-learning-path",
+    "schedule_path_agentic": "schedule-learning-path-agentic",
     "reschedule_path": "reschedule-learning-path",
+    "adapt_path": "adapt-learning-path",
     "explore_knowledge_perspectives": "explore-knowledge-perspectives",
     "draft_knowledge_perspective": "draft-knowledge-perspective",
     "draft_point_perspectives": "draft-point-perspectives",
@@ -129,6 +133,8 @@ API_NAMES = {
     "simulate_path_feedback": "simulate-path-feedback",
     "refine_path": "refine-learning-path",
     "iterative_refine_path": "iterative-refine-path",
+    "audit_skill_gap_bias": "audit-skill-gap-bias",
+    "validate_profile_fairness": "validate-profile-fairness",
 }
 
 
@@ -217,7 +223,10 @@ def get_available_models(backend_endpoint):
         # st.write("Failed to fetch available models. Error:", e)
         return []
 
-def chat_with_tutor(chat_messages, learner_profile, llm_type="gpt4o", method_name="genmentor"):
+def chat_with_tutor(chat_messages, learner_profile, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "messages": str(chat_messages),
         "learner_profile": str(learner_profile),
@@ -227,7 +236,10 @@ def chat_with_tutor(chat_messages, learner_profile, llm_type="gpt4o", method_nam
     response = make_post_request(API_NAMES["chat_with_tutor"], data, "./assets/data_example/ai)tutor_chat.json")
     return response.get("response") if response else None
 
-def refine_learning_goal(learning_goal, learner_information, llm_type="gpt4o", method_name="genmentor"):
+def refine_learning_goal(learning_goal, learner_information, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learning_goal": str(learning_goal),
         "learner_information": _normalize_learner_information(learner_information),
@@ -241,11 +253,14 @@ def refine_learning_goal(learning_goal, learner_information, llm_type="gpt4o", m
 def identify_skill_gap(
     learning_goal,
     learner_information,
-    llm_type="gpt4o",
-    method_name="genmentor",
+    llm_type=None,
+    method_name=None,
     user_id=None,
     goal_id=None,
 ):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learning_goal": str(learning_goal),
         "learner_information": _normalize_learner_information(learner_information),
@@ -257,18 +272,50 @@ def identify_skill_gap(
     if goal_id is not None:
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
-    return response.get("skill_gaps") if response else None
+    if not response:
+        return None, None, None
+    return response.get("skill_gaps"), response.get("goal_assessment"), response.get("retrieved_sources")
+
+
+def audit_skill_gap_bias(skill_gaps_dict, learner_information, llm_type=None, method_name=None):
+    """Call the bias audit endpoint and return the audit result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "skill_gaps": json.dumps(skill_gaps_dict),
+        "learner_information": _normalize_learner_information(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    return make_post_request(API_NAMES["audit_skill_gap_bias"], data)
+
+
+def validate_profile_fairness(learner_profile, learner_information, persona_name="", llm_type=None):
+    """Call the fairness validation endpoint and return the result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    data = {
+        "learner_profile": json.dumps(learner_profile) if isinstance(learner_profile, dict) else str(learner_profile),
+        "learner_information": _normalize_learner_information(learner_information),
+        "persona_name": persona_name,
+        "llm_type": str(llm_type),
+    }
+    return make_post_request(API_NAMES["validate_profile_fairness"], data)
 
 
 def create_learner_profile(
     learning_goal,
     learner_information,
     skill_gaps,
-    llm_type="gpt4o",
-    method_name="genmentor",
+    llm_type=None,
+    method_name=None,
     user_id=None,
     goal_id=None,
 ):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learning_goal": str(learning_goal),
         "learner_information": _normalize_learner_information(learner_information),
@@ -283,7 +330,10 @@ def create_learner_profile(
     response = make_post_request(API_NAMES["create_profile"], data, "./assets/data_example/learner_profile.json")
     return response.get("learner_profile") if response else None
 
-def update_learner_profile(learner_profile, learner_interactions, learner_information="", session_information="", llm_type="gpt4o", method_name="genmentor", user_id=None, goal_id=None):
+def update_learner_profile(learner_profile, learner_interactions, learner_information="", session_information="", llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learner_profile": str(learner_profile),
         "learner_interactions": str(learner_interactions),
@@ -299,14 +349,55 @@ def update_learner_profile(learner_profile, learner_interactions, learner_inform
     response = make_post_request(API_NAMES["update_profile"], data, "./assets/data_example/learner_profile.json")
     return response.get("learner_profile") if response else None
 
+
+def update_cognitive_status(learner_profile, session_information, llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_information": str(session_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_cognitive_status"], data)
+    return response.get("learner_profile") if response else None
+
+
+def update_learning_preferences(learner_profile, learner_interactions, learner_information="", llm_type=None, method_name=None, user_id=None, goal_id=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "learner_interactions": str(learner_interactions),
+        "learner_information": str(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_learning_preferences"], data)
+    return response.get("learner_profile") if response else None
+
+
 # @st.cache_resource
-def schedule_learning_path(learner_profile, session_count=None, llm_type="gpt4o", method_name="genmentor"):
+def schedule_learning_path(learner_profile, session_count=None, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     # Backend expects learner_profile as a string.
     # session_count must be an int.
     try:
-        session_count_int = int(session_count) if session_count is not None else 5
+        session_count_int = int(session_count) if session_count is not None else cfg["default_session_count"]
     except Exception:
-        session_count_int = 5
+        session_count_int = cfg["default_session_count"]
 
     data = {
         "learner_profile": str(learner_profile),
@@ -314,14 +405,66 @@ def schedule_learning_path(learner_profile, session_count=None, llm_type="gpt4o"
     }
 
     response = make_post_request(API_NAMES["schedule_path"], data)
-    return response.get("learning_path") if response else None
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "retrieved_sources": response.get("retrieved_sources", []),
+        }
+    return None
 
-def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type="gpt4o", method_name="genmentor"):
+
+def schedule_learning_path_agentic(learner_profile, session_count=None, llm_type=None, method_name=None):
+    """Call the agentic learning path endpoint with auto-refinement."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    try:
+        session_count_int = int(session_count) if session_count is not None else cfg["default_session_count"]
+    except Exception:
+        session_count_int = cfg["default_session_count"]
+
+    data = {
+        "learner_profile": str(learner_profile),
+        "session_count": session_count_int,
+    }
+
+    response = make_post_request(API_NAMES["schedule_path_agentic"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
+
+def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, method_name=None):
+    """Call the adaptive plan regeneration endpoint."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "new_learner_profile": str(new_learner_profile),
+    }
+    response = make_post_request(API_NAMES["adapt_path"], data, timeout=120)
+    if response:
+        return {
+            "learning_path": response.get("learning_path"),
+            "agent_metadata": response.get("agent_metadata", {}),
+        }
+    return None
+
+
+def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     # Backend expects learner_profile and learning_path as strings.
     try:
         session_count_int = int(session_count)
     except Exception:
-        session_count_int = 5
+        session_count_int = cfg["default_session_count"]
     data = {
         "learning_path": str(learning_path),
         "learner_profile": str(learner_profile),
@@ -334,7 +477,10 @@ def reschedule_learning_path(learning_path, learner_profile, session_count, othe
     return response.get("rescheduled_learning_path") if response else None
 
 # @st.cache_resource
-def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, llm_type="gpt4o", method_name="genmentor"):
+def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count=0, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learner_profile": str(learner_profile),
         "learning_document": str(learning_document),
@@ -342,6 +488,7 @@ def generate_document_quizzes(learner_profile, learning_document, single_choice_
         "multiple_choice_count": multiple_choice_count,
         "true_false_count": true_false_count,
         "short_answer_count": short_answer_count,
+        "open_ended_count": open_ended_count,
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
@@ -349,7 +496,7 @@ def generate_document_quizzes(learner_profile, learning_document, single_choice_
     return response.get("document_quiz") if response else None
 
 # @st.cache_resource
-def explore_knowledge_points(learner_profile, learning_path, learning_session, llm_type="gpt4o", method_name="genmentor"):
+def explore_knowledge_points(learner_profile, learning_path, learning_session, llm_type=None, method_name=None):
     data = {
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
@@ -359,7 +506,10 @@ def explore_knowledge_points(learner_profile, learning_path, learning_session, l
     return response.get("knowledge_points") if response else None
 
 # @st.cache_resource
-def draft_knowledge_point(learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search, llm_type="gpt4o", method_name="genmentor"):
+def draft_knowledge_point(learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
@@ -374,7 +524,10 @@ def draft_knowledge_point(learner_profile, learning_path, learning_session, know
     return response.get("knowledge_draft") if response else None
 
 # @st.cache_resource
-def draft_knowledge_points(learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search, llm_type="gpt4o", method_name="genmentor"):
+def draft_knowledge_points(learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
@@ -389,7 +542,10 @@ def draft_knowledge_points(learner_profile, learning_path, learning_session, kno
     return response.get("knowledge_drafts") if response else None
 
 # @st.cache_resource
-def integrate_learning_document(learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown=False, llm_type="gpt4o", method_name="genmentor"):
+def integrate_learning_document(learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown=False, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
     data = {
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
@@ -401,46 +557,76 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
         "method_name": str(method_name),
     }
     response = make_post_request("integrate-learning-document", data, "./assets/data_example/learning_document.json")
-    if output_markdown:
-        return response.get("learning_document") if response else None
-    else:
-        return response.get("learning_document") if response else None
-
-def simulate_path_feedback(learner_profile, learning_path, llm_type="gpt4o", method_name="genmentor"):
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
+    if not response:
+        return None
+    # Return enriched dict including audio-visual metadata from Sprint 3 backend
+    return {
+        "learning_document": response.get("learning_document"),
+        "content_format": response.get("content_format", "standard"),
+        "audio_url": response.get("audio_url"),
+        "document_is_markdown": response.get("document_is_markdown", False),
     }
-    response = make_post_request(API_NAMES["simulate_path_feedback"], data)
-    return response.get("feedback") if response else None
 
-def refine_learning_path_with_feedback(learning_path, feedback, llm_type="gpt4o", method_name="genmentor"):
+def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
+    """Submit quiz answers for mastery evaluation."""
     data = {
-        "learning_path": str(learning_path),
-        "feedback": str(feedback),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "quiz_answers": quiz_answers,
     }
-    response = make_post_request(API_NAMES["refine_path"], data)
-    return response.get("refined_learning_path") if response else None
+    response = make_post_request("evaluate-mastery", data)
+    return response if response else None
 
-def iterative_refine_learning_path(learner_profile, learning_path, max_iterations=2, llm_type="gpt4o", method_name="genmentor"):
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "max_iterations": max_iterations,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["iterative_refine_path"], data)
-    if response:
-        return {
-            "final_learning_path": response.get("final_learning_path"),
-            "iterations": response.get("iterations", [])
-        }
+
+def get_session_mastery_status(user_id, goal_id):
+    """Get mastery status for all sessions in a goal."""
+    url = f"{backend_endpoint}session-mastery-status/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
     return None
+
+
+def get_behavioral_metrics(user_id, goal_id=None):
+    """Fetch computed behavioral metrics from the backend."""
+    url = f"{backend_endpoint}behavioral-metrics/{user_id}"
+    if goal_id is not None:
+        url += f"?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_quiz_mix(user_id, goal_id, session_index):
+    """Get SOLO-aligned question type counts for a session from the backend.
+
+    Returns a dict with keys: single_choice_count, multiple_choice_count,
+    true_false_count, short_answer_count, open_ended_count.
+    Falls back to a standard beginner mix if the endpoint is unavailable.
+    """
+    url = f"{backend_endpoint}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    # Fallback: standard mix (same as previous hardcoded behaviour)
+    return {
+        "single_choice_count": 3,
+        "multiple_choice_count": 1,
+        "true_false_count": 1,
+        "short_answer_count": 1,
+        "open_ended_count": 0,
+    }
 
 
 def get_user_state(backend_ep, user_id):
@@ -516,3 +702,116 @@ def auth_delete_user(token):
         return resp.status_code, resp.json()
     except Exception as e:
         return None, {"detail": str(e)}
+
+
+def sync_profile(user_id, goal_id):
+    """Sync a goal's profile with shared fields from all other goals."""
+    backend_url = f"{backend_endpoint}sync-profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.post(backend_url, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("learner_profile")
+    except Exception:
+        pass
+    return None
+
+
+def get_learner_profile(user_id, goal_id):
+    """Retrieve an existing learner profile from the backend store. Returns None if not found."""
+    url = f"{backend_endpoint}profile/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("learner_profile")
+    except Exception:
+        pass
+    return None
+
+
+def save_learner_profile(user_id, goal_id, learner_profile):
+    """Persist a learner profile to the backend store without triggering an LLM call."""
+    backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"
+    try:
+        response = httpx.put(backend_url, json={"learner_profile": learner_profile}, timeout=30)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def get_personas():
+    """GET /personas → dict of personas. Falls back to local data on failure."""
+    from utils.personas import PERSONAS as LOCAL_PERSONAS
+    if use_mock_data:
+        return LOCAL_PERSONAS
+    url = f"{backend_endpoint}personas"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("personas", LOCAL_PERSONAS)
+        return LOCAL_PERSONAS
+    except Exception:
+        return LOCAL_PERSONAS
+
+
+# ---- Application config (fetched from backend, with local fallback) ----
+
+_LOCAL_APP_CONFIG = {
+    "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
+    "default_session_count": 8,
+    "default_llm_type": "gpt4o",
+    "default_method_name": "genmentor",
+    "motivational_trigger_interval_secs": 180,
+    "max_refinement_iterations": 5,
+    "fslsm_thresholds": {
+        "perception": {
+            "low_threshold": -0.3,
+            "high_threshold": 0.3,
+            "low_label": "Concrete examples and practical applications",
+            "high_label": "Conceptual and theoretical explanations",
+            "neutral_label": "A mix of practical and conceptual content",
+        },
+        "understanding": {
+            "low_threshold": -0.3,
+            "high_threshold": 0.3,
+            "low_label": "presented in step-by-step sequences",
+            "high_label": "with big-picture overviews first",
+            "neutral_label": "balancing sequential detail and big-picture context",
+        },
+        "processing": {
+            "low_threshold": -0.3,
+            "high_threshold": 0.3,
+            "low_label": "Hands-on and interactive activities",
+            "high_label": "Reading and observation-based learning",
+            "neutral_label": "A balance of interactive and reflective activities",
+        },
+        "input": {
+            "low_threshold": -0.3,
+            "high_threshold": 0.3,
+            "low_label": "with diagrams, charts, and videos",
+            "high_label": "with text-based materials and lectures",
+            "neutral_label": "using both visual and verbal materials",
+        },
+    },
+}
+
+_cached_app_config = None
+
+
+def get_app_config():
+    """GET /config → app configuration dict. Falls back to local defaults."""
+    global _cached_app_config
+    if _cached_app_config is not None:
+        return _cached_app_config
+    if use_mock_data:
+        _cached_app_config = _LOCAL_APP_CONFIG
+        return _cached_app_config
+    url = f"{backend_endpoint}config"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            _cached_app_config = resp.json()
+            return _cached_app_config
+    except Exception:
+        pass
+    _cached_app_config = _LOCAL_APP_CONFIG
+    return _cached_app_config

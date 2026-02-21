@@ -47,6 +47,23 @@ class LearnerProfileUpdateRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class CognitiveStatusUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    session_information: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
+class LearningPreferencesUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    learner_interactions: str
+    learner_information: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class LearningPathSchedulingRequest(BaseRequest):
 
     learner_profile: str
@@ -112,6 +129,7 @@ class KnowledgeQuizGenerationRequest(BaseModel):
     multiple_choice_count: int = 0
     true_false_count: int = 0
     short_answer_count: int = 0
+    open_ended_count: int = 0
 
 
 class TailoredContentGenerationRequest(BaseModel):
@@ -161,29 +179,22 @@ class LearningDocumentIntegrationRequest(BaseModel):
     output_markdown: bool = False
 
 
-class LearningPathFeedbackRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-
-
 class LearningContentFeedbackRequest(BaseRequest):
 
     learner_profile: str
     learning_content: str
 
+class BiasAuditRequest(BaseRequest):
 
-class LearningPathRefinementRequest(BaseRequest):
-    """Request for refining a learning path based on feedback."""
-    learning_path: str
-    feedback: str
+    learner_information: str
+    skill_gaps: str
 
 
-class IterativeRefinementRequest(BaseRequest):
-    """Request for iterative refinement with feedback simulation."""
+class ProfileFairnessRequest(BaseRequest):
+
     learner_profile: str
-    learning_path: str
-    max_iterations: int = 2
+    learner_information: str
+    persona_name: str = ""
 
 
 class AuthRegisterRequest(BaseModel):
@@ -198,3 +209,23 @@ class AuthLoginRequest(BaseModel):
 
 class UserStateRequest(BaseModel):
     state: Dict[str, Any]
+
+
+class MasteryEvaluationRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+    quiz_answers: Dict[str, Any]
+
+
+class BehavioralMetricsResponse(BaseModel):
+    user_id: str
+    goal_id: Optional[int] = None
+    sessions_completed: int
+    total_sessions_in_path: int
+    sessions_learned: int
+    avg_session_duration_sec: float
+    total_learning_time_sec: float
+    motivational_triggers_count: int
+    mastery_history: list
+    latest_mastery_rate: Optional[float] = None

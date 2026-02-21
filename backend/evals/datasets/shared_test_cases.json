@@ -1,0 +1,335 @@
+{
+  "notes": {
+    "learner_information_genmentor": "Mirrors GenMentor's real onboarding: occupation_label + background_text (from onboarding.py:149). Occupation is the required dropdown seed; no FSLSM.",
+    "learner_information_enhanced": "Mirrors enhanced onboarding: persona label + persona description (from PERSONAS dict in main.py) + background_text. FSLSM dimensions are stored in the learner profile object, not serialized into this string. Persona selection is required; no free-text field.",
+    "learner_information": "Plain background text only \u2014 used as context in judge prompts to avoid polluting the evaluation with system-specific prefixes.",
+    "vague_goal_refinement": "MVP scenarios include vague project-management goals to surface a key difference: the enhanced system auto-refines underspecified goals into structured, actionable objectives, while GenMentor tends to keep the original broad wording.",
+    "mvp_dataset_design": "MVP subset: 8 scenarios total (2 per learning goal) to balance coverage and cost. Includes beginner/intermediate/career-switcher backgrounds, all enhanced personas (Balanced, Hands-on Explorer, Visual), and vague-goal project-management cases to surface goal-refinement differences between systems."
+  },
+  "learning_goals": {
+    "G1": "I want to learn full-stack web development using React and Node.js",
+    "G2": "I want to learn about the topics in 6.0001 Introduction to CS and Python",
+    "G3": "I want to build and deploy a REST API to the cloud",
+    "G4": "I want to learn project management"
+  },
+  "learner_backgrounds": {
+    "B1": {
+      "label": "Complete beginner",
+      "occupation_genmentor": "Software Engineer",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      },
+      "text": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning."
+    },
+    "B2": {
+      "label": "Intermediate",
+      "occupation_genmentor": "Software Engineer",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.7,
+        "fslsm_perception": -0.5,
+        "fslsm_input": -0.5,
+        "fslsm_understanding": -0.5
+      },
+      "text": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases."
+    },
+    "B3": {
+      "label": "Career switcher",
+      "occupation_genmentor": "Product Manager",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.2,
+        "fslsm_perception": -0.3,
+        "fslsm_input": -0.8,
+        "fslsm_understanding": -0.3
+      },
+      "text": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning."
+    },
+    "B4": {
+      "label": "Junior professional beginner",
+      "occupation_genmentor": "Business Analyst",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      },
+      "text": "I recently graduated with a business administration degree and have just started my first full-time role as a junior business analyst. I have no formal project management experience and have never used tools like Jira, Trello, or MS Project. I am eager to grow into a project coordinator role and have about 8 hours per week to dedicate to learning."
+    },
+    "B5": {
+      "label": "Technical specialist transitioning to PM",
+      "occupation_genmentor": "Systems Engineer",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.2,
+        "fslsm_perception": -0.3,
+        "fslsm_input": -0.8,
+        "fslsm_understanding": -0.3
+      },
+      "text": "I have 7 years of experience as a systems engineer designing and maintaining enterprise infrastructure. I am highly organized and technically strong, but I am now transitioning into a project management role and need to build formal PM skills in areas like stakeholder management, risk planning, budgeting, and scheduling. I can dedicate 12 hours per week to learning."
+    }
+  },
+  "scenarios": [
+    {
+      "id": "S1",
+      "goal_id": "G1",
+      "background_id": "B1",
+      "learning_goal": "I want to learn full-stack web development using React and Node.js",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner. No strong preference \u2014 adapts to any learning style. A neutral starting point. I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      }
+    },
+    {
+      "id": "S2",
+      "goal_id": "G1",
+      "background_id": "B3",
+      "learning_goal": "I want to learn full-stack web development using React and Node.js",
+      "learner_information": "I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_genmentor": "Product Manager I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "learner_information_enhanced": "Learning Persona: Visual Learner. Strongly prefers diagrams, videos, and visual aids with a slight preference for hands-on activities. I have 5 years of professional experience in marketing and digital analytics. I am comfortable with Excel, data analysis, and have taught myself basic HTML and CSS through online tutorials. I am highly motivated to transition into software engineering as a career change. I can dedicate 15 hours per week to learning.",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.2,
+        "fslsm_perception": -0.3,
+        "fslsm_input": -0.8,
+        "fslsm_understanding": -0.3
+      }
+    },
+    {
+      "id": "S3",
+      "goal_id": "G2",
+      "background_id": "B2",
+      "learning_goal": "I want to learn about the topics in 6.0001 Introduction to CS and Python",
+      "learner_information": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_genmentor": "Software Engineer I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_enhanced": "Learning Persona: Hands-on Explorer. Prefers active experimentation, concrete examples, visual aids, and step-by-step guidance. I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.7,
+        "fslsm_perception": -0.5,
+        "fslsm_input": -0.5,
+        "fslsm_understanding": -0.5
+      }
+    },
+    {
+      "id": "S4",
+      "goal_id": "G2",
+      "background_id": "B1",
+      "learning_goal": "I want to learn about the topics in 6.0001 Introduction to CS and Python",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner. No strong preference \u2014 adapts to any learning style. A neutral starting point. I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      }
+    },
+    {
+      "id": "S5",
+      "goal_id": "G3",
+      "background_id": "B1",
+      "learning_goal": "I want to build and deploy a REST API to the cloud",
+      "learner_information": "I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Software Engineer I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner. No strong preference \u2014 adapts to any learning style. A neutral starting point. I am a first-year computer science undergraduate student with no prior programming experience. I have never written code before and am starting completely from scratch. I am motivated and have about 10 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      }
+    },
+    {
+      "id": "S6",
+      "goal_id": "G3",
+      "background_id": "B2",
+      "learning_goal": "I want to build and deploy a REST API to the cloud",
+      "learner_information": "I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_genmentor": "Software Engineer I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "learner_information_enhanced": "Learning Persona: Hands-on Explorer. Prefers active experimentation, concrete examples, visual aids, and step-by-step guidance. I have about 1-2 years of self-taught Python experience. I have built a few small personal projects like a web scraper and a simple calculator app. I do not have a formal computer science degree. I understand basic programming concepts like loops, functions, and data structures, but I have not worked with professional software development practices or large codebases.",
+      "persona_enhanced": "Hands-on Explorer",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.7,
+        "fslsm_perception": -0.5,
+        "fslsm_input": -0.5,
+        "fslsm_understanding": -0.5
+      }
+    },
+    {
+      "id": "S7",
+      "goal_id": "G4",
+      "background_id": "B4",
+      "goal_is_vague": true,
+      "goal_refinement_note": "Enhanced system auto-refines 'I want to learn project management' into the structured objective stored in 'goal_refined_enhanced' before generating the learning plan. GenMentor forwards the vague goal as-is, producing a generic or unfocused plan; a useful learning path requires the learner or instructor to manually scope the goal first.",
+      "learning_goal": "I want to learn project management",
+      "goal_refined_enhanced": "I want to develop practical project management skills, covering the full project lifecycle (initiation, planning, execution, monitoring, and closure), key methodologies such as Agile and Waterfall, and essential competencies in stakeholder management, risk assessment, and scheduling, so that I can effectively lead or coordinate projects in a professional setting.",
+      "learner_information": "I recently graduated with a business administration degree and have just started my first full-time role as a junior business analyst. I have no formal project management experience and have never used tools like Jira, Trello, or MS Project. I am eager to grow into a project coordinator role and have about 8 hours per week to dedicate to learning.",
+      "learner_information_genmentor": "Business Analyst I recently graduated with a business administration degree and have just started my first full-time role as a junior business analyst. I have no formal project management experience and have never used tools like Jira, Trello, or MS Project. I am eager to grow into a project coordinator role and have about 8 hours per week to dedicate to learning.",
+      "learner_information_enhanced": "Learning Persona: Balanced Learner. No strong preference \u2014 adapts to any learning style. A neutral starting point. I recently graduated with a business administration degree and have just started my first full-time role as a junior business analyst. I have no formal project management experience and have never used tools like Jira, Trello, or MS Project. I am eager to grow into a project coordinator role and have about 8 hours per week to dedicate to learning.",
+      "persona_enhanced": "Balanced Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": 0.0,
+        "fslsm_perception": 0.0,
+        "fslsm_input": 0.0,
+        "fslsm_understanding": 0.0
+      }
+    },
+    {
+      "id": "S8",
+      "goal_id": "G4",
+      "background_id": "B5",
+      "goal_is_vague": true,
+      "goal_refinement_note": "Enhanced system auto-refines 'I want to learn project management' into the structured objective stored in 'goal_refined_enhanced' before generating the learning plan. GenMentor forwards the vague goal as-is, producing a generic or unfocused plan; a useful learning path requires the learner or instructor to manually scope the goal first.",
+      "learning_goal": "I want to learn project management",
+      "goal_refined_enhanced": "I want to develop practical project management skills, covering the full project lifecycle (initiation, planning, execution, monitoring, and closure), key methodologies such as Agile and Waterfall, and essential competencies in stakeholder management, risk assessment, and scheduling, so that I can effectively lead or coordinate projects in a professional setting.",
+      "learner_information": "I have 7 years of experience as a systems engineer designing and maintaining enterprise infrastructure. I am highly organized and technically strong, but I am now transitioning into a project management role and need to build formal PM skills in areas like stakeholder management, risk planning, budgeting, and scheduling. I can dedicate 12 hours per week to learning.",
+      "learner_information_genmentor": "Systems Engineer I have 7 years of experience as a systems engineer designing and maintaining enterprise infrastructure. I am highly organized and technically strong, but I am now transitioning into a project management role and need to build formal PM skills in areas like stakeholder management, risk planning, budgeting, and scheduling. I can dedicate 12 hours per week to learning.",
+      "learner_information_enhanced": "Learning Persona: Visual Learner. Strongly prefers diagrams, videos, and visual aids with a slight preference for hands-on activities. I have 7 years of experience as a systems engineer designing and maintaining enterprise infrastructure. I am highly organized and technically strong, but I am now transitioning into a project management role and need to build formal PM skills in areas like stakeholder management, risk planning, budgeting, and scheduling. I can dedicate 12 hours per week to learning.",
+      "persona_enhanced": "Visual Learner",
+      "fslsm_enhanced": {
+        "fslsm_processing": -0.2,
+        "fslsm_perception": -0.3,
+        "fslsm_input": -0.8,
+        "fslsm_understanding": -0.3
+      }
+    }
+  ],
+  "rag_knowledge_points": {
+    "G1": [
+      "React component lifecycle and hooks",
+      "RESTful API design with Express.js"
+    ],
+    "G3": [
+      "HTTP methods and REST API conventions",
+      "Authentication and authorization with JWT"
+    ],
+    "G4": [
+      "Project lifecycle phases: initiation, planning, execution, monitoring, and closure",
+      "Agile and Scrum: sprints, ceremonies, and backlog management"
+    ]
+  },
+  "rag_metadata_cases": [
+    {
+      "case_id": "M01",
+      "goal_id": "META_60001",
+      "learning_goal": "I want to learn introductory programming topics from MIT 6.0001 lectures",
+      "knowledge_point": "Control flow and function-based decomposition in 6.0001 lectures",
+      "query": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+      "expected_course_code": "6.0001",
+      "expected_keywords": [
+        "while",
+        "for",
+        "functions",
+        "decomposition",
+        "abstraction",
+        "scope",
+        "return",
+        "docstring",
+        "specification",
+        "parameters",
+        "if",
+        "else",
+        "loops",
+        "conditionals"
+      ],
+      "expected_lecture_numbers": [
+        2,
+        4
+      ],
+      "ground_truth_facts": [
+        "6.0001 teaches while and for as core control-flow loop constructs.",
+        "Function-based decomposition and abstraction are introduced as good programming practice.",
+        "Functions are described with a name, parameters, optional docstring/specification, body, and return value.",
+        "The lectures distinguish return from print when writing functions.",
+        "Function calls create a new scope/frame where formal parameters bind to actual arguments."
+      ],
+      "ground_truth": "In 6.0001 Lecture 4, control flow is taught with while loops and for loops, and program structure is improved by introducing functions to achieve decomposition and abstraction. Lecture examples define functions with a name, parameters, optional docstring/specification, body, and return value, and distinguish return from print. The same lecture emphasizes scope: calling a function creates a new frame where formal parameters are bound to actual arguments."
+    },
+    {
+      "case_id": "M02",
+      "goal_id": "META_60001",
+      "learning_goal": "I want to review computational problem-solving from MIT 6.0001 lectures",
+      "knowledge_point": "Computational thinking and algorithmic strategies in 6.0001 lectures",
+      "query": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+      "expected_course_code": "6.0001",
+      "expected_keywords": [
+        "algorithm",
+        "iteration",
+        "recursion",
+        "divide and conquer",
+        "guess and check",
+        "bisection",
+        "complexity",
+        "abstraction"
+      ],
+      "expected_lecture_numbers": [
+        6
+      ],
+      "ground_truth_facts": [
+        "6.0001 frames computational thinking around abstraction and algorithm design.",
+        "Early lectures include guess-and-check and bisection as algorithmic strategies.",
+        "Lecture 6 contrasts iterative algorithms with recursion.",
+        "Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style.",
+        "Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion."
+      ],
+      "ground_truth": "In 6.0001, computational thinking is framed through abstraction and algorithm design, with early lectures introducing algorithmic approaches such as guess-and-check and bisection. Lecture 6 contrasts iterative algorithms with recursion and presents recursion as divide/decrease-and-conquer with base and recursive steps. The lectures also connect algorithm design to efficiency, for example showing how naive Fibonacci recursion is expensive and memoized recursion reduces calls."
+    },
+    {
+      "case_id": "M03",
+      "goal_id": "META_60001",
+      "learning_goal": "I want to focus on data-structure basics from MIT 6.0001 lectures",
+      "knowledge_point": "Strings, tuples, lists, and dictionary data handling in 6.0001 lectures",
+      "query": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+      "expected_course_code": "6.0001",
+      "expected_keywords": [
+        "strings",
+        "tuples",
+        "lists",
+        "indexing",
+        "slicing",
+        "mutable",
+        "immutable",
+        "append",
+        "remove",
+        "split",
+        "join",
+        "dictionary"
+      ],
+      "expected_lecture_numbers": [
+        5
+      ],
+      "ground_truth_facts": [
+        "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns.",
+        "Tuples are immutable while lists are mutable.",
+        "List mutation is shown via index updates and methods like append, extend, remove, pop, and del.",
+        "String and list transformations are covered using list(s), split, and join.",
+        "Dictionary usage is introduced as key-based mapping-style data handling."
+      ],
+      "ground_truth": "6.0001 Lecture 5 introduces tuples and lists as ordered sequences with indexing from 0 to len(L)-1, and shows slicing and iteration patterns. The lecture distinguishes immutability (tuples) from mutability (lists), including list updates by index and list methods such as append, extend, remove, pop, and del. It also covers string/list transformations with list(s), split, and join, while later lecture material introduces dictionary indexing by keys for mapping-style data storage."
+    }
+  ],
+  "rag_ground_truths": {
+    "G1_React component lifecycle and hooks": "React hooks include useState for local state, useEffect for side effects, useContext for context consumption, and useRef for DOM references. The component lifecycle phases are mounting, updating, and unmounting. useEffect with an empty dependency array runs only once on mount. Cleanup functions returned from useEffect run on unmount.",
+    "G1_RESTful API design with Express.js": "REST APIs use HTTP methods: GET (read), POST (create), PUT/PATCH (update), DELETE (remove). Express.js uses app.get(), app.post() etc. to define routes. Middleware functions process requests before handlers. Status codes: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Internal Server Error.",
+    "G3_HTTP methods and REST API conventions": "REST uses stateless HTTP. GET retrieves resources, POST creates, PUT replaces, PATCH partially updates, DELETE removes. Resources are nouns in URLs (e.g., /users/123). Versioning uses /v1/ prefix. JSON is the standard response format. Status codes 2xx success, 4xx client errors, 5xx server errors.",
+    "G3_Authentication and authorization with JWT": "JWT (JSON Web Token) consists of header, payload, and signature, base64-encoded and dot-separated. The server signs tokens with a secret key (HMAC) or private key (RSA). Clients send tokens in the Authorization: Bearer header. Access tokens are short-lived; refresh tokens long-lived. Authorization checks user roles/permissions after authentication.",
+    "G4_Project lifecycle phases: initiation, planning, execution, monitoring, and closure": "The project lifecycle consists of five phases following the PMBOK framework: Initiation (defining scope, objectives, and feasibility in a project charter and identifying key stakeholders), Planning (developing a detailed project management plan covering schedule, budget, resources, risk, and communications), Execution (coordinating people and resources to carry out the plan), Monitoring and Controlling (tracking progress against baselines, managing change requests, and reporting status), and Closure (formally completing the project, obtaining stakeholder sign-off, releasing resources, and capturing lessons learned).",
+    "G4_Agile and Scrum: sprints, ceremonies, and backlog management": "Agile is an iterative project management philosophy that delivers value in short cycles called sprints (typically 1-4 weeks). Scrum is the most widely used Agile framework. Key Scrum roles are the Product Owner (owns and prioritizes the product backlog), Scrum Master (facilitates the process and removes impediments), and Development Team. Core ceremonies include Sprint Planning, Daily Stand-up, Sprint Review, and Sprint Retrospective. The product backlog is a prioritized list of user stories; the sprint backlog contains items selected for the current sprint. Kanban is an alternative Agile approach using a visual board to manage continuous flow of work without fixed sprints."
+  }
+}

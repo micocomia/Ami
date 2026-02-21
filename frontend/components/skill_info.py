@@ -1,5 +1,6 @@
 import math
 import streamlit as st
+from utils.request_api import get_app_config
 
 
 def render_skill_info(learner_profile):
@@ -32,7 +33,7 @@ def render_skill_info(learner_profile):
         in_progress_cols = columns_list[idx // columns_spec]
         with in_progress_cols[idx % columns_spec]:
             # Render each skill in a styled box
-            levels = ["unlearned", "beginner", "intermediate", "advanced"]
+            levels = get_app_config()["skill_levels"]
             st.markdown(
                 f"""
                 <div style='background-color: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #f5c6cb;'>

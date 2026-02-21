@@ -1,7 +1,6 @@
 import re
 import os
 import json
-import PyPDF2
 import pdfplumber
 import re
 from pypinyin import lazy_pinyin

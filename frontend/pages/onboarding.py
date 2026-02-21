@@ -1,26 +1,13 @@
 import streamlit as st
 
-import time
-import asyncio
-from components.goal_refinement import render_goal_refinement
 from utils.pdf import extract_text_from_pdf
 from utils.state import save_persistent_state, reset_to_add_goal
 from components.topbar import render_topbar
-from utils.personas import PERSONAS
-
-
-def on_refine_click():
-    st.session_state["if_refining_learning_goal"] = True
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
+from utils.request_api import get_personas
 
 
 def _init_onboarding_state():
     """Ensure required session_state keys exist to avoid KeyErrors."""
-    st.session_state.setdefault("onboarding_card_index", 0)  # 0: info, 1: goal
-    st.session_state.setdefault("if_refining_learning_goal", False)
     st.session_state.setdefault("learner_persona", "")
     st.session_state.setdefault("learner_information_text", "")
     st.session_state.setdefault("learner_information", "")
@@ -32,165 +19,269 @@ def _init_onboarding_state():
         pass
 
 
-def _inject_card_css():
-    """Inject lightweight CSS to make sections look like cards and style nav buttons."""
+def _inject_page_css():
+    """Inject CSS for the merged onboarding page."""
     st.markdown(
         """
         <style>
-        .gm-card { 
-            background: #ffffff; 
-            border: 1px solid rgba(0,0,0,0.08);
-            border-radius: 14px; 
-            box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-            padding: 24px 22px; 
-        }
-        .gm-side { position: sticky; top: 160px; }
-        .gm-side .gm-side-btn {
-            border: 1px solid rgba(0,0,0,0.12);
-            background: #ffffff;
-            color: #111827;
-            padding: 6px 10px; 
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        /* Welcome header */
+        .welcome-title {
+            font-size: 2.8rem;
             font-weight: 700;
+            color: #111827 !important;
+            text-align: center;
+            margin-bottom: 0;
+        }
+        .welcome-subtitle {
+            font-size: 1.1rem;
+            color: #9ca3af;
+            text-align: center;
+            margin-top: 4px;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+        /* Section label */
+        .section-label {
+            text-align: center;
+            font-size: 1rem;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+        /* Persona cards */
+        .persona-card {
+            background: #ffffff;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 18px 14px;
+            min-height: 150px;
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .persona-card:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 12px rgba(0,123,255,0.10);
+        }
+        .persona-card.selected {
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+            background: #f0f7ff;
+        }
+        .persona-card .persona-icon {
+            font-size: 1.5rem;
+            margin-bottom: 6px;
+            color: #6b7280;
+        }
+        .persona-card .persona-name {
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: #111827;
+            margin-bottom: 6px;
+        }
+        .persona-card .persona-desc {
+            font-size: 0.82rem;
+            color: #6b7280;
+            line-height: 1.4;
+        }
+        /* Bottom action cards */
+        .action-card {
+            background: #ffffff;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 60px;
+        }
+        .action-card .action-icon {
+            font-size: 1.3rem;
+            color: #6b7280;
+        }
+        .action-card .action-text {
+            font-size: 0.95rem;
+            color: #6b7280;
+        }
+        /* Hint text */
+        .hint-text {
+            font-size: 0.88rem;
+            color: #6b7280;
+            margin-top: 4px;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
+
+def _select_persona(name):
+    """Callback for persona card selection."""
+    st.session_state["learner_persona"] = name
+    try:
+        save_persistent_state()
+    except Exception:
+        pass
+
+
 def render_onboard():
     _init_onboarding_state()
-    _inject_card_css()
-    left, center, right = st.columns([1, 5, 1])
+    _inject_page_css()
+
     goal = st.session_state["to_add_goal"]
-    if "refined_learning_goal" not in st.session_state:
-        st.session_state["refined_learning_goal"] = goal["learning_goal"]
-        try:
-            save_persistent_state()
-        except Exception:
-            pass
+
+    PERSONAS = get_personas()
+
+    left, center, right = st.columns([1, 5, 1])
     with center:
         render_topbar()
-        st.title("Onboarding GenMentor")
-        st.write("Start Your Goal-oriented and Personalized Learning Journey!")
-        render_cards_with_nav(goal)
-        
 
-def render_goal(goal):
-    idx = st.session_state.get("onboarding_card_index", 0)
-    with st.container(border=True):
-        st.subheader("Set Learning Goal")
-        st.info("🚀 Please enter your role and specific learning goal. You can also refine it with AI suggestions.")
-        learning_goal = st.text_area("* Enter your learning goal", value=goal["learning_goal"], label_visibility="visible", disabled=st.session_state["if_refining_learning_goal"])
-        goal["learning_goal"] = learning_goal
-        button_col, hint_col, _ = st.columns([3, 10, 3])
-        render_goal_refinement(goal, button_col, hint_col)
-        save_persistent_state()
-        with hint_col:
-            if st.session_state["if_refining_learning_goal"]:
-                st.write("**✨ Refining learning goal...**")
-        prev_col, space_col, continue_col = st.columns([3, 10, 3])
-        with prev_col:
-            if st.button("Previous", key="gm_nav_prev", use_container_width=True):
-                st.session_state["onboarding_card_index"] = max(0, idx - 1)
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.rerun()
-        with continue_col:
-            render_continue_button(goal)
-        
-
-
-
-def render_information(goal):
-    idx = st.session_state.get("onboarding_card_index", 0)
-    with st.container(border=True):
-        st.subheader("Share Your Information")
-        st.info("🧠 Please provide your information (Text or PDF) to enhance personalized experience")
-
-        persona_names = list(PERSONAS.keys())
-        current_persona = st.session_state.get("learner_persona", "")
-        try:
-            persona_index = persona_names.index(current_persona)
-        except ValueError:
-            persona_index = None
-        selected_persona = st.selectbox(
-            "Select your learning persona",
-            persona_names,
-            index=persona_index,
-            format_func=lambda name: f"{name} — {PERSONAS[name]['description']}",
+        # --- Welcome Header ---
+        st.markdown('<h1 class="welcome-title">Welcome to adaptive AI Tutor</h1>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="welcome-subtitle">'
+            "Your personal adaptive learning companion.<br>"
+            "No setup required - we'll adapt to you as we go."
+            "</p>",
+            unsafe_allow_html=True,
         )
-        if selected_persona is not None:
-            st.session_state["learner_persona"] = selected_persona
-        else:
-            st.session_state["learner_persona"] = ""
+
+        # --- Learning Goal Input ---
+        st.markdown('<p class="section-label">What would you like to learn today?</p>', unsafe_allow_html=True)
+        learning_goal = st.text_input(
+            "Learning goal",
+            value=goal["learning_goal"],
+            placeholder="eg : learn english, python, data .....",
+            label_visibility="collapsed",
+        )
+        goal["learning_goal"] = learning_goal
+
+        st.markdown(
+            '<p class="hint-text">'
+            "Enter any topic you want to learn. The system will automatically "
+            "refine your goal if needed and generate personalized content for you."
+            "</p>",
+            unsafe_allow_html=True,
+        )
         try:
             save_persistent_state()
         except Exception:
             pass
-        upload_col, information_col = st.columns([1, 1])
+
+        # --- Persona Selection Cards ---
+        st.write("")  # spacing
+        persona_names = list(PERSONAS.keys())
+        current_persona = st.session_state.get("learner_persona", "")
+        cols = st.columns(len(persona_names))
+        for i, name in enumerate(persona_names):
+            with cols[i]:
+                is_selected = name == current_persona
+                selected_class = " selected" if is_selected else ""
+                desc = PERSONAS[name]["description"]
+                st.markdown(
+                    f'<div class="persona-card{selected_class}">'
+                    f'<div class="persona-icon">ℹ️</div>'
+                    f'<div class="persona-name">{name}</div>'
+                    f'<div class="persona-desc">{desc}</div>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.button(
+                    "Select" if not is_selected else "✓ Selected",
+                    key=f"persona_{i}",
+                    use_container_width=True,
+                    type="primary" if is_selected else "secondary",
+                    on_click=_select_persona,
+                    args=(name,),
+                )
+
+        # Build learner_information from persona
+        persona_name = st.session_state.get("learner_persona", "")
+        if persona_name and persona_name in PERSONAS:
+            dims = PERSONAS[persona_name]["fslsm_dimensions"]
+            persona_prefix = (
+                f"Learning Persona: {persona_name} "
+                f"(initial FSLSM: processing={dims['fslsm_processing']}, "
+                f"perception={dims['fslsm_perception']}, "
+                f"input={dims['fslsm_input']}, "
+                f"understanding={dims['fslsm_understanding']}). "
+            )
+        else:
+            persona_prefix = ""
+
+        # --- Upload Resume + LinkedIn ---
+        st.write("")  # spacing
+        upload_col, linkedin_col = st.columns(2)
         with upload_col:
-            uploaded_file = st.file_uploader("[Optional] Upload a PDF with your information (e.g., resume)", type="pdf")
+            uploaded_file = st.file_uploader(
+                "Upload Your Resume (Optional)",
+                type="pdf",
+                label_visibility="collapsed",
+            )
             if uploaded_file is not None:
                 with st.spinner("Extracting text from PDF..."):
                     learner_information_pdf = extract_text_from_pdf(uploaded_file)
+                    st.session_state["learner_information_pdf"] = learner_information_pdf
                     st.toast("✅ PDF uploaded successfully.")
             else:
-                learner_information_pdf = ""
-        with information_col:
-            learner_information_text = st.text_area("[Optional] Enter your learning perferences and style", value=st.session_state["learner_information_text"], label_visibility="visible", height=77)
-            persona_name = st.session_state.get("learner_persona", "")
-            if persona_name and persona_name in PERSONAS:
-                dims = PERSONAS[persona_name]["fslsm_dimensions"]
-                persona_prefix = (
-                    f"Learning Persona: {persona_name} "
-                    f"(initial FSLSM: processing={dims['fslsm_processing']}, "
-                    f"perception={dims['fslsm_perception']}, "
-                    f"input={dims['fslsm_input']}, "
-                    f"understanding={dims['fslsm_understanding']}). "
+                learner_information_pdf = st.session_state.get("learner_information_pdf", "")
+                st.markdown(
+                    '<div class="action-card">'
+                    '<span class="action-icon">ℹ️</span>'
+                    '<span class="action-text">Upload Your Resume (Optional)</span>'
+                    "</div>",
+                    unsafe_allow_html=True,
                 )
-            else:
-                persona_prefix = ""
-            st.session_state["learner_information"] = persona_prefix + learner_information_text + learner_information_pdf
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-        # st.divider()
-        space_col, next_button_col = st.columns([13, 3])
-        save_persistent_state()
-        with next_button_col:
-            if st.button("Next", key="gm_nav_next", use_container_width=True, type="primary"):
-                st.session_state["onboarding_card_index"] = min(1, idx + 1)
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.rerun()
+        with linkedin_col:
+            st.markdown(
+                '<div class="action-card">'
+                '<span class="action-icon">ℹ️</span>'
+                '<span class="action-text">Connect to your LinkedIn</span>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Connect LinkedIn", use_container_width=True, type="secondary"):
+                st.toast("LinkedIn integration coming soon!")
 
-def render_continue_button(goal):
-    if st.button("Save & Continue", type="primary"):
-        if not goal["learning_goal"] or not st.session_state.get("learner_persona"):
-            st.warning("Please provide both a learning goal and select a learning persona before continuing.")
-        else:
-            st.session_state["selected_page"] = "Skill Gap"
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            st.switch_page("pages/skill_gap.py")
+        # Combine learner information
+        st.session_state["learner_information"] = persona_prefix + learner_information_pdf
+        try:
+            save_persistent_state()
+        except Exception:
+            pass
 
+        # --- Begin Learning Button ---
+        st.write("")  # spacing
+        _, btn_col, _ = st.columns([2, 1, 2])
+        with btn_col:
+            if st.button("Begin Learning", type="primary", use_container_width=True):
+                if not goal["learning_goal"] or not st.session_state.get("learner_persona"):
+                    st.warning("Please provide both a learning goal and select a learning persona before continuing.")
+                else:
+                    # Clear stale skill gaps if the learning goal changed
+                    previous_goal = goal.get("_last_identified_goal", "")
+                    if goal["learning_goal"] != previous_goal:
+                        goal["skill_gaps"] = []
+                        goal["learner_profile"] = {}
+                    st.session_state["selected_page"] = "Skill Gap"
+                    try:
+                        save_persistent_state()
+                    except Exception:
+                        pass
+                    st.switch_page("pages/skill_gap.py")
 
-def render_cards_with_nav(goal):
-    """Show either the Information or Goal section as a card with nav buttons."""
-    idx = st.session_state.get("onboarding_card_index", 0)
+        # --- Data Transparency Notice ---
+        st.write("")  # spacing
+        with st.expander("How your data is used"):
+            st.markdown(
+                "**What we collect:** Your learning goal, selected persona, and optionally your "
+                "resume text. During learning, we also record quiz scores and session timing.\n\n"
+                "**AI-generated assessments:** Skill levels, learner profiles, and learning content "
+                "are generated by AI based on the information you provide. They are estimates and "
+                "may not fully reflect your actual abilities.\n\n"
+                "**External services:** Your learning goal and background information are sent to "
+                "an LLM provider (e.g., OpenAI) to generate personalised assessments and content.\n\n"
+                "**Your control:** You can delete your account and all associated data at any time "
+                "from the My Profile page. No data is shared with third parties or used for advertising."
+            )
 
-    if idx == 0:
-        render_information(goal)
-    else:
-        render_goal(goal)
 
 render_onboard()

@@ -27,7 +27,7 @@ class SearchConfig:
 @dataclass
 class VectorstoreConfig:
     persist_directory: str = "data/vectorstore"
-    collection_name: str = "genmentor"
+    collection_name: str = "non-verified-content"
 
 @dataclass
 class RAGConfig:

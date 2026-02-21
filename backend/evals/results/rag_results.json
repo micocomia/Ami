@@ -1,0 +1,268 @@
+{
+  "raw_rows": {
+    "enhanced": [
+      {
+        "question": "Introduction to Python Programming Control flow and function-based decomposition in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "answer": "**Control Flow in Python**\n\nControl flow is a fundamental concept in programming that allows you to dictate the order in which statements are executed. In Python, control flow is primarily managed using loops and conditional statements.\n\n**For Loops**\n\nA `for` loop in Python is used to iterate over a sequence (such as a list, tuple, or string) or other iterable objects. The syntax for a `for` loop is:\n\n```python\nfor <variable> in range(<some_num>):\n    <expression>\n    <expression>\n    ...\n```\n\nEach time through the loop, `<variable>` takes on a value from the sequence. Initially, `<variable>` starts at the smallest value, and with each iteration, it increments by one until it reaches the specified number[1].\n\n**While Loops**\n\nA `while` loop continues to execute a block of code as long as a specified condition is true. Here is an example of a `while` loop:\n\n```python\nn = 0\nwhile n < 5:\n    print(n)\n    n = n + 1\n```\n\nThis loop will print numbers from 0 to 4. The `while` loop is more flexible than the `for` loop but can be more complex to manage, especially if the loop condition is not properly defined[5].\n\n**Function-Based Decomposition**\n\nFunction-based decomposition is a programming technique used to break down complex problems into smaller, more manageable functions. This approach not only makes code easier to understand and maintain but also promotes code reuse and abstraction.\n\n**Functions in Python**\n\nFunctions in Python are defined using the `def` keyword, followed by the function name and parentheses. Here is a simple example:\n\n```python\ndef greet(name):\n    return \"Hello, \" + name\n```\n\nThis function takes a single argument `name` and returns a greeting string. Functions help in organizing code into logical blocks, making it easier to debug and extend[2].\n\n**Recursive Functions**\n\nRecursive functions are functions that call themselves in order to solve a problem. Each recursive call creates its own scope/environment, and the flow of control returns to the previous scope once the function call returns a value. This is particularly useful for problems that can be broken down into smaller, similar sub-problems[4].\n\n**Additional Resources**\n\nFor more detailed information, you can refer to the following resources:\n\n- [Lecture 2: Control Flow](https://resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_2.pdf) [1][5]\n- [Lecture 4: Function-Based Decomposition](https://resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_4.pdf) [2]\n- [Lecture 6: Recursive Functions](https://resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_6.pdf) [4]",
+        "contexts": [
+          "CONTROL FLOW: for LOOPS\n```\nfor <variable> in range(<some_num>): <expression> <expression> ...\n```\n- \uf0a7 each time through the loop, <variable> takes a value\n- \uf0a7 first time, <variable> starts at the smallest value\n- \uf0a7 next time, <variable> gets the prev value + 1 \uf0a7 etc.",
+          "GOOD PROGRAMMING\n- \uf0a7 more code not necessarily a good thing\n- \uf0a7 measure good programmers by the amount of functionality\n- \uf0a7 introduce functions\n- \uf0a7 mechanism to achieve decomposition and abstraction",
+          "STILL NEED A BETTER WAY\n- Aming\tand\tcounAng evaluate\timplementa!ons\n- Aming evaluates\tmachines\n- want\tto evaluate\talgorithm\n- want\tto evaluate\tscalability\n- want\tto evaluate\tin\tterms\tof\tinput\tsize\n- \u00a7 Going\tto\tfocus\ton\tidea\tof\tcounAng\toperaAons\tin\tan algorithm,\tbut\tnot\tworry\tabout\tsmall\tvariaAons\tin implementaAon\t(e.g.,\twhether\twe\ttake\t3\tor\t4\tprimiAve operaAons\tto\texecute\tthe\tsteps\tof\ta\tloop)\n- \u00a7 Going\tto\tfocus\ton\thow\talgorithm\tperforms\twhen\tsize of\tproblem\tgets\tarbitrarily\tlarge",
+          "SOME OBSERVATIONS\n- \u00a7 each\trecursive\tcall\tto\ta\tfuncSon\tcreates\tits own\tscope/environment\n- \u00a7 bindings\tof\tvariables in\ta\tscope\tare\tnot changed\tby\trecursive\tcall\n- \u00a7 flow\tof\tcontrol\tpasses\tback\tto previous scope once\tfuncSon\tcall\treturns\tvalue",
+          "CONTROL FLOW: while and for LOOPS\n- \uf0a7 iterate through numbers in a sequence\n```\n# more complicated with while loop\n```\n```\nn = 0 while n < 5: print(n) n = n+1 # shortcut with for loop for n in range(5): print(n)\n```"
+        ],
+        "ground_truth": "6.0001 teaches while and for as core control-flow loop constructs. Function-based decomposition and abstraction are introduced as good programming practice. Functions are described with a name, parameters, optional docstring/specification, body, and return value. The lectures distinguish return from print when writing functions. Function calls create a new scope/frame where formal parameters bind to actual arguments.",
+        "question_source": "retrieval_query",
+        "dataset_query": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+        "retrieval_query_primary": "Introduction to Python Programming Control flow and function-based decomposition in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "retrieval_queries": [
+          "Introduction to Python Programming Control flow and function-based decomposition in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Control flow and function-based decomposition in 6.0001 lectures I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Introduction to Python Programming Control flow and function-based decomposition in 6.0001 lectures 6.0001"
+        ],
+        "retrieval_intent_text": "Introduction to Python Programming Control flow and function-based decomposition in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "case_type": "metadata",
+        "case_id": "M01",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "while",
+          "for",
+          "functions",
+          "decomposition",
+          "abstraction",
+          "scope",
+          "return",
+          "docstring",
+          "specification",
+          "parameters",
+          "if",
+          "else",
+          "loops",
+          "conditionals"
+        ],
+        "expected_lecture_numbers": [
+          2,
+          4
+        ],
+        "ground_truth_facts": [
+          "6.0001 teaches while and for as core control-flow loop constructs.",
+          "Function-based decomposition and abstraction are introduced as good programming practice.",
+          "Functions are described with a name, parameters, optional docstring/specification, body, and return value.",
+          "The lectures distinguish return from print when writing functions.",
+          "Function calls create a new scope/frame where formal parameters bind to actual arguments."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_2.pdf",
+          "lec_4.pdf",
+          "lec_10.pdf",
+          "lec_6.pdf",
+          "lec_2.pdf"
+        ],
+        "source_lecture_numbers": [
+          2,
+          4,
+          10,
+          6,
+          2
+        ]
+      },
+      {
+        "question": "Introduction to Python Programming Computational thinking and algorithmic strategies in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "answer": "**Understanding Computational Thinking**\n\nComputational thinking is a fundamental skill taught in the 6.0001 Introduction to Computer Science and Programming in Python course. It involves learning how to approach problems in a way that can be solved by a computer. This includes understanding how to break down complex problems into manageable parts and using algorithmic strategies to solve them[1].\n\n**Key Aspects of Computational Thinking**\n\n1. **Problem Difficulty and Solutions**: One of the core aspects of computational thinking is assessing how difficult a problem is and determining the best way to solve it. This involves theoretical computer science concepts that provide precise meanings to these questions[2].\n\n2. **Recursive Thinking**: This is the ability to reformulate a seemingly difficult problem into one that is easier to solve. Techniques such as reduction, embedding, transformation, and simulation are used to achieve this[2].\n\n3. **Algorithmic Efficiency**: Understanding the efficiency of algorithms is crucial. It involves reasoning about an algorithm to predict the time it will take to solve a problem of a particular size. This includes relating algorithm design choices to their time efficiency and understanding the fundamental limits on the time required to solve specific problems[3].\n\n**Algorithmic Strategies**\n\n- **Iteration and Recursion**: These are computational metaphors used to represent knowledge and solve problems. Iteration involves repeating a set of instructions until a condition is met, while recursion involves a function calling itself to solve smaller instances of a problem[5].\n\n- **Abstraction and Modularity**: Abstraction involves simplifying complex systems by focusing on the high-level overview rather than the details. Modularity involves organizing systems into separate components or modules, which can be developed and tested independently[5].\n\n- **Algorithm Complexity**: Different classes of algorithms, such as searching and sorting, are studied to understand their complexity. This includes analyzing how algorithms perform as the size of the problem increases, often expressed in terms of Big O notation (e.g., O(log n), O(n), O(n log n), O(n\u00b2))[2][5].\n\n**Additional Resources**\n\nFor further reading and a deeper understanding of computational thinking and algorithmic strategies, you can refer to the following resources:\n\n- [Lecture 12 Overview of Course](resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_12.pdf)[1][2]\n- [Lecture 11 on Efficiency of Programs](resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_11.pdf)[3]\n- [Lecture 10 on Algorithm Evaluation](resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_10.pdf)[4]\n- [Lecture 1 Topics](resources/verified-course-content/6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/Lectures/Lec_1.pdf)[5]",
+        "contexts": [
+          "OVERVIEW OF COURSE\n- \u00a7 learn\tcomputaAonal\tmodes\tof thinking\n- \u00a7 begin\tto\tmaster\tthe\tart\tof computaAonal\tproblem\tsolving\n- \u00a7 make\tcomputers\tdo\twhat\tyou\twant them\tto\tdo\nHope\twe\thave\tstarted\tyou\tdown\tthe path\tto\tbeing\table\tto\tthink\tand\tact like\ta\tcomputer\tscienAst",
+          "ASPECTS OF COMPUTATIONAL THINKING\n- \u00a7 how\tdifficult\tis\tthis\tproblem and\thow\tbest\tcan\tI\tsolve\tit?\n- theoreAcal\tcomputer\tscience gives\tprecise\tmeaning\tto\tthese and\trelated\tquesAons\tand\ttheir answers\n- \u00a7 thinking\trecursively\n- reformulaAng\ta\tseemingly difficult\tproblem\tinto\tone which\twe\tknow\thow\tto\tsolve\n- reduction , embeddin g, transformation, simulaAon\n```\nO(log\tn) ; O(n) O(n\tlog\tn) ; O(n 2 );\tO(c n )\n```\n\nImage Licensed CC-BY, Courtesy of Robson# on Flickr.\n```\n;\n```",
+          "WHY WE WANT TO UNDERSTAND EFFICIENCY OF PROGRAMS\n- \u00a7 how\tcan\twe\treason\tabout\tan\talgorithm\tin\torder\tto predict\tthe\tamount\tof\t;me\tit\twill\tneed\tto\tsolve\ta problem\tof\ta\tpar;cular\tsize?\n- \u00a7 how\tcan\twe\trelate\tchoices\tin\talgorithm\tdesign\tto\tthe ;me\tefficiency\tof\tthe\tresul;ng\talgorithm?\n- are\tthere\tfundamental\tlimits\ton\tthe\tamount\tof\t;me\twe will\tneed\tto\tsolve\ta\tpar;cular\tproblem?",
+          "STILL NEED A BETTER WAY\n- Aming\tand\tcounAng evaluate\timplementa!ons\n- Aming evaluates\tmachines\n- want\tto evaluate\talgorithm\n- want\tto evaluate\tscalability\n- want\tto evaluate\tin\tterms\tof\tinput\tsize\n- \u00a7 Going\tto\tfocus\ton\tidea\tof\tcounAng\toperaAons\tin\tan algorithm,\tbut\tnot\tworry\tabout\tsmall\tvariaAons\tin implementaAon\t(e.g.,\twhether\twe\ttake\t3\tor\t4\tprimiAve operaAons\tto\texecute\tthe\tsteps\tof\ta\tloop)\n- \u00a7 Going\tto\tfocus\ton\thow\talgorithm\tperforms\twhen\tsize of\tproblem\tgets\tarbitrarily\tlarge",
+          "TOPICS\n- \uf0a7 represent knowledge with data structures\n- \uf0a7 iteration and recursion as computational metaphors\n- \uf0a7 abstraction of procedures and data types\n- \uf0a7 organize and modularize systems using object classes and methods\n- \uf0a7 different classes of algorithms , searching and sorting\n- \uf0a7 complexity of algorithms"
+        ],
+        "ground_truth": "6.0001 frames computational thinking around abstraction and algorithm design. Early lectures include guess-and-check and bisection as algorithmic strategies. Lecture 6 contrasts iterative algorithms with recursion. Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style. Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion.",
+        "question_source": "retrieval_query",
+        "dataset_query": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+        "retrieval_query_primary": "Introduction to Python Programming Computational thinking and algorithmic strategies in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "retrieval_queries": [
+          "Introduction to Python Programming Computational thinking and algorithmic strategies in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Computational thinking and algorithmic strategies in 6.0001 lectures I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Introduction to Python Programming Computational thinking and algorithmic strategies in 6.0001 lectures 6.0001"
+        ],
+        "retrieval_intent_text": "Introduction to Python Programming Computational thinking and algorithmic strategies in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "case_type": "metadata",
+        "case_id": "M02",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "algorithm",
+          "iteration",
+          "recursion",
+          "divide and conquer",
+          "guess and check",
+          "bisection",
+          "complexity",
+          "abstraction"
+        ],
+        "expected_lecture_numbers": [
+          6
+        ],
+        "ground_truth_facts": [
+          "6.0001 frames computational thinking around abstraction and algorithm design.",
+          "Early lectures include guess-and-check and bisection as algorithmic strategies.",
+          "Lecture 6 contrasts iterative algorithms with recursion.",
+          "Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style.",
+          "Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_12.pdf",
+          "lec_12.pdf",
+          "lec_11.pdf",
+          "lec_10.pdf",
+          "lec_1.pdf"
+        ],
+        "source_lecture_numbers": [
+          12,
+          12,
+          11,
+          10,
+          1
+        ]
+      },
+      {
+        "question": "Introduction to Python Programming Strings, tuples, lists, and dictionary data handling in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "answer": "**Strings**\n\nStrings in Python are sequences of characters enclosed in quotes. They are immutable, meaning once a string is created, it cannot be changed. You can iterate over strings using loops, and Python provides a more 'pythonic' way to do this using direct iteration over characters rather than indexing. For example:\n\n```python\ns = \"abcdefgh\"\nfor char in s:\n    if char == 'i' or char == 'u':\n        print(\"There is an i or u\")\n```\nThis code snippet checks for the presence of 'i' or 'u' in the string and prints a message if found [2].\n\n**Tuples**\n\nTuples are similar to lists but are immutable. Once a tuple is created, its elements cannot be changed. Tuples are defined by placing elements inside parentheses `()`, separated by commas. They are useful for grouping related data together and can be used as keys in dictionaries due to their immutability [1].\n\n**Lists**\n\nLists are mutable sequences, meaning you can change their content after creation. Lists are defined using square brackets `[]`. You can add elements to a list using the `append()` method, which mutates the list by adding an element to its end:\n\n```python\nL = [2, 1, 3]\nL.append(5)  # L is now [2, 1, 3, 5]\n```\nLists can also be concatenated using the `+` operator to create a new list [5].\n\n**Dictionaries**\n\nDictionaries are collections of key-value pairs. They allow for efficient data retrieval by key, which can be any immutable type, such as strings or tuples. Dictionaries are defined using curly braces `{}` with pairs separated by commas. For example:\n\n```python\nd = {'key1': 'value1', 'key2': 'value2'}\n```\nDictionaries provide a convenient way to organize and access data without needing separate lists for keys and values [3].\n\n**Additional Resources**\n\nFor further reading and examples, refer to the following resources:\n- Lecture 5 on compound data types, including tuples and lists [1].\n- Lecture 3 for more on strings and loops [2].\n- Lecture 6 for insights into dictionary usage [3].",
+        "contexts": [
+          "TODAY\n- \uf0a7 have seen variable types: int , float , bool,string\n- \uf0a7 introduce new compound data types\n- tuples\n- lists\n- \uf0a7 idea of aliasing\n- \uf0a7 idea of mutability\n- \uf0a7 idea of cloning",
+          "STRINGS AND LOOPS\n- \uf0a7 these two code snippets do the same thing\n- \uf0a7 bottom one is more 'pythonic'\n```\ns = \"abcdefgh\" for index in range(len(s)): if s[index] == 'i' or s[index] == 'u': print(\"There is an i or u\") for char in s: if char == 'i' or char == 'u': print(\"There is an i or u\")\n```",
+          "A BETTER AND CLEANER WAY A DICTIONARY\n- \u00a7 nice\tto index\titem\tof\tinterest\tdirectly (not\talways\tint)\n- \u00a7 nice\tto\tuse one\tdata\tstructure ,\tno\tseparate\tlists\n1, A list.Elem 1 = Elem 2. 2, A list.Elem 1 = Elem 3. 3, A list.Elem 1 = Elem 4. \u2026, A list.Elem 1 = \u2026",
+          "PRINT REPRESENTATION OF AN OBJECT\n```\n>>> c = Coordinate(3,4) >>> print(c) <__main__.Coordinate object at 0x7fa918510488>\n```\n- \uf0a7 uninformative print representation by default\n- \uf0a7 define a __str__ method for a class\n- \uf0a7 Python calls the __str__ method when used with print on your class object\n- \uf0a7 you choose what it does! Say that when we print a Coordinate object, want to show\n```\n>>> print(c) <3,4>\n```",
+          "OPERATIONS ON LISTS - ADD\n- \uf0a7 add elements to end of list with L.append(element)\n- \uf0a7 mutates the list!\n- \uf0a7 what is the dot?\n- lists are Python objects, everything in Python is an object\n- objects have data\n- objects have methods and functions\n- access this information by object_name.do_something()\n- will learn more about these later\n```\nL = [2,1,3] L.append(5) \uf0e0 L is now [2,1,3,5]\n```\n- \uf0a7 to combine lists together use concatenation , + operator, to give you a new list"
+        ],
+        "ground_truth": "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns. Tuples are immutable while lists are mutable. List mutation is shown via index updates and methods like append, extend, remove, pop, and del. String and list transformations are covered using list(s), split, and join. Dictionary usage is introduced as key-based mapping-style data handling.",
+        "question_source": "retrieval_query",
+        "dataset_query": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+        "retrieval_query_primary": "Introduction to Python Programming Strings, tuples, lists, and dictionary data handling in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "retrieval_queries": [
+          "Introduction to Python Programming Strings, tuples, lists, and dictionary data handling in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Strings, tuples, lists, and dictionary data handling in 6.0001 lectures I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+          "Introduction to Python Programming Strings, tuples, lists, and dictionary data handling in 6.0001 lectures 6.0001"
+        ],
+        "retrieval_intent_text": "Introduction to Python Programming Strings, tuples, lists, and dictionary data handling in 6.0001 lectures foundational I want to learn about the topics in 6.0001 Introduction to CS and Python 6.0001",
+        "case_type": "metadata",
+        "case_id": "M03",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "strings",
+          "tuples",
+          "lists",
+          "indexing",
+          "slicing",
+          "mutable",
+          "immutable",
+          "append",
+          "remove",
+          "split",
+          "join",
+          "dictionary"
+        ],
+        "expected_lecture_numbers": [
+          5
+        ],
+        "ground_truth_facts": [
+          "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns.",
+          "Tuples are immutable while lists are mutable.",
+          "List mutation is shown via index updates and methods like append, extend, remove, pop, and del.",
+          "String and list transformations are covered using list(s), split, and join.",
+          "Dictionary usage is introduced as key-based mapping-style data handling."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_5.pdf",
+          "lec_3.pdf",
+          "lec_6.pdf",
+          "lec_8.pdf",
+          "lec_5.pdf"
+        ],
+        "source_lecture_numbers": [
+          5,
+          3,
+          6,
+          8,
+          5
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "enhanced": {
+      "metrics_mode": "full_ragas",
+      "evaluated_version": "enhanced",
+      "case_scope": "metadata_only",
+      "context_precision": 0.7277777777522685,
+      "context_recall": 0.46666666666666673,
+      "faithfulness": 0.7341062801932366,
+      "answer_relevancy": 0.834805816913703,
+      "answer_correctness": 0.5606735448394421,
+      "metadata_context_precision": 0.7277777777522685,
+      "metadata_context_recall": 0.46666666666666673,
+      "metadata_faithfulness": 0.7341062801932366,
+      "metadata_answer_relevancy": 0.834805816913703,
+      "metadata_answer_correctness": 0.5606735448394421,
+      "metadata_case_count": 3.0,
+      "metadata_course_hit_rate": 1.0,
+      "metadata_verified_source_rate": 1.0,
+      "metadata_keyword_coverage": 0.6448412698412698,
+      "metadata_fact_coverage_answer": 0.4666666666666666,
+      "metadata_fact_coverage_context": 0.20000000000000004,
+      "metadata_expected_lecture_hit_rate": 0.6666666666666666,
+      "evaluation_mode": "enhanced_verified_content_only",
+      "assumption": "metadata_queries_should_retrieve_verified_6_0001_content",
+      "verified_preflight": {
+        "enabled": true,
+        "passed": true,
+        "reason": "ok",
+        "probe_count": 3,
+        "verified_source_hit_count": 3,
+        "course_code_hit_count": 3
+      },
+      "verified_preflight_passed": true
+    }
+  }
+}

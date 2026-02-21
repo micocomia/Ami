@@ -18,7 +18,7 @@ RUN grep -ivE '^(pyobjc|ocrmac)' requirements.txt > requirements-docker.txt \
 # Copy application code
 COPY . .
 
-RUN mkdir -p data
+RUN mkdir -p data/users data/vectorstore
 
 EXPOSE 8000
 

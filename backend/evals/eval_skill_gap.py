@@ -1,0 +1,394 @@
+"""
+Skill Gap Evaluation — LLM-as-a-Judge via LangSmith
+
+Runs /refine-learning-goal then /identify-skill-gap-with-info on both
+GenMentor and the enhanced system for each shared scenario in the dataset,
+then judges the output on shared + enhanced-only dimensions.
+
+Usage:
+    python -m evals.eval_skill_gap
+"""
+
+import json
+import os
+import httpx
+
+from evals.config import VERSIONS, DEFAULT_MODEL_PROVIDER, DEFAULT_MODEL_NAME, DATASETS_DIR, RESULTS_DIR
+from evals.utils.llm_judge import judge, average_score
+from evals.utils.schema_adapter import (
+    extract_skill_gaps_summary,
+    extract_skill_requirements_summary,
+    extract_refined_goal,
+)
+
+SHARED_JUDGE_SYSTEM = """\
+You are an expert evaluator for a personalized learning system.
+You will be given the output of a Skill Gap Identification pipeline and asked to
+rate it on several dimensions using a 1-5 scale.
+Respond ONLY with valid JSON matching the schema described in the user prompt.
+Do not include explanations outside the JSON object."""
+
+SHARED_JUDGE_USER = """\
+Learning Goal: {learning_goal}
+Learner Background: {learner_information}
+Refined Goal: {refined_goal}
+Identified Skill Requirements:
+{skill_requirements}
+Identified Skill Gaps:
+{skill_gaps}
+
+Rate 1-5 for each dimension. Respond with JSON only:
+{{
+  "completeness": {{"score": <int 1-5>, "reason": "<one sentence>"}},
+  "gap_calibration": {{"score": <int 1-5>, "reason": "<one sentence>"}},
+  "goal_refinement_quality": {{"score": <int 1-5>, "reason": "<one sentence>"}},
+  "confidence_validity": {{"score": <int 1-5>, "reason": "<one sentence>"}}
+}}
+
+Scoring rubric — higher is always better:
+- completeness: Does the skill list cover ALL areas a learner needs for this goal?
+    Score 5: the list is comprehensive and no major skill area is missing.
+    Score 4: coverage is strong with only one minor skill area missing or under-specified.
+    Score 3: coverage is partial — key areas are present, but at least one important area is incomplete or weakly represented.
+    Score 2: coverage is limited — multiple important skill areas are missing, though some relevant areas are present.
+    Score 1: one or more major skill areas needed to achieve the goal are absent from the list.
+- gap_calibration: Are the current_level and required_level values plausible given the learner's stated background?
+    Score 5: every gap level is directly justified by the background (e.g., a total beginner is unlearned, an experienced practitioner is intermediate).
+    Score 4: levels are mostly plausible with minor calibration issues that do not materially distort the learning diagnosis.
+    Score 3: calibration is mixed — several levels are plausible, but multiple assignments are questionable or weakly justified.
+    Score 2: calibration is poor — many levels are implausible, with only a small subset matching the stated background.
+    Score 1: gap levels directly contradict the stated background (e.g., a stated expert is marked unlearned, or a total beginner is marked advanced).
+- goal_refinement_quality: Is the Refined Goal specific and actionable? If the Refined Goal is the same as the Learning Goal (no refinement was needed), evaluate the Learning Goal itself.
+    Score 5: the goal is specific, scoped, and clearly actionable.
+    Score 4: the goal is mostly specific and actionable, with minor ambiguity in scope or outcome.
+    Score 3: the goal has moderate clarity but remains somewhat broad, with limited actionability details.
+    Score 2: the goal is weakly specified — partially relevant but still vague and difficult to execute directly.
+    Score 1: the goal is vague, generic, or off-topic relative to the identified skills.
+- confidence_validity: Are the level_confidence values (high/medium/low) appropriate given the information available?
+    Score 5: confidence ratings match the certainty warranted by the background evidence (e.g., high confidence when background is detailed and unambiguous).
+    Score 4: confidence labels are generally appropriate, with occasional mild over- or under-confidence.
+    Score 3: confidence quality is inconsistent — some ratings fit the evidence while others appear weakly justified.
+    Score 2: confidence labels are mostly mismatched to available evidence, though not entirely arbitrary.
+    Score 1: confidence values seem arbitrary or systematically wrong (e.g., high confidence despite very sparse background).
+
+Important: verify that your score and reason are consistent before writing the JSON.
+A positive reason (e.g., "levels are accurate", "all skills covered") must map to a HIGH score (4 or 5).
+A negative reason (e.g., "skills are missing", "levels contradict background") must map to a LOW score (1 or 2)."""
+
+ENHANCED_JUDGE_USER_EXTENSION = """\
+
+Additionally evaluate these two enhanced-only dimensions and merge them into the same JSON object:
+{{
+  "expert_calibration": {{"score": <int 1-5>, "reason": "<one sentence>"}},
+  "solo_level_accuracy": {{"score": <int 1-5>, "reason": "<one sentence>"}}
+}}
+
+SOLO taxonomy — how current_level values map to cognitive levels:
+- unlearned (Prestructural): learner has no relevant knowledge at all
+- beginner (Unistructural): learner knows one or two isolated relevant facts
+- intermediate (Multistructural): learner knows several aspects but cannot integrate them
+- advanced (Relational): learner integrates knowledge into a coherent whole
+- expert (Extended Abstract): learner can generalise and innovate beyond the domain
+
+- expert_calibration: Evaluates whether the expert current_level is used correctly.
+    Score 5 when: (a) expert is correctly withheld because the learner's background shows no prior mastery of the skill, OR (b) expert is correctly assigned to a skill the learner demonstrably already masters.
+    Score 4 when: expert usage is mostly correct, with only one borderline case where expert assignment/withholding is arguable.
+    Score 3 when: expert usage is mixed — some skills are calibrated correctly, but multiple expert-level decisions are debatable.
+    Score 2 when: expert usage is largely incorrect — expert is frequently overused or withheld in ways that conflict with evidence.
+    Score 1 when: expert is withheld for a skill that the learner's background clearly shows they have already mastered at an expert level (i.e., the system missed an existing expert-level competency).
+    Note: a complete beginner having no expert-level skills is CORRECT — that earns a score of 5, not 1.
+- solo_level_accuracy: Are the current_level values consistent with what the learner explicitly stated about their background?
+    Score 5: all current_level values match what the learner's stated experience directly implies (e.g., unlearned for skills never mentioned, beginner for skills briefly touched on).
+    Score 4: most level assignments align with stated background, with only minor mismatches on edge cases.
+    Score 3: level assignments are partly aligned; there is a mix of reasonable and questionable mappings.
+    Score 2: level assignments are mostly misaligned, with only a few levels plausibly tied to stated experience.
+    Score 1: current_level values systematically contradict the learner's stated experience (e.g., marking a self-described expert as unlearned, or a stated novice as advanced).
+
+Respond with ONLY a single merged JSON object containing all 6 dimensions."""
+
+ABLATION_VERSION_KEY = "genmentor_forced_refine"
+ABLATION_VERSION_LABEL = "GenMentor (Forced Refine Ablation)"
+
+
+def _api_learner_info(scenario: dict, version_key: str) -> str:
+    """
+    Return the learner_information string that matches how each system's
+    real onboarding flow constructs it:
+      - genmentor:  occupation_label + background_text
+      - enhanced:   persona label + persona description + background_text
+    The plain 'learner_information' key (background text only) is reserved for
+    judge prompts so the evaluator sees neutral context without system-specific prefixes.
+    """
+    key = f"learner_information_{version_key}"
+    return scenario.get(key, scenario["learner_information"])
+
+
+def call_refine_goal(base_url: str, learning_goal: str, learner_information: str) -> str:
+    payload = {
+        "learning_goal": learning_goal,
+        "learner_information": learner_information,
+    }
+    if DEFAULT_MODEL_PROVIDER:
+        payload["model_provider"] = DEFAULT_MODEL_PROVIDER
+    if DEFAULT_MODEL_NAME:
+        payload["model_name"] = DEFAULT_MODEL_NAME
+
+    with httpx.Client() as client:
+        resp = client.post(f"{base_url}/refine-learning-goal", json=payload, timeout=60.0)
+        resp.raise_for_status()
+        body = resp.json()
+        return body.get("refined_goal") or body.get("learning_goal") or learning_goal
+
+
+def call_skill_gap(base_url: str, learning_goal: str, learner_information: str) -> dict:
+    payload = {
+        "learning_goal": learning_goal,
+        "learner_information": learner_information,
+    }
+    if DEFAULT_MODEL_PROVIDER:
+        payload["model_provider"] = DEFAULT_MODEL_PROVIDER
+    if DEFAULT_MODEL_NAME:
+        payload["model_name"] = DEFAULT_MODEL_NAME
+
+    with httpx.Client() as client:
+        resp = client.post(f"{base_url}/identify-skill-gap-with-info", json=payload, timeout=90.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
+def evaluate_scenario(scenario: dict, version_key: str, version_cfg: dict) -> dict:
+    sid = scenario["id"]
+    goal = scenario["learning_goal"]
+    info = scenario["learner_information"]           # plain text — for judge context only
+    api_info = _api_learner_info(scenario, version_key)  # prefixed — for API calls
+    base_url = version_cfg["base_url"]
+    is_enhanced = version_cfg["has_solo"]
+
+    print(f"  [{version_key}] {sid} — calling /identify-skill-gap-with-info...")
+    try:
+        sg_body = call_skill_gap(base_url, goal, api_info)
+    except Exception as e:
+        print(f"    ERROR: {e}")
+        return {"scenario_id": sid, "version": version_key, "error": str(e)}
+
+    refined_goal = extract_refined_goal(sg_body)
+    skill_reqs = extract_skill_requirements_summary(sg_body)
+    skill_gaps = extract_skill_gaps_summary(sg_body)
+
+    user_prompt = SHARED_JUDGE_USER.format(
+        learning_goal=goal,
+        learner_information=info,
+        refined_goal=refined_goal,
+        skill_requirements=skill_reqs,
+        skill_gaps=skill_gaps,
+    )
+    if is_enhanced:
+        user_prompt += "\n\n" + ENHANCED_JUDGE_USER_EXTENSION
+
+    print(f"  [{version_key}] {sid} — judging...")
+    scores = judge(SHARED_JUDGE_SYSTEM, user_prompt)
+
+    return {
+        "scenario_id": sid,
+        "version": version_key,
+        "raw_output": {
+            "refined_goal": refined_goal,
+            "skill_requirements": json.loads(skill_reqs),
+            "skill_gaps": json.loads(skill_gaps),
+        },
+        "scores": scores,
+    }
+
+
+def _is_ok_timing_entry(entry: dict | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("error"):
+        return False
+    if entry.get("status_code", 200) >= 400:
+        return False
+    return isinstance(entry.get("body"), dict)
+
+
+def run_eval_skill_gap(scenarios: list[dict], prefetched_runs: dict | None = None) -> dict:
+    all_results = {}
+
+    # Optional index from API perf results:
+    # prefetched_runs[version_key]["raw_runs"] = [{"scenario_id": ..., "timings": {...}}, ...]
+    prefetched_index: dict[str, dict[str, dict]] = {}
+    if prefetched_runs:
+        for v_key, v_data in prefetched_runs.items():
+            scenario_map = {}
+            for run in (v_data or {}).get("raw_runs", []):
+                sid = run.get("scenario_id")
+                if sid:
+                    scenario_map[sid] = run.get("timings", {})
+            prefetched_index[v_key] = scenario_map
+
+    eval_variants: list[tuple[str, dict]] = list(VERSIONS.items())
+    # Mini ablation: force explicit refinement before skill-gap identification for baseline.
+    eval_variants.append((ABLATION_VERSION_KEY, {**VERSIONS["genmentor"], "label": ABLATION_VERSION_LABEL}))
+
+    for version_key, version_cfg in eval_variants:
+        print(f"\n=== Skill Gap Eval: {version_cfg['label']} ===")
+        version_results = []
+        for scenario in scenarios:
+            sid = scenario["id"]
+            prefetched_timings = prefetched_index.get(version_key, {}).get(sid, {})
+            # For ablation, reuse genmentor perf cache lane.
+            if version_key == ABLATION_VERSION_KEY:
+                prefetched_timings = prefetched_index.get("genmentor", {}).get(sid, {})
+            sg_timing = prefetched_timings.get("identify_skill_gap")
+            sg_timing_forced = prefetched_timings.get("identify_skill_gap_forced_refine")
+
+            # Reuse API-perf output if available/valid to avoid duplicate API calls.
+            if version_key == ABLATION_VERSION_KEY and _is_ok_timing_entry(sg_timing_forced):
+                sg_body = sg_timing_forced["body"]
+                goal = scenario["learning_goal"]
+                info = scenario["learner_information"]  # plain text — for judge context only
+                is_enhanced = False
+
+                refined_goal = extract_refined_goal(sg_body)
+                skill_reqs = extract_skill_requirements_summary(sg_body)
+                skill_gaps = extract_skill_gaps_summary(sg_body)
+
+                user_prompt = SHARED_JUDGE_USER.format(
+                    learning_goal=goal,
+                    learner_information=info,
+                    refined_goal=refined_goal,
+                    skill_requirements=skill_reqs,
+                    skill_gaps=skill_gaps,
+                )
+                if is_enhanced:
+                    user_prompt += "\n\n" + ENHANCED_JUDGE_USER_EXTENSION
+
+                print(f"  [{version_key}] {sid} — judging (using prefetched forced-refine skill-gap output)...")
+                scores = judge(SHARED_JUDGE_SYSTEM, user_prompt)
+                result = {
+                    "scenario_id": sid,
+                    "version": version_key,
+                    "raw_output": {
+                        "refined_goal": refined_goal,
+                        "skill_requirements": json.loads(skill_reqs),
+                        "skill_gaps": json.loads(skill_gaps),
+                    },
+                    "scores": scores,
+                    "used_prefetched_api_output": True,
+                }
+            elif _is_ok_timing_entry(sg_timing):
+                sg_body = sg_timing["body"]
+                goal = scenario["learning_goal"]
+                info = scenario["learner_information"]  # plain text — for judge context only
+                is_enhanced = version_cfg.get("has_solo", False)
+
+                refined_goal = extract_refined_goal(sg_body)
+                skill_reqs = extract_skill_requirements_summary(sg_body)
+                skill_gaps = extract_skill_gaps_summary(sg_body)
+
+                user_prompt = SHARED_JUDGE_USER.format(
+                    learning_goal=goal,
+                    learner_information=info,
+                    refined_goal=refined_goal,
+                    skill_requirements=skill_reqs,
+                    skill_gaps=skill_gaps,
+                )
+                if is_enhanced:
+                    user_prompt += "\n\n" + ENHANCED_JUDGE_USER_EXTENSION
+
+                print(f"  [{version_key}] {sid} — judging (using prefetched /identify-skill-gap-with-info)...")
+                scores = judge(SHARED_JUDGE_SYSTEM, user_prompt)
+                result = {
+                    "scenario_id": sid,
+                    "version": version_key,
+                    "raw_output": {
+                        "refined_goal": refined_goal,
+                        "skill_requirements": json.loads(skill_reqs),
+                        "skill_gaps": json.loads(skill_gaps),
+                    },
+                    "scores": scores,
+                    "used_prefetched_api_output": True,
+                }
+            else:
+                # Forced-refine ablation fallback when no prefetched run exists.
+                if version_key == ABLATION_VERSION_KEY:
+                    goal = scenario["learning_goal"]
+                    info = scenario["learner_information"]
+                    api_info = _api_learner_info(scenario, "genmentor")
+                    base_url = version_cfg["base_url"]
+                    try:
+                        refined_goal_text = call_refine_goal(base_url, goal, api_info)
+                        sg_body = call_skill_gap(base_url, refined_goal_text, api_info)
+                    except Exception as e:
+                        result = {"scenario_id": sid, "version": version_key, "error": str(e)}
+                        version_results.append(result)
+                        continue
+
+                    refined_goal = extract_refined_goal(sg_body)
+                    skill_reqs = extract_skill_requirements_summary(sg_body)
+                    skill_gaps = extract_skill_gaps_summary(sg_body)
+                    user_prompt = SHARED_JUDGE_USER.format(
+                        learning_goal=goal,
+                        learner_information=info,
+                        refined_goal=refined_goal,
+                        skill_requirements=skill_reqs,
+                        skill_gaps=skill_gaps,
+                    )
+                    print(f"  [{version_key}] {sid} — judging (live forced refine + skill-gap)...")
+                    scores = judge(SHARED_JUDGE_SYSTEM, user_prompt)
+                    result = {
+                        "scenario_id": sid,
+                        "version": version_key,
+                        "raw_output": {
+                            "refined_goal": refined_goal,
+                            "skill_requirements": json.loads(skill_reqs),
+                            "skill_gaps": json.loads(skill_gaps),
+                        },
+                        "scores": scores,
+                    }
+                else:
+                    result = evaluate_scenario(scenario, version_key, version_cfg)
+            version_results.append(result)
+        all_results[version_key] = version_results
+
+    return all_results
+
+
+def summarise(all_results: dict) -> dict:
+    shared_dims = ["completeness", "gap_calibration", "goal_refinement_quality", "confidence_validity"]
+    enhanced_dims = ["expert_calibration", "solo_level_accuracy"]
+    summary = {}
+
+    for version_key, results in all_results.items():
+        scores_list = [r.get("scores", {}) for r in results if "scores" in r]
+        version_summary = {}
+        for dim in shared_dims:
+            version_summary[dim] = average_score(scores_list, dim)
+        if VERSIONS.get(version_key, {}).get("has_solo", False):
+            for dim in enhanced_dims:
+                version_summary[dim] = average_score(scores_list, dim)
+        summary[version_key] = version_summary
+
+    return summary
+
+
+if __name__ == "__main__":
+    dataset_path = os.path.join(DATASETS_DIR, "shared_test_cases.json")
+    with open(dataset_path) as f:
+        dataset = json.load(f)
+    scenarios = dataset["scenarios"]
+
+    all_results = run_eval_skill_gap(scenarios)
+    summary = summarise(all_results)
+
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    out_path = os.path.join(RESULTS_DIR, "skill_gap_results.json")
+    with open(out_path, "w") as f:
+        json.dump({"results": all_results, "summary": summary}, f, indent=2)
+
+    print("\n=== Skill Gap Evaluation Summary ===")
+    for version_key, scores in summary.items():
+        print(f"\n{VERSIONS[version_key]['label']}:")
+        for dim, score in scores.items():
+            print(f"  {dim}: {score}")
+
+    print(f"\nFull results saved to {out_path}")

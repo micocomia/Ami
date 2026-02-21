@@ -21,13 +21,19 @@ search:
 
 vectorstore:
   persist_directory: data/vectorstore
-  collection_name: genmentor
+  collection_name: non-verified-content
 
 rag:
   chunk_size: 1000
   num_retrieval_results: 5
   allow_parallel: true
   max_workers: 3
+
+verified_content:
+  base_dir: resources/verified-course-content
+  collection_name: verified_content
+  chunk_size: 500
+  enabled: true
 
 server:
   host: 127.0.0.1

@@ -5,6 +5,7 @@ import re
 import time
 
 from utils.state import get_current_session_uid
+from utils.request_api import get_app_config
 
 def _get_selected_goal():
     """Return the currently selected goal dict from st.session_state.
@@ -101,7 +102,8 @@ def render_skill_radar_chart(goal):
     learner_profile = goal["learner_profile"]
     mastered_skills = learner_profile["cognitive_status"]["mastered_skills"]
     in_progress_skills = learner_profile["cognitive_status"]["in_progress_skills"]
-    level_map = defaultdict(lambda: 0, {"unlearned": 0, "beginner": 1, "intermediate": 2, "advanced": 3})
+    skill_levels = get_app_config()["skill_levels"]
+    level_map = defaultdict(lambda: 0, {name: i for i, name in enumerate(skill_levels)})
     mastered_skills = [{
         "name": skill_info["name"], 
         "required_level": skill_info["proficiency_level"], 
@@ -137,9 +139,9 @@ def render_skill_radar_chart(goal):
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 3],
-                tickvals=[0, 1, 2, 3],
-                ticktext=['Unlearned', 'Beginner', 'Intermediate', 'Advanced'],
+                range=[0, len(skill_levels) - 1],
+                tickvals=list(range(len(skill_levels))),
+                ticktext=[s.capitalize() for s in skill_levels],
                 tickfont=dict(size=14)
             ),
             angularaxis=dict(  # Set font size for skill names (theta labels)

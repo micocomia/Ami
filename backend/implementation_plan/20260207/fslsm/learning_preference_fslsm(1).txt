@@ -1,0 +1,99 @@
+Plan: Update LearningPreferences to FSLSM Dimensions                                            
+
+ Context
+
+ The current LearningPreferences schema uses free-text content_style and activity_type fields (e.g., "Concise
+  summaries", "Reading-based learning"). This change replaces them with structured Felder-Silverman Learning
+ Style Model (FSLSM) dimension vectors, making learning style representation more precise and
+ machine-interpretable. content_style and activity_type become deterministic computed properties derived from
+  the FSLSM vector — guaranteeing they never drift out of sync.
+
+ Changes
+
+ 1. Update schema — backend/modules/adaptive_learner_modeling/schemas.py
+
+ Add a new FSLSMDimensions model (all fields prefixed with fslsm_ to avoid ambiguity):
+ class FSLSMDimensions(BaseModel):
+     fslsm_processing: float = Field(0.0, ge=-1, le=1)     # -1 active ↔ 1 reflective
+     fslsm_perception: float = Field(0.0, ge=-1, le=1)     # -1 sensing ↔ 1 intuitive
+     fslsm_input: float = Field(0.0, ge=-1, le=1)          # -1 visual ↔ 1 verbal
+     fslsm_understanding: float = Field(0.0, ge=-1, le=1)  # -1 sequential ↔ 1 global
+
+ Update LearningPreferences:
+ - Add fslsm_dimensions: FSLSMDimensions
+ - Convert content_style and activity_type from stored fields to @computed_field properties that derive their
+  values deterministically from fslsm_dimensions
+ - Keep additional_notes: str | None = None
+
+ Add a standalone helper function derive_content_style(dims) and derive_activity_type(dims) so the mapping
+ logic can be reused outside Pydantic (e.g., for simulation dict post-processing).
+
+ Mapping logic:
+ - content_style derived from perception + understanding:
+   - perception: sensing → concrete examples/practical; intuitive → conceptual/theoretical
+   - understanding: sequential → step-by-step; global → big-picture overviews
+ - activity_type derived from processing + input:
+   - processing: active → hands-on/interactive; reflective → reading/observation
+   - input: visual → diagrams/videos; verbal → text/lectures
+
+ 2. Update LLM prompts — backend/modules/adaptive_learner_modeling/prompts.py
+
+ - Update learner_profile_output_format to show fslsm_dimensions instead of content_style/activity_type in
+ the JSON template. Explain the scale in a comment.
+ - Update adaptive_learner_profiler_system_prompt_base to describe FSLSM dimensions and instruct the LLM to
+ set values based on learner information.
+ - Update chain-of-thought instructions to include an FSLSM reasoning step (step 4 in Task A).
+ - Remove references to "concise summaries or interactive exercises" style choices and replace with FSLSM
+ dimension guidance.
+
+ 3. Update duplicate prompts — backend/modules/adaptive_learner_modeling/prompts/__init__.py
+
+ Mirror the exact same changes from step 2 (this file is a duplicate).
+
+ 4. Update learner simulation prompts — backend/modules/learner_simulation/prompts.py
+
+ - Update ground_truth_profile_creator_system_prompt to reference FSLSM dimensions instead of "preferred
+ content style / activity type".
+ - Update ground_truth_profile_creator_task_prompt_progress output format to include fslsm_dimensions instead
+  of content_style/activity_type.
+ - Update the "Learning Preferences Update" instructions (section 2) to describe adjusting FSLSM dimension
+ values based on session behavior.
+
+ 5. Update frontend display — frontend/pages/learner_profile.py
+
+ Update render_learning_preferences() to:
+ - Display each FSLSM dimension as a labeled row showing the two poles and the current value (e.g., using
+ st.slider in disabled mode or a formatted table: Active [-1] ←——●——→ [1] Reflective)
+ - Continue displaying the computed content_style and activity_type strings as summary text below the
+ dimensions.
+
+ 6. Update example data — frontend/assets/data_example/learner_profile.json
+
+ Replace content_style/activity_type with fslsm_dimensions:
+ "learning_preferences": {
+     "fslsm_dimensions": {
+         "fslsm_processing": -0.5,
+         "fslsm_perception": -0.3,
+         "fslsm_input": -0.7,
+         "fslsm_understanding": 0.2
+     },
+     "additional_notes": "The learner has a strong foundation in communication and organizational skills."
+ }
+
+ Files to modify
+
+ 1. backend/modules/adaptive_learner_modeling/schemas.py
+ 2. backend/modules/adaptive_learner_modeling/prompts.py
+ 3. backend/modules/adaptive_learner_modeling/prompts/__init__.py
+ 4. backend/modules/learner_simulation/prompts.py
+ 5. frontend/pages/learner_profile.py
+ 6. frontend/assets/data_example/learner_profile.json
+
+ Verification
+
+ - Run python -c "from backend.modules.adaptive_learner_modeling.schemas import LearnerProfile,
+ LearningPreferences, FSLSMDimensions; ..." to verify schema loads and computed fields work
+ - Validate the example JSON can be loaded by the updated schema
+ - Verify computed content_style/activity_type produce sensible strings for edge cases (all zeros, all -1s,
+ all 1s, mixed)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌

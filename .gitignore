@@ -18,7 +18,8 @@ backend/data/
 pids/
 .DS_Store
 frontend/config.py
-data/vectorstore/chroma.sqlite3
 
-/backend/notes
-/backend/implementation_plan
+# IDE and tooling
+.idea/
+.claude/
+CLAUDE.md

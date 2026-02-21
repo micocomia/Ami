@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from base.llm_factory import LLMFactory
-from modules.adaptive_learner_modeling.agents.adaptive_learning_profiler import (
+from modules.learner_profiler.agents.adaptive_learning_profiler import (
     update_learner_profile_with_llm,
 )
 

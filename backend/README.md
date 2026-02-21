@@ -1,6 +1,6 @@
-# Backend of GenMentor
+# Backend of Ami
 
-GenMentor is an AI-powered personalized learning platform that creates adaptive learning experiences tailored to individual learners' needs, skill gaps, and goals. The system combines advanced AI technologies including Large Language Models, Retrieval-Augmented Generation (RAG), and intelligent tutoring systems to deliver comprehensive educational content.
+Ami is an AI-powered personalized learning platform that creates adaptive learning experiences tailored to individual learners' needs, skill gaps, and goals. The system combines advanced AI technologies including Large Language Models, Retrieval-Augmented Generation (RAG), and intelligent tutoring systems to deliver comprehensive educational content.
 
 ## Features
 
@@ -20,10 +20,11 @@ The system is built with a modular architecture consisting of:
 
 - **Core Modules**:
   - `ai_chatbot_tutor`: Conversational AI tutoring interface
-  - `skill_gap_identification`: Analyzes and identifies learning gaps
-  - `adaptive_learner_modeling`: Manages learner profiles and adaptation
-  - `personalized_resource_delivery`: Creates customized learning content
-  - `learner_simulation`: Simulates learner behaviors for testing
+  - `skill_gap`: Analyzes and identifies learning gaps
+  - `learner_profiler`: Manages learner profiles and adaptation
+  - `learning_plan_generator`: Creates structured and adaptive learning plans
+  - `content_generator`: Creates customized learning content
+  - `learner_simulator`: Simulates learner behaviors for testing
 
 - **Base Components**:
   - `llm_factory`: Manages different LLM providers (DeepSeek, OpenAI, etc.)
@@ -141,7 +142,7 @@ You should see the **FastAPI automatic documentation page** listing all availabl
   docker compose -f docker/docker-compose.yml down
   ```
 
-Both options cleanly shut down the server. Your data (stored in the `data/` folder) is preserved between restarts.
+Both options cleanly shut down the server. Your data (stored in the `data/users/` folder) is preserved between restarts.
 
 #### Restarting After Stopping
 
@@ -184,8 +185,8 @@ docker compose -f docker/docker-compose.yml up --build
 
 ```bash
 # 1. Create and activate a conda environment
-conda create -n genmentor python=3.13 -y
-conda activate genmentor
+conda create -n ami-backend python=3.13 -y
+conda activate ami-backend
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -229,14 +230,18 @@ curl -X POST "http://localhost:8000/refine-learning-goal" \
   }'
 ```
 
-#### Identify Skill Gap (with CV upload)
+#### Identify Skill Gap (with learner info)
 
 ```bash
-curl -X POST "http://localhost:8000/identify-skill-gap" \
-  -F "goal=Learn data science" \
-  -F "cv=@path/to/cv.pdf" \
-  -F "model_provider=openai" \
-  -F "model_name=gpt-4o"
+curl -X POST "http://localhost:8000/identify-skill-gap-with-info" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "learning_goal": "Learn data science",
+    "learner_information": "Beginner with Python and statistics",
+    "skill_requirements": "{\"required_skills\": [\"Python\", \"SQL\", \"Machine Learning\"]}",
+    "model_provider": "openai",
+    "model_name": "gpt-4o"
+  }'
 ```
 
 #### Create Learner Profile
@@ -248,7 +253,7 @@ curl -X POST "http://localhost:8000/create-learner-profile-with-info" \
     "learning_goal": "Learn web development",
     "learner_information": "{\"experience\": \"beginner\", \"interests\": [\"frontend\", \"backend\"]}",
     "skill_gaps": "{\"missing_skills\": [\"JavaScript\", \"CSS\"]}",
-    "method_name": "genmentor",
+    "method_name": "ami",
     "model_provider": "openai",
     "model_name": "gpt-4o"
   }'
@@ -294,7 +299,7 @@ The application uses Hydra for configuration management. Key configuration files
 
 #### Setting Up LLM Providers
 
-GenMentor supports multiple LLM providers. Configure them using environment variables or by modifying the configuration files:
+Ami supports multiple LLM providers. Configure them using environment variables or by modifying the configuration files:
 
 **Environment Variables (Recommended for API Keys):**
 ```bash
@@ -385,8 +390,8 @@ search:
 **Vector Store:**
 ```yaml
 vectorstore:
-  persist_directory: data/vectorstore
-  collection_name: genmentor
+  persist_directory: data/vectorstore   # runtime vectorstore
+  collection_name: non-verified-content
 ```
 
 **RAG Parameters:**
@@ -441,6 +446,36 @@ The system supports multiple search providers:
 - **ChromaDB**: Vector storage for document retrieval
 - **Sentence Transformers**: Text embeddings
 
+### Verified Course Content
+
+The system supports loading and indexing verified course materials (lecture slides, syllabi, exercises, reference code) so the AI tutor can ground answers in trusted content.
+
+**Directory structure:**
+
+Place course folders under `resources/verified-course-content/`. Each folder follows the naming pattern:
+
+```
+{course_code}_{course-name}_{term}/
+├── Syllabus/
+├── Lectures/
+├── Exercises/
+└── References/
+```
+
+For example: `6.0001_introduction-to-computer-science-and-programming-in-python_fall-2016/`
+
+**File naming — lecture numbers:**
+
+Lecture files should contain `Lec_N` in the filename (e.g. `Lec_1.pdf`, `Lec_12.pdf`) so the system can automatically extract lecture numbers for metadata filtering. The following patterns are recognised:
+
+- `Lec_1.pdf`
+- `MIT11_437F16_Lec3.pdf`
+- `MIT6_831S11_lec01.pdf`
+
+**Supported file types:** `.pdf`, `.pptx`, `.json`, `.txt`, `.py`, `.md`
+
+**Re-indexing:** On startup, the backend now compares a verified-content manifest against files in `resources/verified-course-content/` and automatically re-indexes when files are added, removed, or updated. Deleting `data/vectorstore/` still forces a full rebuild of all collections.
+
 ## Data Flow
 
 1. **Learner Input**: CV upload, learning goals, or direct information
@@ -474,10 +509,11 @@ backend/
 │   └── search_rag.py
 ├── modules/                  # Feature modules
 │   ├── ai_chatbot_tutor/
-│   ├── skill_gap_identification/
-│   ├── adaptive_learner_modeling/
-│   ├── personalized_resource_delivery/
-│   └── learner_simulation/
+│   ├── skill_gap/
+│   ├── learner_profiler/
+│   ├── learning_plan_generator/
+│   ├── content_generator/
+│   └── learner_simulator/
 └── utils/                    # Utility functions
     ├── preprocess.py
     └── llm_output.py
@@ -494,10 +530,10 @@ backend/
 
 ### Testing
 
-The project includes an `api_tester/` directory with testing utilities. Run tests using:
+Run tests from the `backend/` directory using:
 
 ```bash
-python -m pytest test_config.py
+python -m pytest tests
 ```
 
 ## Dependencies
@@ -510,10 +546,6 @@ Key dependencies include:
 - **ChromaDB**: Vector database
 - **Sentence Transformers**: Text embeddings
 - **DuckDuckGo Search**: Web search
-
-## License
-
-This project is part of the GenMentor research initiative.
 
 ## Support
 

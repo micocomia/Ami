@@ -30,6 +30,9 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_events", {})
     monkeypatch.setattr(store, "_USER_STATES_PATH", data_dir / "user_states.json")
     monkeypatch.setattr(store, "_user_states", {})
+    # Isolate snapshot state
+    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
+    monkeypatch.setattr(store, "_profile_snapshots", {})
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +97,55 @@ class TestProfilePersistence:
 
         store.load()
         assert store.get_profile("alice", 0)["goal"] == "Python"
+
+
+# ===================================================================
+# store.py – profile snapshot persistence
+# ===================================================================
+
+class TestProfileSnapshotPersistence:
+    def test_save_and_get_snapshot(self):
+        profile = {"v": 1}
+        store.save_profile_snapshot("alice", 0, profile)
+        assert store.get_profile_snapshot("alice", 0) == {"v": 1}
+
+    def test_get_nonexistent_snapshot_returns_none(self):
+        assert store.get_profile_snapshot("nobody", 0) is None
+
+    def test_save_snapshot_does_not_affect_profile(self):
+        store.upsert_profile("alice", 0, {"v": "current"})
+        store.save_profile_snapshot("alice", 0, {"v": "old"})
+        # The live profile is unchanged
+        assert store.get_profile("alice", 0) == {"v": "current"}
+        # The snapshot is the old value
+        assert store.get_profile_snapshot("alice", 0) == {"v": "old"}
+
+    def test_overwrite_snapshot(self):
+        store.save_profile_snapshot("alice", 0, {"v": 1})
+        store.save_profile_snapshot("alice", 0, {"v": 2})
+        assert store.get_profile_snapshot("alice", 0) == {"v": 2}
+
+    def test_delete_snapshot(self):
+        store.save_profile_snapshot("alice", 0, {"v": 1})
+        store.delete_profile_snapshot("alice", 0)
+        assert store.get_profile_snapshot("alice", 0) is None
+
+    def test_delete_nonexistent_snapshot_is_noop(self):
+        # Should not raise
+        store.delete_profile_snapshot("nobody", 99)
+
+    def test_snapshot_persisted_to_disk(self):
+        store.save_profile_snapshot("alice", 0, {"v": "snap"})
+        raw = json.loads(store._PROFILE_SNAPSHOTS_PATH.read_text(encoding="utf-8"))
+        assert "alice:0" in raw
+        assert raw["alice:0"]["v"] == "snap"
+
+    def test_load_restores_snapshot_from_disk(self):
+        store.save_profile_snapshot("alice", 0, {"v": "snap"})
+        store._profile_snapshots.clear()
+        assert store.get_profile_snapshot("alice", 0) is None
+        store.load()
+        assert store.get_profile_snapshot("alice", 0) == {"v": "snap"}
 
 
 # ===================================================================
@@ -255,6 +307,18 @@ class TestDeleteAllUserData:
 
         assert store.get_user_state("alice") is None
         assert store.get_user_state("bob") == {"theme": "light"}
+
+    def test_delete_all_user_data_removes_snapshots(self):
+        store.save_profile_snapshot("alice", 0, {"v": "snap"})
+        store.save_profile_snapshot("alice", 1, {"v": "snap2"})
+        store.save_profile_snapshot("bob", 0, {"v": "bob_snap"})
+
+        store.delete_all_user_data("alice")
+
+        assert store.get_profile_snapshot("alice", 0) is None
+        assert store.get_profile_snapshot("alice", 1) is None
+        # Bob's snapshot is untouched
+        assert store.get_profile_snapshot("bob", 0) == {"v": "bob_snap"}
 
 
 # ===================================================================

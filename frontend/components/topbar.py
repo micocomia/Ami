@@ -178,5 +178,5 @@ def settings():
 
     if not is_valid_backend:
         st.warning("Backend endpoint not reachable or invalid.")
-        st.info("Ensure the GenMentor backend API is running and the endpoint is correct, including protocol and port (e.g., http://127.0.0.1:8000/).")
-        st.info("Please refer to the [GenMentor Backend Setup Instructions](https://github.com/GeminiLight/gen-mentor/blob/main/backend/README.md) for more details on how to set up and run the backend service.")
+        st.info("Ensure the Ami backend API is running and the endpoint is correct, including protocol and port (e.g., http://127.0.0.1:8000/).")
+        st.info("Please refer to the [Ami Backend Setup Instructions] for more details on how to set up and run the backend service.")
