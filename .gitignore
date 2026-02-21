@@ -22,3 +22,4 @@ frontend/config.py
 # IDE and tooling
 .idea/
 .claude/
+CLAUDE.md
