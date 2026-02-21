@@ -53,7 +53,7 @@ Our project addresses this gap by enhancing GenMentor with:
 - **Backend**: Python, FastAPI, LangChain, OpenAI/Google/Meta LLMs
 - **Frontend**: React (in parallel development), Streamlit (maintained alternative in this repository)
 - **Content Retrieval**: RAG (Retrieval Augmented Generation) via LangChain vector stores
-- **Evaluation**: BERTScore (recall & precision) for content adaptation quality
+- **Evaluation**: RAGAS for the assessment of the RAG system and LLM-as-a-judge for the evaluation of the agents
 - **Design**: Figma for prototyping and design system
 
 ## Project Context
