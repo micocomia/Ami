@@ -1,6 +1,6 @@
-"""Tests for the skill gap orchestrator (auto-refinement loop).
+"""Tests for the skill gap orchestrator (two-loop reflexion architecture).
 
-Tests the identify_skill_gap_with_llm function with mocked agents and tools.
+Tests the identify_skill_gap_with_llm function with mocked agents and helpers.
 
 Run from the repo root:
     python -m pytest backend/tests/test_skill_gap_orchestrator.py -v
@@ -58,167 +58,403 @@ MOCK_SKILL_GAPS_ALL_MASTERED = {
     "goal_assessment": None,
 }
 
+_GOAL_CONTEXT_NOT_VAGUE = {
+    "course_code": None,
+    "lecture_number": None,
+    "content_category": None,
+    "page_number": None,
+    "is_vague": False,
+}
+_GOAL_CONTEXT_VAGUE = {**_GOAL_CONTEXT_NOT_VAGUE, "is_vague": True}
 
-class TestAutoRefinementLoop:
-    @patch("modules.skill_gap.agents.skill_gap_identifier.LearningGoalRefiner")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillGapIdentifier")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillRequirementMapper")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.create_goal_assessment_tool")
-    def test_vague_goal_triggers_auto_refinement(
-        self, mock_assess_tool_factory, mock_mapper_cls, mock_identifier_cls, mock_refiner_cls
+_EVAL_ACCEPTED = {"is_acceptable": True, "issues": [], "feedback": ""}
+_EVAL_REJECTED = {"is_acceptable": False, "issues": ["Gap too broad"], "feedback": "Be more specific"}
+
+
+def _make_patches(*targets):
+    """Return a list of patch objects for the given import paths."""
+    return [patch(t) for t in targets]
+
+
+# ── Helper to apply standard patches ────────────────────────────────────────
+_PATCH_BASE = "modules.skill_gap.agents.skill_gap_identifier"
+
+
+class TestLoop1GoalClarification:
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_vague_goal_refined_in_loop1(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
-        """When goal is assessed as vague, auto-refinement should trigger and retry."""
+        """Vague on attempt 0 → refiner called → goal changes → re-parse → not vague → breaks.
+        Mapper called once; was_auto_refined=True."""
         from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
 
-        # Mapper returns requirements
-        mock_mapper = mock_mapper_cls.return_value
-        mock_mapper.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockLLMFactory.create.return_value = MagicMock()
 
-        # Identifier returns gaps without goal_assessment (so fallback runs)
-        mock_identifier = mock_identifier_cls.return_value
-        mock_identifier.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
-
-        # Assessment tool says vague on first call, not vague on second
-        mock_assess_fn = MagicMock()
-        mock_assess_fn.invoke.side_effect = [
-            {"is_vague": True, "all_mastered": False, "suggestion": "Be more specific"},
-            {"is_vague": False, "all_mastered": False, "suggestion": ""},
+        parser_instance = MockParser.return_value
+        parser_instance.parse.side_effect = [
+            _GOAL_CONTEXT_VAGUE,
+            _GOAL_CONTEXT_NOT_VAGUE,
         ]
-        mock_assess_tool_factory.return_value = mock_assess_fn
 
-        # Refiner returns refined goal
-        mock_refiner = mock_refiner_cls.return_value
-        mock_refiner.refine_goal.return_value = {"refined_goal": "Learn Python for data science with Pandas"}
+        mock_retrieve.return_value = []
 
-        mgr = MagicMock()
+        refiner_instance = MockRefiner.return_value
+        refiner_instance.refine_goal.return_value = {"refined_goal": "Learn Python for data science"}
+
+        mapper_instance = MockMapper.return_value
+        mapper_instance.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+
+        identifier_instance = MockIdentifier.return_value
+        identifier_instance.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+
+        evaluator_instance = MockEvaluator.return_value
+        evaluator_instance.evaluate.return_value = _EVAL_ACCEPTED
+
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
         llm = MagicMock()
+        skill_gaps, reqs = identify_skill_gap_with_llm(llm, "learn python", "CS student")
 
-        skill_gaps, reqs = identify_skill_gap_with_llm(
-            llm, "learn stuff", "CS student", search_rag_manager=mgr
-        )
-
-        # Refiner should have been called
-        mock_refiner.refine_goal.assert_called_once()
-        # Mapper called twice (once per attempt)
-        assert mock_mapper.map_goal_to_skill.call_count == 2
-        # Goal assessment includes auto_refined info
+        # Refiner called once (on attempt 0 after vague assessment)
+        refiner_instance.refine_goal.assert_called_once()
+        # Parser called twice (original + refined goal)
+        assert parser_instance.parse.call_count == 2
+        # Mapper called once (between loops)
+        assert mapper_instance.map_goal_to_skill.call_count == 1
+        # Goal was auto-refined
         assert skill_gaps["goal_assessment"]["auto_refined"] is True
-        assert skill_gaps["goal_assessment"]["original_goal"] == "learn stuff"
+        assert skill_gaps["goal_assessment"]["original_goal"] == "learn python"
 
-    @patch("modules.skill_gap.agents.skill_gap_identifier.LearningGoalRefiner")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillGapIdentifier")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillRequirementMapper")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.create_goal_assessment_tool")
-    def test_non_vague_goal_no_refinement(
-        self, mock_assess_tool_factory, mock_mapper_cls, mock_identifier_cls, mock_refiner_cls
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_non_vague_goal_skips_loop1_refinement(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
-        """A clear goal should not trigger refinement."""
+        """A clear goal should not trigger refinement — refiner never called."""
         from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
 
-        mock_mapper = mock_mapper_cls.return_value
-        mock_mapper.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
 
-        mock_identifier = mock_identifier_cls.return_value
-        mock_identifier.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
-
-        mock_assess_fn = MagicMock()
-        mock_assess_fn.invoke.return_value = {"is_vague": False, "all_mastered": False, "suggestion": ""}
-        mock_assess_tool_factory.return_value = mock_assess_fn
-
-        mgr = MagicMock()
         llm = MagicMock()
+        identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
 
-        skill_gaps, reqs = identify_skill_gap_with_llm(
-            llm, "Learn Python for data science", "CS student", search_rag_manager=mgr
-        )
+        MockRefiner.assert_not_called()
+        assert MockParser.return_value.parse.call_count == 1
 
-        mock_refiner_cls.assert_not_called()
-        assert mock_mapper.map_goal_to_skill.call_count == 1
-
-    @patch("modules.skill_gap.agents.skill_gap_identifier.LearningGoalRefiner")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillGapIdentifier")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillRequirementMapper")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.create_goal_assessment_tool")
-    def test_all_mastered_goal_no_refinement(
-        self, mock_assess_tool_factory, mock_mapper_cls, mock_identifier_cls, mock_refiner_cls
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_loop1_max_iterations_respected(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
-        """All-mastered goals should not trigger auto-refinement."""
+        """Always vague, goal always changes — refiner called MAX_GOAL_ITERATIONS-1 times."""
         from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
 
-        mock_mapper = mock_mapper_cls.return_value
-        mock_mapper.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockLLMFactory.create.return_value = MagicMock()
+        # Always vague across all parse calls
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_VAGUE
+        mock_retrieve.return_value = []
 
-        mock_identifier = mock_identifier_cls.return_value
-        mock_identifier.identify_skill_gap.return_value = MOCK_SKILL_GAPS_ALL_MASTERED.copy()
+        call_count = [0]
+        def refine_side_effect(d):
+            call_count[0] += 1
+            return {"refined_goal": f"refined goal {call_count[0]}"}
+        MockRefiner.return_value.refine_goal.side_effect = refine_side_effect
 
-        mock_assess_fn = MagicMock()
-        mock_assess_fn.invoke.return_value = {"is_vague": True, "all_mastered": True, "suggestion": "You've mastered it all"}
-        mock_assess_tool_factory.return_value = mock_assess_fn
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
 
-        mgr = MagicMock()
+        MAX_GOAL_ITERATIONS = 2
         llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "learn stuff", "student")
 
-        skill_gaps, reqs = identify_skill_gap_with_llm(
-            llm, "learn stuff", "Expert programmer", search_rag_manager=mgr
-        )
+        # Refiner called at most MAX_GOAL_ITERATIONS - 1 times
+        assert MockRefiner.return_value.refine_goal.call_count <= MAX_GOAL_ITERATIONS - 1
+        # Loop exits and proceeds to Loop 2
+        assert MockMapper.return_value.map_goal_to_skill.call_count == 1
 
-        mock_refiner_cls.assert_not_called()
-
-    @patch("modules.skill_gap.agents.skill_gap_identifier.LearningGoalRefiner")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillGapIdentifier")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillRequirementMapper")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.create_goal_assessment_tool")
-    def test_max_one_refinement(
-        self, mock_assess_tool_factory, mock_mapper_cls, mock_identifier_cls, mock_refiner_cls
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_loop1_refiner_returns_same_goal_breaks(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
-        """Even if still vague after refinement, should only refine once."""
+        """Vague but refiner returns same goal — breaks immediately; refiner called once."""
         from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
 
-        mock_mapper = mock_mapper_cls.return_value
-        mock_mapper.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_VAGUE
+        mock_retrieve.return_value = []
+        MockRefiner.return_value.refine_goal.return_value = {"refined_goal": "learn stuff"}
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
 
-        mock_identifier = mock_identifier_cls.return_value
-        mock_identifier.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
-
-        # Still vague after refinement
-        mock_assess_fn = MagicMock()
-        mock_assess_fn.invoke.return_value = {"is_vague": True, "all_mastered": False, "suggestion": "Still vague"}
-        mock_assess_tool_factory.return_value = mock_assess_fn
-
-        mock_refiner = mock_refiner_cls.return_value
-        mock_refiner.refine_goal.return_value = {"refined_goal": "learn more stuff"}
-
-        mgr = MagicMock()
         llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "learn stuff", "student")
 
-        skill_gaps, reqs = identify_skill_gap_with_llm(
-            llm, "learn stuff", "student", search_rag_manager=mgr
-        )
+        MockRefiner.return_value.refine_goal.assert_called_once()
+        # Goal was NOT auto-refined (same goal returned)
+        assert skill_gaps["goal_assessment"]["auto_refined"] is False
 
-        # Refiner called exactly once
-        mock_refiner.refine_goal.assert_called_once()
-        # Mapper called twice (original + refined)
-        assert mock_mapper.map_goal_to_skill.call_count == 2
-        # Still returns is_vague since refinement didn't help
-        assert skill_gaps["goal_assessment"].get("is_vague") is True
 
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillGapIdentifier")
-    @patch("modules.skill_gap.agents.skill_gap_identifier.SkillRequirementMapper")
-    def test_auto_refinement_info_in_response(self, mock_mapper_cls, mock_identifier_cls):
-        """Response should include goal_assessment even without search_rag_manager."""
+class TestLoop2SkillGapReflexion:
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_evaluator_accepts_on_first_pass(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """Evaluator accepts immediately — identifier called once."""
         from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
 
-        mock_mapper = mock_mapper_cls.return_value
-        mock_mapper.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
-
-        mock_identifier = mock_identifier_cls.return_value
-        mock_identifier.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
 
         llm = MagicMock()
+        identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
 
-        skill_gaps, reqs = identify_skill_gap_with_llm(
-            llm, "Learn Python", "CS student", search_rag_manager=None
-        )
+        assert MockIdentifier.return_value.identify_skill_gap.call_count == 1
+        MockEvaluator.return_value.evaluate.assert_called_once()
 
-        # goal_assessment should be present (even if empty dict when no mgr)
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_evaluator_rejects_then_accepts(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """Evaluator rejects iteration 0 with feedback, accepts iteration 1.
+        Identifier called twice; second call receives evaluator_feedback."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.side_effect = [_EVAL_REJECTED, _EVAL_ACCEPTED]
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
+        llm = MagicMock()
+        identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
+
+        assert MockIdentifier.return_value.identify_skill_gap.call_count == 2
+        # Second identifier call should have received the feedback
+        second_call_kwargs = MockIdentifier.return_value.identify_skill_gap.call_args_list[1]
+        assert second_call_kwargs.kwargs.get("evaluator_feedback") == _EVAL_REJECTED["feedback"]
+
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_evaluator_max_iterations_respected(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """Evaluator always rejects — loop exits after MAX_EVAL_ITERATIONS; identifier called that many times."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_REJECTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
+        MAX_EVAL_ITERATIONS = 2
+        llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
+
+        assert MockIdentifier.return_value.identify_skill_gap.call_count == MAX_EVAL_ITERATIONS
+        # Evaluator called MAX_EVAL_ITERATIONS - 1 times (skipped on last iteration)
+        assert MockEvaluator.return_value.evaluate.call_count == MAX_EVAL_ITERATIONS - 1
+
+
+class TestPostLoop:
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_bias_audit_always_runs(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """BiasAuditor runs unconditionally and result is in skill_gaps."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        bias_output = {"bias_flags": [], "overall_bias_risk": "low"}
+        MockBias.return_value.audit_skill_gaps.return_value = bias_output
+
+        llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
+
+        MockBias.return_value.audit_skill_gaps.assert_called_once()
+        assert skill_gaps["bias_audit"] == bias_output
+
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_all_mastered_in_goal_assessment(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """All is_gap=False → goal_assessment.all_mastered=True."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_ALL_MASTERED.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
+        llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "Learn Python", "Expert Python programmer")
+
+        assert skill_gaps["goal_assessment"]["all_mastered"] is True
+        assert "master" in skill_gaps["goal_assessment"]["suggestion"].lower()
+
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_goal_assessment_always_present(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """goal_assessment is always present in the response."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_ACCEPTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
+        llm = MagicMock()
+        skill_gaps, _ = identify_skill_gap_with_llm(llm, "Learn Python", "CS student", search_rag_manager=None)
+
         assert "goal_assessment" in skill_gaps
+        assert isinstance(skill_gaps["goal_assessment"], dict)
+
+    @patch(f"{_PATCH_BASE}.LLMFactory")
+    @patch(f"{_PATCH_BASE}.BiasAuditor")
+    @patch(f"{_PATCH_BASE}.SkillGapEvaluator")
+    @patch(f"{_PATCH_BASE}.SkillRequirementMapper")
+    @patch(f"{_PATCH_BASE}.SkillGapIdentifier")
+    @patch(f"{_PATCH_BASE}.LearningGoalRefiner")
+    @patch(f"{_PATCH_BASE}._retrieve_context_for_goal")
+    @patch(f"{_PATCH_BASE}.GoalContextParser")
+    def test_loop2_no_goal_refinement(
+        self,
+        MockParser, mock_retrieve, MockRefiner, MockIdentifier,
+        MockMapper, MockEvaluator, MockBias, MockLLMFactory,
+    ):
+        """Loop 2 must never trigger goal refinement — LearningGoalRefiner not called in Loop 2."""
+        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+
+        MockLLMFactory.create.return_value = MagicMock()
+        MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
+        mock_retrieve.return_value = []
+        MockMapper.return_value.map_goal_to_skill.return_value = MOCK_SKILL_REQUIREMENTS
+        MockIdentifier.return_value.identify_skill_gap.return_value = MOCK_SKILL_GAPS_WITH_GAPS.copy()
+        # Evaluator always rejects
+        MockEvaluator.return_value.evaluate.return_value = _EVAL_REJECTED
+        MockBias.return_value.audit_skill_gaps.return_value = {}
+
+        llm = MagicMock()
+        identify_skill_gap_with_llm(llm, "Learn Python for data science", "CS student")
+
+        # Refiner was never called (goal was not vague, and Loop 2 never calls refiner)
+        MockRefiner.assert_not_called()

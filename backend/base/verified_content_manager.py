@@ -320,6 +320,7 @@ class VerifiedContentManager:
         course_code: Optional[str] = None,
         content_category: Optional[str] = None,
         lecture_number: Optional[int] = None,
+        page_number: Optional[int] = None,
         exclude_file_names: Optional[List[str]] = None,
         require_lecture: bool = False,
     ) -> List[Document]:
@@ -357,6 +358,8 @@ class VerifiedContentManager:
             if content_category and cat != content_category.lower():
                 continue
             if lecture_number is not None and meta.get("lecture_number") != lecture_number:
+                continue
+            if page_number is not None and meta.get("page_number") != page_number:
                 continue
             if fname in excluded:
                 continue

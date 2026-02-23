@@ -1,4 +1,3 @@
-from .course_content_retrieval_tool import create_course_content_retrieval_tool
 from .learner_simulation_tool import create_simulate_feedback_tool
 from .plan_regeneration_tool import (
     RegenerationDecision,
@@ -8,7 +7,6 @@ from .plan_regeneration_tool import (
 )
 
 __all__ = [
-    "create_course_content_retrieval_tool",
     "create_simulate_feedback_tool",
     "RegenerationDecision",
     "compute_fslsm_deltas",
