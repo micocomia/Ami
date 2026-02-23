@@ -200,7 +200,14 @@ def identify_skill_gap_with_llm(
             "learner_information": learner_information,
         })
 
-        retrieved_docs = _retrieve_context_for_goal(goal_context, search_rag_manager)
+        # Only retrieve content when context includes retrievable fields
+        verified_content_flag = any(
+            goal_context.get(k)
+            for k in ("course_code", "lecture_number", "content_category", "page_number")
+        )
+
+        if verified_content_flag:
+            retrieved_docs = _retrieve_context_for_goal(goal_context, search_rag_manager)
 
         if not goal_context.get("is_vague", False):
             break  # goal is specific — proceed to skill gap identification
@@ -223,7 +230,8 @@ def identify_skill_gap_with_llm(
                 break
         # On last attempt: keep current state (goal may still be vague), fall through
 
-    retrieved_context_str = _format_retrieved_docs(retrieved_docs)
+    # Format the retrieved content
+    retrieved_context_str = _format_retrieved_docs(retrieved_docs) if verified_content_flag else ""
 
     # ── MAP REQUIREMENTS ONCE between loops ────────────────────────────────────────
     if skill_requirements:
