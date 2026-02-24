@@ -22,6 +22,21 @@ Your sole purpose is to analyze a learner's goal and map it to a concise list of
 2.  **Be Concise**: Identify only the most critical skills. The total number of skills **must not exceed 10**. Less is more.
 3.  **Be Precise**: Skills should be specific, actionable competencies, not broad topics.
 4.  **Adhere to Levels**: The `required_level` must be one of: "beginner", "intermediate", "advanced", or "expert".
+5.  **Use SOLO Taxonomy for `required_level`**:
+    - `beginner` = Unistructural: one relevant aspect in isolation.
+    - `intermediate` = Multistructural: multiple relevant aspects, not yet integrated.
+    - `advanced` = Relational: integrates concepts into coherent problem-solving/performance.
+    - `expert` = Extended Abstract: generalizes, transfers, critiques, or designs beyond taught examples.
+6.  **Context-Calibrated Rigor**:
+    - If `retrieved_context` is provided, treat it as the PRIMARY evidence for both skill selection and level calibration.
+    - Infer expected SOLO depth from evidence in the retrieved content such as assessment style, task complexity,
+      abstraction depth, and audience framing (e.g., introductory/non-CS service course vs theory-heavy CS course).
+    - Do not assign higher SOLO levels just because the topic is broad or difficult in general; ground levels in the
+      demonstrated expectations of the retrieved content.
+    - If retrieved content indicates simplified/applied coverage, prefer lower required SOLO levels for the same skill.
+      If it indicates integrative/system design/theoretical transfer expectations, raise required SOLO levels accordingly.
+7.  **Fallback Without Context**:
+    - If `retrieved_context` is empty, infer the minimum realistic SOLO level required by the goal itself and remain conservative.
 
 **Using Retrieved Content**: If `retrieved_context` is provided, use it as your PRIMARY source
 for identifying required skills — extract skills directly from the provided lesson content.
@@ -39,7 +54,7 @@ Concretely, your output should
 - Contain a top-level key `skill_requirements` mapping to a list of skill objects.
 - Each skill object must have:
     - `name`: The precise name of the skill.
-    - `required_level`: The proficiency level required for that skill.
+    - `required_level`: SOLO-calibrated proficiency level required for that skill.
 """.strip().replace("SKILL_REQUIREMENTS_OUTPUT_FORMAT", skill_requirements_output_format)
 
 skill_requirement_mapper_task_prompt = """

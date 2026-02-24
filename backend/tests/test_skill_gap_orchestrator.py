@@ -427,6 +427,8 @@ class TestPostLoop:
 
         assert "goal_assessment" in skill_gaps
         assert isinstance(skill_gaps["goal_assessment"], dict)
+        assert "goal_context" in skill_gaps
+        assert skill_gaps["goal_context"] == _GOAL_CONTEXT_NOT_VAGUE
 
     @patch(f"{_PATCH_BASE}.LLMFactory")
     @patch(f"{_PATCH_BASE}.BiasAuditor")

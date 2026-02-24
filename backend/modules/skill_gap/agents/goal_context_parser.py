@@ -54,3 +54,16 @@ class GoalContextParser(BaseAgent):
         raw_output = self.invoke(payload_dict, task_prompt=goal_context_parser_task_prompt)
         validated = GoalContext.model_validate(raw_output)
         return validated.model_dump()
+
+
+def parse_goal_context_with_llm(
+    llm: Any,
+    learning_goal: str,
+    learner_information: str = "",
+) -> JSONDict:
+    """Convenience helper to parse goal context with the provided LLM."""
+    parser = GoalContextParser(llm)
+    return parser.parse({
+        "learning_goal": learning_goal,
+        "learner_information": learner_information,
+    })

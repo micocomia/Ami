@@ -108,6 +108,7 @@ class SessionSchedulePayload(BaseModel):
 
     learner_profile: Union[str, Dict[str, Any], Mapping[str, Any]]
     session_count: int = 0
+    goal_context: Optional[Mapping[str, Any]] = None
 
 
 class LearningPathRefinementPayload(BaseModel):
@@ -115,6 +116,7 @@ class LearningPathRefinementPayload(BaseModel):
 
     learning_path: Sequence[Any]
     feedback: Union[str, Dict[str, Any], Mapping[str, Any]]
+    goal_context: Optional[Mapping[str, Any]] = None
 
 
 class LearningPathReschedulePayload(BaseModel):
@@ -124,6 +126,7 @@ class LearningPathReschedulePayload(BaseModel):
     learning_path: Sequence[Any]
     session_count: Optional[Union[int, str]] = None
     other_feedback: Optional[Union[str, Dict[str, Any], Mapping[str, Any]]] = None
+    goal_context: Optional[Mapping[str, Any]] = None
 
 
 class LearningPathScheduler(BaseAgent):
@@ -243,12 +246,14 @@ def schedule_learning_path_with_llm(
     llm: Any,
     learner_profile: Mapping[str, Any],
     session_count: int = 0,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ) -> JSONDict:
     """Convenience helper to create a scheduler and produce a new learning path."""
     learning_path_scheduler = LearningPathScheduler(llm)
     payload_dict = {
         "learner_profile": learner_profile,
         "session_count": session_count,
+        "goal_context": goal_context,
     }
     return learning_path_scheduler.schedule_session(payload_dict)
 
@@ -259,6 +264,7 @@ def reschedule_learning_path_with_llm(
     learner_profile: Mapping[str, Any],
     session_count: Optional[int] = None,
     other_feedback: Optional[Union[str, Mapping[str, Any]]] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
     *,
     system_prompt: str = learning_path_scheduler_system_prompt,
     task_prompt: str = learning_path_scheduler_task_prompt_reschedule,
@@ -270,6 +276,7 @@ def reschedule_learning_path_with_llm(
         "learning_path": learning_path,
         "session_count": session_count,
         "other_feedback": other_feedback,
+        "goal_context": goal_context,
     }
     return learning_path_scheduler.reschedule(payload_dict)
 
@@ -301,6 +308,7 @@ def schedule_learning_path_agentic(
     learner_profile: Mapping[str, Any],
     session_count: int = 0,
     max_refinements: int = 2,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[JSONDict, Dict[str, Any]]:
     """Agentic learning path generation with auto-refinement.
 
@@ -326,6 +334,7 @@ def schedule_learning_path_agentic(
             plan = scheduler.schedule_session({
                 "learner_profile": learner_profile,
                 "session_count": session_count,
+                "goal_context": goal_context,
             })
         else:
             plan = scheduler.reflexion({
@@ -334,6 +343,7 @@ def schedule_learning_path_agentic(
                     "learner_profile": learner_profile,
                     "simulation_feedback": simulation_feedback,
                 },
+                "goal_context": goal_context,
             })
 
         # Evaluate via learner simulation (gpt-4o-mini, fast path)

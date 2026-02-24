@@ -193,6 +193,7 @@ def identify_skill_gap_with_llm(
     # ── LOOP 1: Goal Clarification (GoalContextParser ↔ LearningGoalRefiner) ──────
     goal_context: Dict[str, Any] = {}
     retrieved_docs: List[Document] = []
+    verified_content_flag = False
 
     for attempt in range(MAX_GOAL_ITERATIONS):
         goal_context = GoalContextParser(lightweight_llm).parse({
@@ -301,6 +302,7 @@ def identify_skill_gap_with_llm(
         "original_goal": original_goal if was_auto_refined else None,
         "refined_goal": learning_goal if was_auto_refined else None,
     }
+    skill_gaps_result["goal_context"] = dict(goal_context)
     skill_gaps_result["retrieved_sources"] = _deduplicate_sources(retrieved_docs)
 
     # ── BIAS AUDIT ─────────────────────────────────────────────────────────────────
