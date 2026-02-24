@@ -1,7 +1,7 @@
 """Tests for the agentic learning plan generation orchestration.
 
 These tests mock LLM calls and verify the orchestration logic:
-- Auto-refinement loop with quality gate
+- Auto-refinement loop with LLM-based quality gate
 - Metadata structure
 
 Run from the repo root:
@@ -17,7 +17,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from modules.learning_plan_generator.agents.learning_path_scheduler import LearningPathScheduler
-from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import _evaluate_plan_quality
+from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
+    schedule_learning_path_agentic,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,31 +83,44 @@ class TestLearningPathSchedulerInit:
 
 class TestAgenticMetadata:
 
-    def test_evaluate_plan_quality_returns_expected_keys(self):
-        """Quality gate should return pass, issues, feedback_summary."""
+    def _make_sim_tool(self, feedback_dict):
+        sim_tool = MagicMock()
+        sim_tool.invoke.return_value = feedback_dict
+        return sim_tool
+
+    def test_quality_gate_reads_is_acceptable_from_feedback(self):
+        """Quality gate should read is_acceptable directly from simulation feedback."""
         feedback = {
-            "feedback": {
-                "progression": "Good",
-                "engagement": "Good",
-                "personalization": "Good",
-            },
-            "suggestions": {
-                "progression": "",
-                "engagement": "",
-                "personalization": "",
-            },
+            "feedback": {"progression": "Good", "engagement": "Good", "personalization": "Good"},
+            "suggestions": {"progression": "", "engagement": "", "personalization": ""},
+            "is_acceptable": True,
+            "issues": [],
+            "improvement_directives": "",
         }
-        result = _evaluate_plan_quality(feedback)
-        assert "pass" in result
-        assert "issues" in result
-        assert "feedback_summary" in result
-        assert len(result["feedback_summary"]) == 3
+        mock_scheduler = MagicMock()
+        mock_scheduler.schedule_session.return_value = _make_plan()
+
+        with patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
+            return_value=mock_scheduler,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
+            return_value=self._make_sim_tool(feedback),
+        ):
+            plan, metadata = schedule_learning_path_agentic(
+                llm=MagicMock(),
+                learner_profile=_make_learner_profile(),
+                max_refinements=2,
+            )
+
+        assert "pass" in metadata["evaluation"]
+        assert "issues" in metadata["evaluation"]
+        assert "feedback_summary" in metadata["evaluation"]
+        assert metadata["evaluation"]["pass"] is True
 
     def test_schedule_agentic_returns_metadata(self):
         """Mocked agentic generation should return plan + metadata dict."""
-        # This tests the function signature / structure without real LLM calls
-        # Full integration tests require actual LLM
-        pass
+        pass  # Full integration tests require actual LLM
 
     def test_schedule_agentic_without_rag_falls_back(self):
         """Scheduler should work without any tools."""
@@ -114,13 +129,32 @@ class TestAgenticMetadata:
         assert scheduler._tools is None
 
     def test_schedule_agentic_caps_at_max_refinements(self):
-        """Quality gate failing every time should still cap at max refinements."""
+        """Quality gate failing every time should still cap at max_refinements."""
         bad_feedback = {
-            "progression": "poor progression needs improvement",
-            "engagement": "weak engagement",
-            "personalization": "not personalized",
-            "suggestions": ["fix 1", "fix 2", "fix 3", "fix 4"],
+            "feedback": {"progression": "Poor.", "engagement": "Weak.", "personalization": "Missing."},
+            "suggestions": {"progression": "Fix.", "engagement": "Fix.", "personalization": "Fix."},
+            "is_acceptable": False,
+            "issues": ["Pacing too fast"],
+            "improvement_directives": "Add foundational sessions.",
         }
-        result = _evaluate_plan_quality(bad_feedback)
-        assert result["pass"] is False
-        assert len(result["issues"]) > 0
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.schedule_session.return_value = _make_plan()
+        mock_scheduler.reflexion.return_value = _make_plan()
+
+        with patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
+            return_value=mock_scheduler,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
+            return_value=self._make_sim_tool(bad_feedback),
+        ):
+            plan, metadata = schedule_learning_path_agentic(
+                llm=MagicMock(),
+                learner_profile=_make_learner_profile(),
+                max_refinements=2,
+            )
+
+        # 1 initial + 2 refinements = 3 total attempts
+        assert metadata["refinement_iterations"] == 3
+        assert metadata["evaluation"]["pass"] is False

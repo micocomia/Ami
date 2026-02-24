@@ -10,7 +10,6 @@ from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_task_prompt_reschedule,
     learning_path_scheduler_task_prompt_session,
 )
-from modules.learning_plan_generator.utils.fslsm import _parse_profile, _apply_fslsm_overrides
 
 
 JSONDict = Dict[str, Any]
@@ -29,6 +28,7 @@ class LearningPathRefinementPayload(BaseModel):
 
     learning_path: Sequence[Any]
     feedback: Union[str, Dict[str, Any], Mapping[str, Any]]
+    evaluator_feedback: str = Field(default="")
     goal_context: Optional[Mapping[str, Any]] = None
 
 
@@ -61,10 +61,7 @@ class LearningPathScheduler(BaseAgent):
         task_prompt = learning_path_scheduler_task_prompt_session
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated_output = LearningPath.model_validate(raw_output)
-        result = validated_output.model_dump()
-        # Apply FSLSM overrides deterministically
-        profile = _parse_profile(input_dict.get("learner_profile", {}))
-        return _apply_fslsm_overrides(result, profile)
+        return validated_output.model_dump()
 
     def reflexion(self, input_dict: Dict[str, Any]) -> JSONDict:
         """Refine the learning path based on evaluator feedback."""
@@ -72,13 +69,7 @@ class LearningPathScheduler(BaseAgent):
         task_prompt = learning_path_scheduler_task_prompt_reflexion
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated = LearningPath.model_validate(raw_output)
-        result = validated.model_dump()
-        # Apply FSLSM overrides if profile available in feedback
-        feedback = input_dict.get("feedback", {})
-        if isinstance(feedback, dict) and "learner_profile" in feedback:
-            profile = _parse_profile(feedback["learner_profile"])
-            result = _apply_fslsm_overrides(result, profile)
-        return result
+        return validated.model_dump()
 
     def reschedule(self, input_dict: Dict[str, Any]) -> JSONDict:
         """Reschedule the learning path with optional new session_count/feedback."""
@@ -86,10 +77,7 @@ class LearningPathScheduler(BaseAgent):
         task_prompt = learning_path_scheduler_task_prompt_reschedule
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated = LearningPath.model_validate(raw_output)
-        result = validated.model_dump()
-        # Apply FSLSM overrides
-        profile = _parse_profile(input_dict.get("learner_profile", {}))
-        return _apply_fslsm_overrides(result, profile)
+        return validated.model_dump()
 
 
 # ---------------------------------------------------------------------------

@@ -25,11 +25,10 @@ from modules.learner_profiler import *
 from modules.learning_plan_generator import *
 from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
     schedule_learning_path_agentic,
-    _evaluate_plan_quality,
 )
 from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
 from modules.content_generator import *
-from modules.learner_simulator import simulate_content_feedback_with_llm
+from modules.content_generator.agents.content_feedback_simulator import simulate_content_feedback_with_llm
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
 from api_schemas import *
 from config import load_config
@@ -610,7 +609,13 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
             "learner_profile": new_profile,
         })
         agent_metadata["evaluation_feedback"] = sim_feedback
-        agent_metadata["evaluation"] = _evaluate_plan_quality(sim_feedback)
+        if not isinstance(sim_feedback, dict):
+            sim_feedback = {}
+        agent_metadata["evaluation"] = {
+            "pass": sim_feedback.get("is_acceptable", True),
+            "issues": sim_feedback.get("issues", []),
+            "feedback_summary": sim_feedback.get("feedback", {}),
+        }
 
         store.delete_profile_snapshot(request.user_id, request.goal_id)
         return {**result_plan, "agent_metadata": agent_metadata}

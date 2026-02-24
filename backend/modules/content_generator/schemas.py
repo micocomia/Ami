@@ -120,3 +120,14 @@ class LearningContent(BaseModel):
     content: str
     summary: str
     quizzes: List[QuizPair] = Field(default_factory=list)
+
+
+class FeedbackDetail(BaseModel):
+    progression: str
+    engagement: str
+    personalization: str
+
+
+class LearnerFeedback(BaseModel):
+    feedback: FeedbackDetail
+    suggestions: FeedbackDetail

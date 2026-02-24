@@ -3,14 +3,15 @@ from __future__ import annotations
 import ast
 from typing import Any, Dict, Mapping, Optional, Union
 
+from pydantic import BaseModel, Field, field_validator
+
 from base import BaseAgent
-from .schemas import parse_ground_truth_profile_result
-from .prompts import (
+from modules.learning_plan_generator.schemas import parse_ground_truth_profile_result
+from modules.learning_plan_generator.prompts.ground_truth_profile import (
     ground_truth_profile_creator_system_prompt,
     ground_truth_profile_creator_task_prompt,
     ground_truth_profile_creator_task_prompt_progress,
 )
-from pydantic import BaseModel, Field, field_validator
 
 
 class GroundTruthProfileCreatePayload(BaseModel):
@@ -62,7 +63,7 @@ class GroundTruthProfileProgressPayload(BaseModel):
 
 class GroundTruthProfileCreator(BaseAgent):
 
-    name: str = 'GroundTruthProfileCreator'
+    name: str = "GroundTruthProfileCreator"
 
     def __init__(self, model: Any):
         super().__init__(
@@ -79,19 +80,13 @@ class GroundTruthProfileCreator(BaseAgent):
         return validated.model_dump()
 
     def progress_profile(self, input_dict: Mapping[str, Any]) -> Dict[str, Any]:
-        """
-        Progress the ground-truth learner profile based on the provided session information.
-
-        Args:
-            input_dict (dict): Input dictionary containing the ground-truth profile and session information.
-                - ground_truth_profile (dict): The ground-truth learner profile.
-                - session_information (dict): Information about the current session.
-        """
+        """Progress the ground-truth learner profile based on the provided session information."""
         payload = GroundTruthProfileProgressPayload(**input_dict).model_dump()
         task_prompt = ground_truth_profile_creator_task_prompt_progress
         raw_output = self.invoke(payload, task_prompt=task_prompt)
         validated = parse_ground_truth_profile_result(raw_output)
         return validated.model_dump()
+
 
 def create_ground_truth_profile_with_llm(
     llm: Any,

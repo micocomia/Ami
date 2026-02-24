@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -59,3 +59,35 @@ class LearningPath(BaseModel):
         if not (1 <= len(v) <= 10):
             raise ValueError("Learning path must contain between 1 and 10 sessions.")
         return v
+
+
+# ---------------------------------------------------------------------------
+# Plan feedback schemas (used by LearningPlanFeedbackSimulator)
+# ---------------------------------------------------------------------------
+
+class PlanFeedbackDimensions(BaseModel):
+    progression: str
+    engagement: str
+    personalization: str
+
+
+class LearnerPlanFeedback(BaseModel):
+    feedback: PlanFeedbackDimensions
+    suggestions: PlanFeedbackDimensions
+    is_acceptable: bool = Field(default=True)
+    issues: List[str] = Field(default_factory=list)
+    improvement_directives: str = Field(default="")
+
+
+# ---------------------------------------------------------------------------
+# Ground-truth profile schemas (used by GroundTruthProfileCreator)
+# ---------------------------------------------------------------------------
+
+class GroundTruthProfileResult(BaseModel):
+    """Schema for ground-truth profile generation/progression output."""
+    learner_profile: Dict[str, Any]
+
+
+def parse_ground_truth_profile_result(data: Any) -> GroundTruthProfileResult:
+    """Validate LLM output of ground-truth profile creation/progression."""
+    return GroundTruthProfileResult.model_validate(data)

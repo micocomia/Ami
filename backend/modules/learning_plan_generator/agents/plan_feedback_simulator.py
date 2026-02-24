@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, Field, field_validator
 
 from base import BaseAgent
-from modules.learner_simulator.schemas import LearnerFeedback
+from modules.learning_plan_generator.schemas import LearnerPlanFeedback
 from modules.learning_plan_generator.prompts.plan_feedback import (
     plan_feedback_simulator_system_prompt,
     plan_feedback_simulator_task_prompt,
@@ -43,7 +43,7 @@ class LearningPlanFeedbackSimulator(BaseAgent):
         if not isinstance(payload, LearningPathFeedbackPayload):
             payload = LearningPathFeedbackPayload.model_validate(payload)
         raw_output = self.invoke(payload.model_dump(), task_prompt=plan_feedback_simulator_task_prompt)
-        validated_output = LearnerFeedback.model_validate(raw_output)
+        validated_output = LearnerPlanFeedback.model_validate(raw_output)
         return validated_output.model_dump()
 
 

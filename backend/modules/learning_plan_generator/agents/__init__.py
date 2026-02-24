@@ -11,6 +11,10 @@ from .plan_feedback_simulator import (
 	LearningPlanFeedbackSimulator,
 	simulate_path_feedback_with_llm,
 )
+from .ground_truth_profile_creator import (
+	GroundTruthProfileCreator,
+	create_ground_truth_profile_with_llm,
+)
 
 __all__ = [
 	# Learning path scheduler
@@ -24,4 +28,7 @@ __all__ = [
 	# Plan feedback simulator
 	"LearningPlanFeedbackSimulator",
 	"simulate_path_feedback_with_llm",
+	# Ground truth profile creator
+	"GroundTruthProfileCreator",
+	"create_ground_truth_profile_with_llm",
 ]

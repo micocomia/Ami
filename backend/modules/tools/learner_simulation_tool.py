@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from base.llm_factory import LLMFactory
 from modules.learning_plan_generator.agents.plan_feedback_simulator import LearningPlanFeedbackSimulator
-from modules.learner_simulator import create_ground_truth_profile_with_llm
+from modules.learning_plan_generator.agents.ground_truth_profile_creator import create_ground_truth_profile_with_llm
 
 
 # Default fast model for simulation
