@@ -42,14 +42,14 @@ def test_reschedule_learning_path_with_llm_accepts_goal_context():
 
 
 def test_schedule_learning_path_agentic_accepts_goal_context():
-    from modules.learning_plan_generator.agents.learning_path_scheduler import schedule_learning_path_agentic
+    from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import schedule_learning_path_agentic
 
     goal_context = {"course_code": "6.0001", "page_number": 5}
     llm = MagicMock()
 
-    with patch("modules.learning_plan_generator.agents.learning_path_scheduler.LearningPathScheduler") as MockScheduler, \
-         patch("modules.learning_plan_generator.agents.learning_path_scheduler.create_simulate_feedback_tool") as mock_sim_tool_factory, \
-         patch("modules.learning_plan_generator.agents.learning_path_scheduler._evaluate_plan_quality") as mock_quality:
+    with patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler") as MockScheduler, \
+         patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool") as mock_sim_tool_factory, \
+         patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline._evaluate_plan_quality") as mock_quality:
         MockScheduler.return_value.schedule_session.return_value = {"learning_path": []}
         mock_sim_tool_factory.return_value.invoke.return_value = {"feedback": {}}
         mock_quality.return_value = {"pass": True, "issues": [], "feedback_summary": {}}

@@ -1,5 +1,5 @@
 <div align="center">
-  <p><b>Cognitive-Style Adaptive AI Tutor</b></p>
+  <p><b>Ami: Adaptive Mentoring Intelligence</b></p>
   <p>An enhanced fork of GenMentor — LLM-powered & Goal-oriented Tutoring System</p>
 </div>
 

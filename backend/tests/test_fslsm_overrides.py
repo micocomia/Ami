@@ -10,9 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from modules.learning_plan_generator.agents.learning_path_scheduler import (
-    _apply_fslsm_overrides,
-)
+from modules.learning_plan_generator.utils.fslsm import _apply_fslsm_overrides
 
 
 def _make_profile(processing=0.0, perception=0.0, input_dim=0.0, understanding=0.0):

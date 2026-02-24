@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from modules.skill_gap import *
 from modules.learner_profiler import *
 from modules.learning_plan_generator import *
-from modules.learning_plan_generator.agents.learning_path_scheduler import (
+from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
     schedule_learning_path_agentic,
     _evaluate_plan_quality,
 )

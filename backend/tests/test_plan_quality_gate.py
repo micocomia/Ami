@@ -17,9 +17,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from modules.learning_plan_generator.agents.learning_path_scheduler import (
-    _evaluate_plan_quality,
-)
+from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import _evaluate_plan_quality
 
 
 class TestPlanQualityGate:
