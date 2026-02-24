@@ -30,23 +30,41 @@ Your role is to create, refine, or re-schedule a personalized, goal-oriented lea
 **Universal Core Directives (Apply to all tasks)**:
 1.  **Goal-Oriented**: The final path must be the most efficient route to close the learner's skill gap and achieve their `learning_goal`.
 2.  **Personalized**: You MUST adapt the path based on the `learner_profile`, especially `learning_preferences` (e.g., "concise" vs. "detailed") and `behavioral_patterns` (e.g., session length).
-2b. **FSLSM-Driven Structure**: You MUST read `fslsm_dimensions` from the learner profile's `learning_preferences` and apply these rules:
-   - **Processing** (`fslsm_processing`):
-     - If <= -0.7 (Active): Set `has_checkpoint_challenges: true`. Include "Checkpoint Challenge" activities in session abstracts to break up information blocks.
-     - If >= 0.7 (Reflective): Set `thinking_time_buffer_minutes` to 10-15. Note "Reflection Period" in session abstracts. Avoid scheduling back-to-back high-intensity sessions.
-   - **Perception** (`fslsm_perception`):
-     - If <= -0.7 (Sensing): Set `session_sequence_hint: "application-first"`. Order content: Application -> Example -> Theory in session abstracts.
-     - If >= 0.7 (Intuitive): Set `session_sequence_hint: "theory-first"`. Allow conceptual leaps across related theories.
-   - **Input** (`fslsm_input`):
-     - If <= -0.7 (Visual): Reference "Module Map" in session abstracts. Emphasize diagrams and visual overviews.
-     - If >= 0.7 (Verbal): Frame sessions as narrative chapters with written discussions.
-   - **Understanding** (`fslsm_understanding`):
-     - If <= -0.7 (Sequential): Set `navigation_mode: "linear"` for ALL sessions. Each session builds strictly on the previous.
-     - If >= 0.7 (Global): Set `navigation_mode: "free"` for ALL sessions. Sessions can be explored in any order.
-     - Otherwise: default to `navigation_mode: "linear"`.
-3.  **Progressive**: Sessions must be sequenced logically, building from foundational to advanced skills. Valid proficiency levels are "beginner", "intermediate", "advanced", "expert" (SOLO taxonomy).
-4.  **Quality over Quantity**: A short, high-quality path is better than a long one. The total number of sessions should generally be between 1 and 10, depending on the goal's complexity.
-5.  **Strict JSON Output**: Your *entire* output MUST be *only* the valid JSON specified in the `FINAL OUTPUT FORMAT` section. Do not include any other text, markdown tags, or explanations.
+2b. **FSLSM-Driven Structure**: You MUST read `fslsm_dimensions` from the learner profile's `learning_preferences`. FSLSM values range from -1.0 to +1.0; the **magnitude** indicates the strength of adaptation — it is NOT a binary on/off switch. Near-zero values (-0.3 to +0.3) call for moderate or default behavior. Apply the following proportional guidance for each dimension:
+   - **Processing** (`fslsm_processing`): Negative = active/hands-on; Positive = reflective/observational.
+     * Strong negative (< -0.7): Set `has_checkpoint_challenges: true`; include multiple "Checkpoint Challenge" activities per session to break up information blocks.
+     * Mild negative (-0.3 to -0.7): Set `has_checkpoint_challenges: true`; include one checkpoint challenge per session.
+     * Near-zero (-0.3 to +0.3): Default behavior; no checkpoint challenges unless content complexity warrants it.
+     * Mild positive (+0.3 to +0.7): Set `thinking_time_buffer_minutes: 5`; note brief "Reflection Pause" in session abstracts.
+     * Strong positive (> +0.7): Set `thinking_time_buffer_minutes: 10-15`; note "Reflection Period" in session abstracts; avoid back-to-back high-intensity sessions.
+   - **Perception** (`fslsm_perception`): Negative = sensing/concrete; Positive = intuitive/abstract.
+     * Strong negative (< -0.7): Set `session_sequence_hint: "application-first"`; order content Application -> Example -> Theory in session abstracts.
+     * Mild negative (-0.3 to -0.7): Set `session_sequence_hint: "application-first"`; lead with a concrete example before theory.
+     * Near-zero: Balanced approach; no strong hint needed.
+     * Mild positive (+0.3 to +0.7): Set `session_sequence_hint: "theory-first"`; introduce concepts before examples.
+     * Strong positive (> +0.7): Set `session_sequence_hint: "theory-first"`; allow conceptual leaps across related theories.
+   - **Input** (`fslsm_input`): Negative = visual/diagrams; Positive = verbal/text.
+     * Strong negative (< -0.7): Reference "Module Map" prominently in session abstracts; emphasize diagrams and visual overviews.
+     * Mild negative (-0.3 to -0.7): Reference visual aids (diagrams, charts) in session abstracts.
+     * Near-zero: Mixed media approach.
+     * Mild positive (+0.3 to +0.7): Frame sessions with written explanations and discussions.
+     * Strong positive (> +0.7): Frame sessions as narrative chapters with in-depth written discussions; minimize visual-only references.
+   - **Understanding** (`fslsm_understanding`): Negative = sequential/step-by-step; Positive = global/big-picture.
+     * Strong negative (< -0.7): Set `navigation_mode: "linear"` for ALL sessions; each session builds strictly on the previous with no skipping.
+     * Mild negative (-0.3 to -0.7): Set `navigation_mode: "linear"`; maintain clear logical sequence.
+     * Near-zero: Set `navigation_mode: "linear"` (default).
+     * Mild positive (+0.3 to +0.7): Set `navigation_mode: "free"`; sessions may be explored with some flexibility.
+     * Strong positive (> +0.7): Set `navigation_mode: "free"` for ALL sessions; sessions can be explored in any order.
+3.  **Progressive — No SOLO Level Skipping**: Sessions must advance through SOLO proficiency levels strictly one step at a time: beginner → intermediate → advanced → expert. You MUST NOT skip levels. Apply these rules without exception:
+    - If a learner's `cognitive_status` shows a skill as absent or unlearned, that skill MUST be targeted at `beginner` before any session targets it at `intermediate` or higher.
+    - A learner who has no prior knowledge of a domain requires at least one `beginner` session per major skill area before any session targets that skill at `intermediate`.
+    - A single session's `desired_outcome_when_completed` MUST NOT advance any skill by more than one SOLO level relative to the learner's current `cognitive_status` for that skill.
+    - Valid proficiency levels (in order): "beginner", "intermediate", "advanced", "expert".
+4.  **Quality over Quantity — Without Compressing SOLO Levels**: A focused path is better than a bloated one. The total number of sessions should generally be between 1 and 10. However, the session count MUST NEVER be achieved by skipping or compressing SOLO proficiency levels — Directive 3 takes priority over the session count target. Three correctly-paced beginner sessions are always preferable to one session that claims to cover beginner, intermediate, and advanced together.
+5.  **Mastery Thresholds**: Set `mastery_threshold` based on the session's highest required proficiency level:
+    - beginner -> 60 | intermediate -> 70 | advanced -> 80 | expert -> 90
+    If a session targets multiple proficiency levels, use the highest.
+6.  **Strict JSON Output**: Your *entire* output MUST be *only* the valid JSON specified in the `FINAL OUTPUT FORMAT` section. Do not include any other text, markdown tags, or explanations.
 
 ---
 **Task-Specific Directives**
@@ -61,13 +79,13 @@ You will be given one of the following tasks. Follow its rules precisely.
 **Task B: Reflection and Refinement (Refine Existing Path)**
 * **Goal**: *Modify* an `original_learning_path` based on qualitative `feedback`.
 * **Rule**: You MUST NOT change the content of any session where `"if_learned": true`.
-* **Action**: Review the feedback (Progression, Engagement, Personalization) and adjust the *unlearned* sessions' content, order, or structure to address the suggestions.
+* **Action**: Review the feedback (Progression, Engagement, Personalization) and adjust the *unlearned* sessions' content, order, or structure to address the suggestions. If `evaluator_feedback` is provided, treat it as the highest-priority directive and address all issues listed.
 
 **Task C: Re-schedule Learning Path (Update Existing Path)**
 * **Goal**: *Update* an `original_learning_path` using an `updated_learner_profile` and other constraints.
 * **Rule 1 (Preserve Learned Sessions)**: All sessions from the `original_learning_path` with `"if_learned": true` MUST be preserved *exactly as they are* (no content changes) and placed at the *beginning* of the new path.
 * **Rule 2 (Generate New Sessions)**: After the preserved learned sessions, generate *new* sessions based on the `updated_learner_profile` to close the *remaining* skill gap.
-* **Rule 3 (Session Count)**: The *total* number of sessions (learned + new) must match the `desired_session_count`. If `desired_session_count` is -1 or not provided, generate a reasonable number of new sessions (e.GET_STARTED, targeting a total path length of 1-10).
+* **Rule 3 (Session Count)**: The *total* number of sessions (learned + new) must match the `desired_session_count`. If `desired_session_count` is -1 or not provided, generate a reasonable number of new sessions (targeting a total path length of 1-10).
 * **Rule 4 (Handle Feedback)**: Incorporate any `other_feedback` when generating the new (unlearned) sessions.
 
 ---
@@ -91,6 +109,9 @@ Refine the unlearned sessions in the learning path based on the provided feedbac
 
 * **Original Learning Path**: {learning_path}
 * **Feedback and Suggestions**: {feedback}
+
+**Evaluator Directives** (from quality evaluation — address all issues; empty on first pass):
+{evaluator_feedback}
 """
 
 learning_path_scheduler_task_prompt_reschedule = """
