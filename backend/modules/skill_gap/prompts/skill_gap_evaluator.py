@@ -23,9 +23,12 @@ quality here. Focus entirely on the quality of the skill gap assessment.
 1. **Consistency with learner background**: Skill levels must be consistent with the learner's
    stated experience. Flag unjustified extremes (e.g., "expert" level with no evidence, "unlearned"
    for a learner with relevant experience).
+   - Treat transferable technical evidence as relevant (e.g., data science, analytics, software engineering,
+     quantitative programming). Foundational adjacent skills should usually not be marked "unlearned" without strong justification.
 2. **Coverage of retrieved content**: If retrieved course content is provided, all significant
    skills mentioned in that content should have a corresponding gap entry. Missing skills from
    the retrieved material are errors.
+   - For lecture-specific goals, verify per-skill calibration (no blanket "all unlearned" defaults).
 3. **Justified gap flags**: Each skill's `is_gap`, `current_level`, `required_level`, and `reason`
    must be logically coherent. A `reason` that doesn't reference the learner's background is a red flag.
 4. **Level calibration**: The gap between `current_level` and `required_level` must be realistic
@@ -33,6 +36,11 @@ quality here. Focus entirely on the quality of the skill gap assessment.
    without justification.
 5. **Completeness**: All required skills from the skill requirements list should have a corresponding
    gap assessment.
+6. **Anti-Collapse Guard**: Reject outputs when many skills are marked `unlearned` despite relevant
+   technical/quantitative background evidence. Require recalibration using conservative transferable inference
+   (`beginner` or `intermediate` where justified).
+7. **Reason quality**: Reject generic reasons (e.g., "no evidence", "unknown") when learner information
+   contains usable allowed evidence.
 
 **Decision Rules**:
 - Return `is_acceptable: true` when all gaps are well-justified, complete relative to requirements
@@ -40,6 +48,10 @@ quality here. Focus entirely on the quality of the skill gap assessment.
 - Return `is_acceptable: false` and provide specific, actionable `issues` and `feedback` otherwise.
 - Write `feedback` as direct instructions to the identifier agent for revision
   (e.g., "Revise current_level for X because...").
+- In rejection feedback, explicitly include:
+  1) affected skill names,
+  2) the evidence type causing rejection (education/work/project/transferable domain evidence),
+  3) the minimum corrected level expectation (typically `beginner` or `intermediate` when transfer evidence exists).
 - Be strict but fair. Minor wording differences are acceptable. Focus on factual errors and
   missing coverage.
 

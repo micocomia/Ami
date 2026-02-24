@@ -17,8 +17,8 @@ import pytest
 from langchain_core.documents import Document
 
 from modules.skill_gap.agents.goal_context_parser import GoalContextParser, GoalContext
+from modules.skill_gap.agents.learning_goal_refiner import refine_learning_goal_with_llm
 from modules.skill_gap.agents.skill_gap_evaluator import SkillGapEvaluator, SkillGapEvaluationResult
-from modules.skill_gap.tools.goal_refinement_tool import create_goal_refinement_tool
 
 
 # ---------------------------------------------------------------------------
@@ -186,19 +186,19 @@ class TestGoalContextParser:
 
 class TestRetrieveContextForGoal:
     def test_returns_empty_list_when_no_manager(self):
-        from modules.skill_gap.agents.skill_gap_identifier import _retrieve_context_for_goal
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
         result = _retrieve_context_for_goal({"course_code": "6.0001"}, None)
         assert result == []
 
     def test_returns_empty_list_when_no_vcm(self):
-        from modules.skill_gap.agents.skill_gap_identifier import _retrieve_context_for_goal
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
         mgr = MagicMock()
         mgr.verified_content_manager = None
         result = _retrieve_context_for_goal({"course_code": "6.0001"}, mgr)
         assert result == []
 
     def test_calls_retrieve_filtered_with_course_and_lecture(self):
-        from modules.skill_gap.agents.skill_gap_identifier import _retrieve_context_for_goal
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
 
         # Use a stub class so hasattr(type(vcm), "retrieve_filtered") returns True
         class _StubVCM:
@@ -227,7 +227,7 @@ class TestRetrieveContextForGoal:
         assert len(result) == 1
 
     def test_passes_page_number_to_retrieve_filtered(self):
-        from modules.skill_gap.agents.skill_gap_identifier import _retrieve_context_for_goal
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
 
         class _StubVCM:
             def retrieve_filtered(self, *args, **kwargs): ...
@@ -251,7 +251,7 @@ class TestRetrieveContextForGoal:
         assert call_kwargs["page_number"] == 5
 
     def test_falls_back_to_retrieve_when_no_retrieve_filtered(self):
-        from modules.skill_gap.agents.skill_gap_identifier import _retrieve_context_for_goal
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
         mgr = MagicMock()
         vcm = MagicMock(spec=["retrieve"])  # no retrieve_filtered
         vcm.retrieve.return_value = [_make_doc("content")]
@@ -358,47 +358,42 @@ class TestSkillGapEvaluator:
 
 
 # ===================================================================
-# TestGoalRefinementTool (unchanged)
+# TestLearningGoalRefiner helper
 # ===================================================================
 
-class TestGoalRefinementTool:
-    @patch("modules.skill_gap.tools.goal_refinement_tool.LearningGoalRefiner")
+class TestLearningGoalRefinerHelper:
+    @patch("modules.skill_gap.agents.learning_goal_refiner.LearningGoalRefiner")
     def test_returns_refined_goal(self, MockRefiner):
         mock_instance = MockRefiner.return_value
         mock_instance.refine_goal.return_value = {"refined_goal": "Learn Python for data analysis with Pandas"}
         llm = MagicMock()
 
-        tool = create_goal_refinement_tool(llm)
-        result = tool.invoke({"learning_goal": "learn python"})
+        result = refine_learning_goal_with_llm(llm, "learn python")
         assert result["refined_goal"] == "Learn Python for data analysis with Pandas"
-        assert result["was_refined"] is True
 
-    @patch("modules.skill_gap.tools.goal_refinement_tool.LearningGoalRefiner")
+    @patch("modules.skill_gap.agents.learning_goal_refiner.LearningGoalRefiner")
     def test_includes_was_refined_true(self, MockRefiner):
         mock_instance = MockRefiner.return_value
         mock_instance.refine_goal.return_value = {"refined_goal": "A different goal"}
         llm = MagicMock()
 
-        tool = create_goal_refinement_tool(llm)
-        result = tool.invoke({"learning_goal": "original goal"})
-        assert result["was_refined"] is True
+        result = refine_learning_goal_with_llm(llm, "original goal")
+        assert result["refined_goal"] == "A different goal"
 
-    @patch("modules.skill_gap.tools.goal_refinement_tool.LearningGoalRefiner")
+    @patch("modules.skill_gap.agents.learning_goal_refiner.LearningGoalRefiner")
     def test_was_refined_false_when_unchanged(self, MockRefiner):
         mock_instance = MockRefiner.return_value
         mock_instance.refine_goal.return_value = {"refined_goal": "learn python"}
         llm = MagicMock()
 
-        tool = create_goal_refinement_tool(llm)
-        result = tool.invoke({"learning_goal": "learn python"})
-        assert result["was_refined"] is False
+        result = refine_learning_goal_with_llm(llm, "learn python")
+        assert result["refined_goal"] == "learn python"
 
-    @patch("modules.skill_gap.tools.goal_refinement_tool.LearningGoalRefiner")
+    @patch("modules.skill_gap.agents.learning_goal_refiner.LearningGoalRefiner")
     def test_works_with_empty_learner_information(self, MockRefiner):
         mock_instance = MockRefiner.return_value
         mock_instance.refine_goal.return_value = {"refined_goal": "Learn Python for web dev"}
         llm = MagicMock()
 
-        tool = create_goal_refinement_tool(llm)
-        result = tool.invoke({"learning_goal": "learn python", "learner_information": ""})
+        result = refine_learning_goal_with_llm(llm, "learn python", "")
         assert "refined_goal" in result

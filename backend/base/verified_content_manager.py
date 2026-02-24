@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import stat
 from typing import List, Dict, Any, Optional, Union
 
 from omegaconf import DictConfig
@@ -98,14 +99,29 @@ class VerifiedContentManager:
         files: List[Dict[str, Any]] = []
         base_dir_abs = os.path.abspath(base_dir)
         for file_path in self._iter_supported_files(base_dir_abs):
-            stat = os.stat(file_path)
+            try:
+                file_stat = os.stat(file_path, follow_symlinks=False)
+            except OSError as e:
+                logger.warning(f"Skipping unreadable verified content file '{file_path}': {e}")
+                continue
+
+            if not stat.S_ISREG(file_stat.st_mode):
+                logger.warning(f"Skipping non-regular verified content file '{file_path}'")
+                continue
+
+            try:
+                file_hash = self._hash_file(file_path)
+            except OSError as e:
+                logger.warning(f"Skipping unreadable verified content file '{file_path}': {e}")
+                continue
+
             rel_path = os.path.relpath(file_path, base_dir_abs).replace(os.sep, "/")
             files.append(
                 {
                     "path": rel_path,
-                    "size": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
-                    "sha256": self._hash_file(file_path),
+                    "size": file_stat.st_size,
+                    "mtime_ns": file_stat.st_mtime_ns,
+                    "sha256": file_hash,
                 }
             )
 

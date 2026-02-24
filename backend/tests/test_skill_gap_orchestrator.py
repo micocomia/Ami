@@ -77,7 +77,7 @@ def _make_patches(*targets):
 
 
 # ── Helper to apply standard patches ────────────────────────────────────────
-_PATCH_BASE = "modules.skill_gap.agents.skill_gap_identifier"
+_PATCH_BASE = "modules.skill_gap.orchestrators.skill_gap_pipeline"
 
 
 class TestLoop1GoalClarification:
@@ -96,7 +96,7 @@ class TestLoop1GoalClarification:
     ):
         """Vague on attempt 0 → refiner called → goal changes → re-parse → not vague → breaks.
         Mapper called once; was_auto_refined=True."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
 
@@ -149,7 +149,7 @@ class TestLoop1GoalClarification:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """A clear goal should not trigger refinement — refiner never called."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -179,7 +179,7 @@ class TestLoop1GoalClarification:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """Always vague, goal always changes — refiner called MAX_GOAL_ITERATIONS-1 times."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         # Always vague across all parse calls
@@ -220,7 +220,7 @@ class TestLoop1GoalClarification:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """Vague but refiner returns same goal — breaks immediately; refiner called once."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_VAGUE
@@ -254,7 +254,7 @@ class TestLoop2SkillGapReflexion:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """Evaluator accepts immediately — identifier called once."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -285,7 +285,7 @@ class TestLoop2SkillGapReflexion:
     ):
         """Evaluator rejects iteration 0 with feedback, accepts iteration 1.
         Identifier called twice; second call receives evaluator_feedback."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -317,7 +317,7 @@ class TestLoop2SkillGapReflexion:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """Evaluator always rejects — loop exits after MAX_EVAL_ITERATIONS; identifier called that many times."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -351,7 +351,7 @@ class TestPostLoop:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """BiasAuditor runs unconditionally and result is in skill_gaps."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -382,7 +382,7 @@ class TestPostLoop:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """All is_gap=False → goal_assessment.all_mastered=True."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -412,7 +412,7 @@ class TestPostLoop:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """goal_assessment is always present in the response."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE
@@ -444,7 +444,7 @@ class TestPostLoop:
         MockMapper, MockEvaluator, MockBias, MockLLMFactory,
     ):
         """Loop 2 must never trigger goal refinement — LearningGoalRefiner not called in Loop 2."""
-        from modules.skill_gap.agents.skill_gap_identifier import identify_skill_gap_with_llm
+        from modules.skill_gap.orchestrators.skill_gap_pipeline import identify_skill_gap_with_llm
 
         MockLLMFactory.create.return_value = MagicMock()
         MockParser.return_value.parse.return_value = _GOAL_CONTEXT_NOT_VAGUE

@@ -41,17 +41,30 @@ Your role is to compare a learner's profile against a set of required skills (pr
      b) Motivation, personality, engagement style, curiosity, confidence, “likes to try”, “prefers practice”, etc.
      c) Generic intent statements without evidence (e.g., “wants to learn Python”, “interested in AI”)
    - If only disallowed evidence exists for a skill, set `current_level` = "unlearned".
-4. **Don't Assume "Unlearned" (Within Policy)**: If a skill isn't explicitly listed, you may still infer a higher level ONLY when allowed evidence strongly implies it (education/work/projects). Otherwise, output "unlearned".
-5. **Provide Justification**: `reason` must be concise (max 20 words) and MUST reference ONLY allowed evidence (education/work/project/self-claim). Do not mention learning preferences.
-6. **Assign Confidence**: `level_confidence` ("low", "medium", "high") reflects certainty based on allowed evidence strength:
+4. **Transferable Evidence Rule (Important)**:
+   - You MAY infer `beginner` or `intermediate` from transferable allowed evidence, even if the exact skill name is not explicitly listed.
+   - Examples of transferable allowed evidence:
+     - Data science / ML / analytics work implying Python coding fundamentals
+     - Software engineering work implying debugging, functions, control flow, and modular coding
+     - Quantitative programming coursework implying basic algorithmic reasoning
+   - Never inflate to `advanced`/`expert` on transfer alone; those require direct, strong evidence.
+5. **Don't Assume "Unlearned" (Within Policy)**: If a skill isn't explicitly listed, infer the most conservative plausible level from allowed evidence:
+   - use `unlearned` only when there is truly no relevant allowed evidence.
+   - use `beginner` when there is broad adjacent evidence but weak direct evidence.
+   - use `intermediate` when multiple allowed signals consistently imply practical use.
+6. **Anti-Collapse Check**:
+   - Before finalizing, if most skills are marked `unlearned` but learner_information shows relevant technical/quantitative experience, revise levels upward where transfer is justified.
+   - For goals tied to specific retrieved course content (e.g., a lecture), calibrate required-vs-current gaps skill-by-skill; do not default all skills to `unlearned`.
+7. **Provide Justification**: `reason` must be concise (max 20 words) and MUST reference ONLY allowed evidence (education/work/project/self-claim). Do not mention learning preferences.
+8. **Assign Confidence**: `level_confidence` ("low", "medium", "high") reflects certainty based on allowed evidence strength:
    - high: direct, repeated evidence (work + projects, or strong project evidence)
-   - medium: indirect but plausible evidence (related coursework or adjacent project)
+   - medium: indirect but plausible evidence (related coursework, adjacent project, transferable domain evidence)
    - low: weak self-claim or minimal evidence
-7. **Adhere to Levels**:
+9. **Adhere to Levels**:
    - `current_level` must be one of: "unlearned", "beginner", "intermediate", "advanced", "expert".
    - `required_level` will be provided in the input.
-8. **Identify the Gap**: `is_gap` is `true` if `current_level` is below `required_level`, and `false` otherwise.
-9. **Use SOLO Reasoning**: Proficiency levels map to the SOLO taxonomy — assess the *quality* of understanding based on allowed evidence only:
+10. **Identify the Gap**: `is_gap` is `true` if `current_level` is below `required_level`, and `false` otherwise.
+11. **Use SOLO Reasoning**: Proficiency levels map to the SOLO taxonomy — assess the *quality* of understanding based on allowed evidence only:
    - `unlearned` (Prestructural): No allowed evidence of relevant understanding.
    - `beginner` (Unistructural): Allowed evidence shows one aspect in isolation (e.g., small scripts, basic use).
    - `intermediate` (Multistructural): Allowed evidence shows multiple aspects, not integrated (e.g., several scripts/features).
