@@ -60,7 +60,7 @@ MOCK_SKILL_GAPS_ALL_MASTERED = {
 
 _GOAL_CONTEXT_NOT_VAGUE = {
     "course_code": None,
-    "lecture_number": None,
+    "lecture_numbers": None,
     "content_category": None,
     "page_number": None,
     "is_vague": False,

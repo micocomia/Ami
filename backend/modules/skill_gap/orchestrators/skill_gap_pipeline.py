@@ -67,7 +67,7 @@ def identify_skill_gap_with_llm(
         # Only retrieve content when context includes retrievable fields
         verified_content_flag = any(
             goal_context.get(k)
-            for k in ("course_code", "lecture_number", "content_category", "page_number")
+            for k in ("course_code", "lecture_numbers", "content_category", "page_number")
         )
 
         if verified_content_flag:

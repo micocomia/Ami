@@ -52,7 +52,7 @@ class TestGoalContextParser:
         """Goal with course code → is_vague=False, course_code extracted."""
         mock_invoke.return_value = {
             "course_code": "6.0001",
-            "lecture_number": 4,
+            "lecture_numbers": [4],
             "content_category": "Lectures",
             "page_number": None,
             "is_vague": False,
@@ -64,7 +64,7 @@ class TestGoalContextParser:
             "learner_information": "",
         })
         assert result["course_code"] == "6.0001"
-        assert result["lecture_number"] == 4
+        assert result["lecture_numbers"] == [4]
         assert result["content_category"] == "Lectures"
         assert result["is_vague"] is False
 
@@ -73,7 +73,7 @@ class TestGoalContextParser:
         """Goal referencing exercises → content_category='Exercises'."""
         mock_invoke.return_value = {
             "course_code": "DTI5902",
-            "lecture_number": 3,
+            "lecture_numbers": [3],
             "content_category": "Exercises",
             "page_number": None,
             "is_vague": False,
@@ -85,7 +85,7 @@ class TestGoalContextParser:
             "learner_information": "",
         })
         assert result["course_code"] == "DTI5902"
-        assert result["lecture_number"] == 3
+        assert result["lecture_numbers"] == [3]
         assert result["content_category"] == "Exercises"
         assert result["is_vague"] is False
 
@@ -94,7 +94,7 @@ class TestGoalContextParser:
         """Goal with page number → page_number extracted."""
         mock_invoke.return_value = {
             "course_code": "6.0001",
-            "lecture_number": 4,
+            "lecture_numbers": [4],
             "content_category": "Lectures",
             "page_number": 5,
             "is_vague": False,
@@ -113,7 +113,7 @@ class TestGoalContextParser:
         """Generic goal → is_vague=True, all fields null."""
         mock_invoke.return_value = {
             "course_code": None,
-            "lecture_number": None,
+            "lecture_numbers": None,
             "content_category": None,
             "page_number": None,
             "is_vague": True,
@@ -132,7 +132,7 @@ class TestGoalContextParser:
         """'learn Python' with tech background → is_vague=True."""
         mock_invoke.return_value = {
             "course_code": None,
-            "lecture_number": None,
+            "lecture_numbers": None,
             "content_category": None,
             "page_number": None,
             "is_vague": True,
@@ -150,7 +150,7 @@ class TestGoalContextParser:
         """'learn Python for data analysis' → is_vague=False."""
         mock_invoke.return_value = {
             "course_code": None,
-            "lecture_number": None,
+            "lecture_numbers": None,
             "content_category": None,
             "page_number": None,
             "is_vague": False,
@@ -168,7 +168,7 @@ class TestGoalContextParser:
         """Parser validates output through GoalContext schema."""
         mock_invoke.return_value = {
             "course_code": "6.0001",
-            "lecture_number": 2,
+            "lecture_numbers": [2],
             "content_category": "Lectures",
             "page_number": None,
             "is_vague": False,
@@ -177,7 +177,37 @@ class TestGoalContextParser:
         parser = GoalContextParser(llm)
         result = parser.parse({"learning_goal": "lecture 2 of 6.0001", "learner_information": ""})
         # All expected keys present from GoalContext schema
-        assert set(result.keys()) == {"course_code", "lecture_number", "content_category", "page_number", "is_vague"}
+        assert set(result.keys()) == {"course_code", "lecture_numbers", "content_category", "page_number", "is_vague"}
+
+    @patch("modules.skill_gap.agents.goal_context_parser.GoalContextParser.invoke")
+    def test_range_lecture_numbers_supported(self, mock_invoke):
+        """Parser accepts inclusive ranges represented as a list."""
+        mock_invoke.return_value = {
+            "course_code": "6.0001",
+            "lecture_numbers": [1, 2, 3],
+            "content_category": "Lectures",
+            "page_number": None,
+            "is_vague": False,
+        }
+        llm = MagicMock()
+        parser = GoalContextParser(llm)
+        result = parser.parse({"learning_goal": "lesson 1 to 3 of 6.0001", "learner_information": ""})
+        assert result["lecture_numbers"] == [1, 2, 3]
+
+    @patch("modules.skill_gap.agents.goal_context_parser.GoalContextParser.invoke")
+    def test_mixed_lecture_numbers_supported(self, mock_invoke):
+        """Parser accepts mixed list/range normalization output."""
+        mock_invoke.return_value = {
+            "course_code": "6.0001",
+            "lecture_numbers": [1, 2, 4, 5],
+            "content_category": "Lectures",
+            "page_number": None,
+            "is_vague": False,
+        }
+        llm = MagicMock()
+        parser = GoalContextParser(llm)
+        result = parser.parse({"learning_goal": "lectures 1-2 and 4,5 of 6.0001", "learner_information": ""})
+        assert result["lecture_numbers"] == [1, 2, 4, 5]
 
 
 # ===================================================================
@@ -212,7 +242,7 @@ class TestRetrieveContextForGoal:
 
         goal_context = {
             "course_code": "6.0001",
-            "lecture_number": 4,
+            "lecture_numbers": [4],
             "content_category": "Lectures",
             "page_number": None,
             "is_vague": False,
@@ -240,7 +270,7 @@ class TestRetrieveContextForGoal:
 
         goal_context = {
             "course_code": "6.0001",
-            "lecture_number": 4,
+            "lecture_numbers": [4],
             "content_category": "Lectures",
             "page_number": 5,
             "is_vague": False,
@@ -257,12 +287,168 @@ class TestRetrieveContextForGoal:
         vcm.retrieve.return_value = [_make_doc("content")]
         mgr.verified_content_manager = vcm
 
-        goal_context = {"course_code": "6.0001", "lecture_number": None,
+        goal_context = {"course_code": "6.0001", "lecture_numbers": None,
                         "content_category": None, "page_number": None, "is_vague": False}
         result = _retrieve_context_for_goal(goal_context, mgr)
 
         vcm.retrieve.assert_called_once()
         assert len(result) == 1
+
+    def test_broad_goal_strong_syllabus_no_lecture_fallback(self):
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
+
+        class _StubVCM:
+            def retrieve_filtered(self, *args, **kwargs): ...
+            def retrieve(self, *args, **kwargs): ...
+
+        mgr = MagicMock()
+        vcm = _StubVCM()
+        syllabus_docs = [
+            _make_doc("6.0001 course overview and key topics in computational thinking", content_category="Syllabus"),
+            _make_doc("6.0001 syllabus includes algorithms, recursion, and data abstractions", content_category="Syllabus"),
+            _make_doc("6.0001 pacing and topic map across major units", content_category="Syllabus"),
+        ]
+
+        def _rf(*args, **kwargs):
+            if kwargs.get("content_category") == "Syllabus":
+                return syllabus_docs
+            return []
+
+        vcm.retrieve_filtered = MagicMock(side_effect=_rf)
+        mgr.verified_content_manager = vcm
+        goal_context = {
+            "course_code": "6.0001",
+            "lecture_numbers": None,
+            "content_category": None,
+            "page_number": None,
+            "is_vague": False,
+        }
+
+        result = _retrieve_context_for_goal(goal_context, mgr)
+        assert len(result) == 3
+        assert all((d.metadata or {}).get("content_category") == "Syllabus" for d in result)
+        assert vcm.retrieve_filtered.call_count == 1
+        assert vcm.retrieve_filtered.call_args.kwargs["content_category"] == "Syllabus"
+
+    def test_broad_goal_weak_syllabus_falls_back_to_lecture_diverse(self):
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
+
+        class _StubVCM:
+            def retrieve_filtered(self, *args, **kwargs): ...
+            def retrieve(self, *args, **kwargs): ...
+
+        mgr = MagicMock()
+        vcm = _StubVCM()
+
+        syllabus_docs = [
+            _make_doc("for information about citing these materials, visit terms of use", content_category="Syllabus"),
+            _make_doc("6.0001 brief course outline", content_category="Syllabus"),
+        ]
+        lecture_docs = [
+            _make_doc(
+                f"6.0001 lecture {i} topic details and examples",
+                content_category="Lectures",
+                lecture_number=i,
+                file_name=f"Lec_{i}.pdf",
+            )
+            for i in range(1, 11)
+        ]
+
+        def _rf(*args, **kwargs):
+            if kwargs.get("content_category") == "Syllabus":
+                return syllabus_docs
+            if kwargs.get("content_category") == "Lectures":
+                return lecture_docs
+            return []
+
+        vcm.retrieve_filtered = MagicMock(side_effect=_rf)
+        mgr.verified_content_manager = vcm
+        goal_context = {
+            "course_code": "6.0001",
+            "lecture_numbers": None,
+            "content_category": None,
+            "page_number": None,
+            "is_vague": False,
+        }
+
+        result = _retrieve_context_for_goal(goal_context, mgr)
+        assert len(result) <= 8
+        categories = [(d.metadata or {}).get("content_category") for d in result]
+        assert "Lectures" in categories
+
+        lecture_nums = [
+            (d.metadata or {}).get("lecture_number")
+            for d in result
+            if (d.metadata or {}).get("content_category") == "Lectures"
+        ]
+        assert len(set(lecture_nums)) >= 4
+
+        # broad-goal flow should query syllabus first, then lectures on fallback
+        assert vcm.retrieve_filtered.call_count == 2
+        first = vcm.retrieve_filtered.call_args_list[0].kwargs
+        second = vcm.retrieve_filtered.call_args_list[1].kwargs
+        assert first["content_category"] == "Syllabus"
+        assert second["content_category"] == "Lectures"
+
+    def test_multi_lecture_numbers_calls_filtered_per_lecture(self):
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
+
+        class _StubVCM:
+            def retrieve_filtered(self, *args, **kwargs): ...
+            def retrieve(self, *args, **kwargs): ...
+
+        mgr = MagicMock()
+        vcm = _StubVCM()
+
+        def _rf(*args, **kwargs):
+            ln = kwargs.get("lecture_number")
+            return [
+                _make_doc(
+                    f"lecture {ln} content",
+                    content_category="Lectures",
+                    lecture_number=ln,
+                    file_name=f"Lec_{ln}.pdf",
+                )
+            ]
+
+        vcm.retrieve_filtered = MagicMock(side_effect=_rf)
+        mgr.verified_content_manager = vcm
+        goal_context = {
+            "course_code": "6.0001",
+            "lecture_numbers": [1, 2, 3],
+            "content_category": "Lectures",
+            "page_number": None,
+            "is_vague": False,
+        }
+
+        result = _retrieve_context_for_goal(goal_context, mgr)
+        assert len(result) == 3
+        assert vcm.retrieve_filtered.call_count == 3
+        called_lectures = [c.kwargs.get("lecture_number") for c in vcm.retrieve_filtered.call_args_list]
+        assert called_lectures == [1, 2, 3]
+
+    def test_multi_lecture_numbers_cap_at_20(self):
+        from modules.skill_gap.utils.retrieval import _retrieve_context_for_goal
+
+        class _StubVCM:
+            def retrieve_filtered(self, *args, **kwargs): ...
+            def retrieve(self, *args, **kwargs): ...
+
+        mgr = MagicMock()
+        vcm = _StubVCM()
+        vcm.retrieve_filtered = MagicMock(return_value=[])
+        mgr.verified_content_manager = vcm
+
+        goal_context = {
+            "course_code": "6.0001",
+            "lecture_numbers": list(range(1, 31)),
+            "content_category": "Lectures",
+            "page_number": None,
+            "is_vague": False,
+        }
+
+        _retrieve_context_for_goal(goal_context, mgr)
+        assert vcm.retrieve_filtered.call_count == 20
 
 
 # ===================================================================

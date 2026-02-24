@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Dict, Optional, TypeAlias
+from typing import Any, Dict, List, Optional, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -22,7 +22,7 @@ class GoalContext(BaseModel):
     """Structured output of the GoalContextParser."""
 
     course_code: Optional[str] = Field(default=None)
-    lecture_number: Optional[int] = Field(default=None)
+    lecture_numbers: Optional[List[int]] = Field(default=None)
     content_category: Optional[str] = Field(default=None)
     page_number: Optional[int] = Field(default=None)
     is_vague: bool = Field(default=False)
@@ -47,7 +47,7 @@ class GoalContextParser(BaseAgent):
             input_dict: Must contain 'learning_goal' and optionally 'learner_information'.
 
         Returns:
-            A GoalContext dict with course_code, lecture_number, content_category,
+            A GoalContext dict with course_code, lecture_numbers, content_category,
             page_number, and is_vague fields.
         """
         payload_dict = GoalContextPayload(**input_dict).model_dump()

@@ -1,7 +1,7 @@
 goal_context_output_format = """
 {
     "course_code": "6.0001",
-    "lecture_number": 4,
+    "lecture_numbers": [4],
     "content_category": "Lectures",
     "page_number": null,
     "is_vague": false
@@ -14,15 +14,25 @@ Your task is to extract structured metadata from a learner's goal and assess whe
 
 **Extraction Rules**:
 1. **`course_code`**: Extract if a course identifier is mentioned (e.g., "6.0001", "DTI5902", "11.437"). Return `null` if not present.
-2. **`lecture_number`**: Extract if any lecture/lesson/week/session/module/unit/chapter number is mentioned (e.g., "Lesson 4", "Week 4", "Lec 4", "Chapter 4" → `4`). Return `null` if not present.
-3. **`content_category`**: Map to one of: `"Exercises"` (practice problems, exercises, assignments), `"Syllabus"` (course overview, schedule, outline), `"References"` (supplementary materials, readings), `"Lectures"` (slides, notes, lecture content). Default to `"Lectures"` when a `lecture_number` is given. Return `null` if no content type is implied.
+2. **`lecture_numbers`**:
+   - Extract lecture/lesson/week/session/module/unit/chapter numbers as a list of positive integers.
+   - Inclusive ranges must be expanded:
+     - "lesson 1 to 3", "1-3", "1 through 3" => `[1, 2, 3]`
+   - Comma-separated mentions:
+     - "lectures 2, 4, 5" => `[2, 4, 5]`
+   - Single mention:
+     - "lecture 4" => `[4]`
+   - Normalize to sorted ascending unique values.
+   - Return `null` if no lecture reference exists.
+3. **`content_category`**: Map to one of: `"Exercises"` (practice problems, exercises, assignments), `"Syllabus"` (course overview, schedule, outline), `"References"` (supplementary materials, readings), `"Lectures"` (slides, notes, lecture content). Default to `"Lectures"` when `lecture_numbers` is present. Return `null` if no content type is implied.
 4. **`page_number`**: Extract only if a specific page number is explicitly mentioned (e.g., "page 5"). Return `null` if not present.
 5. Return `null` for any field that cannot be confidently extracted.
+6. If the inferred lecture span is very large, still return the full logical range; retrieval will apply any cap.
 
 **Vagueness Assessment** (`is_vague`):
 A goal is vague when it is too generic to determine a meaningful, specific learning direction **for this particular learner**.
 
-- Goals with a `course_code` or `lecture_number` are NEVER vague — they reference specific content.
+- Goals with a `course_code` or `lecture_numbers` are NEVER vague — they reference specific content.
 - Goals naming a specific domain or technology are NOT vague: "learn machine learning", "learn Python for data analysis", "learn web development with React" → `is_vague: false`.
 - Goals that are too broad to map to a focused learning path ARE vague, assessed relative to the learner's background:
   - "learn Python" + tech/engineering background → `is_vague: true` (which Python domain?)

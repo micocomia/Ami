@@ -43,6 +43,8 @@ Your role is to compare a learner's profile against a set of required skills (pr
    - If only disallowed evidence exists for a skill, set `current_level` = "unlearned".
 4. **Transferable Evidence Rule (Important)**:
    - You MAY infer `beginner` or `intermediate` from transferable allowed evidence, even if the exact skill name is not explicitly listed.
+   - Transfer is valid ONLY within closely related domains/skill families (e.g., Python scripting -> Python data analysis; SQL analytics -> relational querying).
+   - Do NOT transfer proficiency across unrelated domains (e.g., software/data science background -> French language proficiency).
    - Examples of transferable allowed evidence:
      - Data science / ML / analytics work implying Python coding fundamentals
      - Software engineering work implying debugging, functions, control flow, and modular coding
@@ -52,10 +54,13 @@ Your role is to compare a learner's profile against a set of required skills (pr
    - use `unlearned` only when there is truly no relevant allowed evidence.
    - use `beginner` when there is broad adjacent evidence but weak direct evidence.
    - use `intermediate` when multiple allowed signals consistently imply practical use.
+   - If there is no direct or same-domain-adjacent evidence, output `unlearned` (not `beginner`).
 6. **Anti-Collapse Check**:
    - Before finalizing, if most skills are marked `unlearned` but learner_information shows relevant technical/quantitative experience, revise levels upward where transfer is justified.
    - For goals tied to specific retrieved course content (e.g., a lecture), calibrate required-vs-current gaps skill-by-skill; do not default all skills to `unlearned`.
 7. **Provide Justification**: `reason` must be concise (max 20 words) and MUST reference ONLY allowed evidence (education/work/project/self-claim). Do not mention learning preferences.
+   - Never write speculative justification like "assume beginner" without evidence.
+   - If evidence is absent or unrelated, explicitly state no relevant evidence and use `unlearned`.
 8. **Assign Confidence**: `level_confidence` ("low", "medium", "high") reflects certainty based on allowed evidence strength:
    - high: direct, repeated evidence (work + projects, or strong project evidence)
    - medium: indirect but plausible evidence (related coursework, adjacent project, transferable domain evidence)
