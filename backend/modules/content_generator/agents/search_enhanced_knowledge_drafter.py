@@ -27,6 +27,7 @@ class KnowledgeDraftPayload(BaseModel):
     external_resources: str | None = ""
     visual_formatting_hints: str = ""
     processing_perception_hints: str = ""
+    goal_context: Optional[Mapping[str, Any]] = None
 
     @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_point")
     @classmethod
@@ -488,6 +489,7 @@ def draft_knowledge_point_with_llm(
     processing_perception_hints: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
     """Draft a single knowledge point using the agent, optionally enriching with a SearchRagManager."""
     drafter = SearchEnhancedKnowledgeDrafter(llm, search_rag_manager=search_rag_manager, use_search=use_search)
@@ -497,6 +499,7 @@ def draft_knowledge_point_with_llm(
         "learning_session": learning_session,
         "knowledge_points": knowledge_points,
         "knowledge_point": knowledge_point,
+        "goal_context": goal_context,
         "visual_formatting_hints": visual_formatting_hints,
         "processing_perception_hints": processing_perception_hints,
     }
@@ -516,6 +519,7 @@ def draft_knowledge_points_with_llm(
     processing_perception_hints: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
     """Draft multiple knowledge points in parallel or sequentially using the agent."""
     if isinstance(learning_session, str):
@@ -532,6 +536,7 @@ def draft_knowledge_points_with_llm(
             learning_session,
             knowledge_points,
             kp,
+            goal_context=goal_context,
             use_search=use_search,
             visual_formatting_hints=visual_formatting_hints,
             processing_perception_hints=processing_perception_hints,

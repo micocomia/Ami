@@ -199,6 +199,7 @@ def create_learning_content_with_llm(
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     quiz_mix_config: Optional[dict] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
     from .goal_oriented_knowledge_explorer import explore_knowledge_points_with_llm
     from .search_enhanced_knowledge_drafter import draft_knowledge_points_with_llm
@@ -229,6 +230,7 @@ def create_learning_content_with_llm(
             learning_path,
             learning_session,
             knowledge_points,
+            goal_context=goal_context,
             allow_parallel=allow_parallel,
             use_search=use_search,
             max_workers=max_workers,
