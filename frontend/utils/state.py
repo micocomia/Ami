@@ -192,6 +192,21 @@ def initialize_session_state():
             pass
         st.session_state["_state_loaded"] = True
 
+def clear_user_state():
+    """Clear all persisted user state from the current session.
+
+    Called on logout and before switching users so that no data leaks
+    between accounts. After this, initialize_session_state() will
+    re-initialize keys to their defaults and load_persistent_state()
+    will pull fresh data for the new user.
+    """
+    for k in PERSIST_KEYS:
+        st.session_state.pop(k, None)
+    # Clear ancillary keys not in PERSIST_KEYS
+    for k in ["_state_loaded", "_last_save_ts", "auth_token", "_navigated_lp_once"]:
+        st.session_state.pop(k, None)
+
+
 def get_new_goal_uid():
     return max(goal["id"] for goal in st.session_state.goals) + 1 if st.session_state.goals else 0
 

@@ -1,6 +1,6 @@
 import streamlit as st
 import config
-from utils.state import save_persistent_state, load_persistent_state
+from utils.state import save_persistent_state, load_persistent_state, clear_user_state
 import requests
 import re
 from pathlib import Path
@@ -19,6 +19,7 @@ def login():
             else:
                 status, data = auth_login(login_user, login_pass)
                 if status == 200:
+                    clear_user_state()
                     st.session_state["userId"] = data["username"]
                     st.session_state["auth_token"] = data.get("token", "")
                     load_persistent_state()
@@ -51,6 +52,7 @@ def login():
             else:
                 status, data = auth_register(reg_user, reg_pass)
                 if status == 200:
+                    clear_user_state()
                     st.session_state["logged_in"] = True
                     st.session_state["userId"] = data["username"]
                     st.session_state["auth_token"] = data.get("token", "")
@@ -68,21 +70,10 @@ def login():
 
 
 def logout():
-    # Be defensive: keys may not exist depending on navigation order / reruns
-    st.session_state["logged_in"] = False
-    st.session_state["userId"] = "default"
-    st.session_state["if_complete_onboarding"] = False
-    st.session_state["goals"] = []
-    st.session_state["_navigated_lp_once"] = False
-
-    # Optional keys that may exist in some flows
-    for k in [
-        "selected_goal_id",
-        "selected_model",
-        "agent_reasoning",
-        "agent_reasoning_context",
-        "agent_reasoning_raw_response",
-    ]:
+    clear_user_state()
+    # Pop UI-only keys not covered by PERSIST_KEYS
+    for k in ["selected_model", "agent_reasoning",
+              "agent_reasoning_context", "agent_reasoning_raw_response"]:
         st.session_state.pop(k, None)
 
 
