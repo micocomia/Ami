@@ -25,6 +25,10 @@ quality here. Focus entirely on the quality of the skill gap assessment.
    for a learner with relevant experience).
    - Treat transferable technical evidence as relevant (e.g., data science, analytics, software engineering,
      quantitative programming). Foundational adjacent skills should usually not be marked "unlearned" without strong justification.
+   - Enforce evidence boundaries for `current_level`:
+     - Allowed: education, professional/work evidence, projects/artifacts, explicit self-claims.
+     - Disallowed: learning preferences/FSLSM traits, motivation/personality/engagement style, generic intent statements.
+     - If level justification relies on disallowed evidence, reject.
 2. **Coverage of retrieved content**: If retrieved course content is provided, all significant
    skills mentioned in that content should have a corresponding gap entry. Missing skills from
    the retrieved material are errors.
@@ -41,6 +45,9 @@ quality here. Focus entirely on the quality of the skill gap assessment.
    (`beginner` or `intermediate` where justified).
 7. **Reason quality**: Reject generic reasons (e.g., "no evidence", "unknown") when learner information
    contains usable allowed evidence.
+8. **Preference Leakage Check**: The learner's preferences may inform pedagogy later, but must not
+   influence cognitive-level judgments here. Reject if `current_level` (or confidence) appears driven
+   by preference-style signals (e.g., "hands-on", "visual", "active", "likes practice").
 
 **Decision Rules**:
 - Return `is_acceptable: true` when all gaps are well-justified, complete relative to requirements
@@ -52,6 +59,8 @@ quality here. Focus entirely on the quality of the skill gap assessment.
   1) affected skill names,
   2) the evidence type causing rejection (education/work/project/transferable domain evidence),
   3) the minimum corrected level expectation (typically `beginner` or `intermediate` when transfer evidence exists).
+- If rejection is due to disallowed evidence, state that preference/motivation signals are invalid for
+  level inference and instruct recalibration using only allowed evidence.
 - Be strict but fair. Minor wording differences are acceptable. Focus on factual errors and
   missing coverage.
 
