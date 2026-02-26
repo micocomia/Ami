@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, List
 
 from base import BaseAgent
+from base.llm_factory import LLMFactory
 
 
 _SYSTEM_PROMPT = """
@@ -38,6 +39,30 @@ Return JSON:
 }}
 """.strip()
 
+_TTS_NORMALIZER_SYSTEM_PROMPT = """
+You normalize narrative text for English TTS only.
+
+Rules:
+- Output JSON only.
+- Preserve meaning and factual content exactly.
+- Rewrite non-English terms into clear English phonetic spellings for English TTS.
+- Keep text natural for spoken delivery.
+- For list items, keep each item on its own line and ensure each item is a complete short sentence.
+- Do not add commentary or metadata.
+""".strip()
+
+_TTS_NORMALIZER_TASK_PROMPT = """
+Normalize this text for English TTS while preserving meaning.
+
+Text:
+{content}
+
+Return JSON:
+{
+  "normalized_text": "string"
+}
+""".strip()
+
 
 class NarrativeResourceGenerator(BaseAgent):
     name: str = "NarrativeResourceGenerator"
@@ -66,6 +91,38 @@ class NarrativeResourceGenerator(BaseAgent):
                 }
             )
         return cleaned
+
+
+class NarrativeTTSNormalizer(BaseAgent):
+    name: str = "NarrativeTTSNormalizer"
+
+    def __init__(self, model: Any):
+        super().__init__(model=model, system_prompt=_TTS_NORMALIZER_SYSTEM_PROMPT, jsonalize_output=True)
+
+    def normalize(self, text: str) -> str:
+        raw = self.invoke({"content": text or ""}, task_prompt=_TTS_NORMALIZER_TASK_PROMPT)
+        normalized = raw.get("normalized_text", "") if isinstance(raw, dict) else ""
+        normalized = str(normalized or "").strip()
+        return normalized or (text or "")
+
+
+def _normalize_narrative_content_for_tts(llm, content: str) -> str:
+    if not content:
+        return ""
+    try:
+        mini_llm = LLMFactory.create(
+            model="gpt-4o-mini",
+            model_provider="openai",
+            temperature=0,
+        )
+        return NarrativeTTSNormalizer(mini_llm).normalize(content)
+    except Exception:
+        try:
+            if llm is not None:
+                return NarrativeTTSNormalizer(llm).normalize(content)
+        except Exception:
+            pass
+        return content
 
 
 def generate_narrative_resources_with_llm(
@@ -117,10 +174,15 @@ def generate_narrative_resources_with_llm(
             from .tts_generator import generate_tts_audio
             for n in narratives:
                 try:
-                    n["audio_url"] = generate_tts_audio(n.get("content", ""))
+                    normalized_content = _normalize_narrative_content_for_tts(
+                        llm,
+                        n.get("content", ""),
+                    )
+                    n["audio_url"] = generate_tts_audio(
+                        normalized_content,
+                    )
                 except Exception:
                     pass
         except Exception:
             pass
     return narratives
-
