@@ -66,6 +66,7 @@ def filter_media_resources_with_llm(
     resources: List[dict],
     session_title: str,
     knowledge_point_names: List[str],
+    lightweight_llm: Any = None,
 ) -> List[dict]:
     """Use MediaRelevanceEvaluator to filter candidate resources for session relevance.
     Strict mode: fail-closed with deterministic topicality gate."""
@@ -86,6 +87,16 @@ def filter_media_resources_with_llm(
         "key_topics": ", ".join(knowledge_point_names) if knowledge_point_names else session_title,
         "resources": resource_lines,
     }
+    if lightweight_llm is not None:
+        try:
+            evaluator = MediaRelevanceEvaluator(lightweight_llm)
+            result = evaluator.evaluate(payload)
+            judgments = result.get("relevance", [])
+            if len(judgments) == len(prefiltered):
+                kept = [r for r, keep in zip(prefiltered, judgments) if keep]
+                return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
+        except Exception:
+            pass
     try:
         # Use a lightweight model for this binary relevance filter to keep latency/cost low.
         lightweight_llm = LLMFactory.create(

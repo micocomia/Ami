@@ -272,10 +272,10 @@ curl -X POST "http://localhost:8000/schedule-learning-path" \
   }'
 ```
 
-#### Generate Tailored Content
+#### Generate Learning Content
 
 ```bash
-curl -X POST "http://localhost:8000/tailor-knowledge-content" \
+curl -X POST "http://localhost:8000/generate-learning-content" \
   -H "Content-Type: application/json" \
   -d '{
     "learner_profile": "{\"level\": \"beginner\"}",
@@ -283,9 +283,13 @@ curl -X POST "http://localhost:8000/tailor-knowledge-content" \
     "learning_session": "{\"current_topic\": \"HTML\"}",
     "use_search": true,
     "allow_parallel": true,
-    "with_quiz": true
+    "with_quiz": true,
+    "method_name": "ami"
   }'
 ```
+
+Returns a flat learning-content payload:
+`document`, `quizzes`, `sources_used`, `content_format`, `audio_url`, `audio_mode`, `inline_assets_count`, `inline_assets_placement_stats`.
 
 ## Configuration
 

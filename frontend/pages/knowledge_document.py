@@ -1,5 +1,4 @@
 import json
-import math
 import time
 import copy
 import re
@@ -7,8 +6,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
-from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
-from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
+from utils.request_api import generate_learning_content, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery
+from utils.format import inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
 from config import use_mock_data, use_search, backend_endpoint, backend_public_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
@@ -239,88 +238,23 @@ def render_content_preparation(goal):
             pass
         return learning_content
 
-    with st.spinner("Stage 1/4 - Exploring knowledge Points..."):
-        knowledge_points = explore_knowledge_points(
+    with st.spinner("Generating personalized learning content..."):
+        learning_content = generate_learning_content(
             goal["learner_profile"],
             goal["learning_path"],
             learning_session,
-            llm_type="gpt4o"
-        )
-    if knowledge_points is None:
-        st.error("Failed to explore knowledge points.")
-        return
-    else:
-        st.success("Stage 1/4 🔍 Knowledge points explored successfully.")
-        with st.expander("View Explored Knowledge Points", expanded=False):
-            for kp in knowledge_points:
-                st.write(f"- {kp['name']} (`{kp['type']}`)")
-    with st.spinner("Stage 2/4 - Drafting knowledge points..."):
-        knowledge_drafts = draft_knowledge_points(
-            goal["learner_profile"],
-            goal["learning_path"],
-            learning_session,
-            knowledge_points,
             use_search=use_search,
             allow_parallel=True,
+            with_quiz=True,
             goal_context=goal.get("goal_context"),
-            llm_type="gpt4o"
-        )
-    if knowledge_drafts is None:
-        st.error("Failed to draft knowledge points.")
-        return
-    sources_used = extract_sources_used(knowledge_drafts)
-    st.success("Stage 2/4 📝 Knowledge points drafted successfully.")
-    with st.spinner("Stage 3/4 - Integrating knowledge document..."):
-        integration_result = integrate_learning_document(
-            goal["learner_profile"],
-            goal["learning_path"],
-            learning_session,
-            knowledge_points,
-            knowledge_drafts,
             llm_type="gpt4o",
-            output_markdown=False
         )
-    if integration_result is None:
-        st.error("Failed to integrate knowledge document.")
+
+    if not learning_content:
+        st.error("Failed to generate learning content.")
         return
-    document_structure = integration_result["learning_document"]
-    content_format = integration_result.get("content_format", "standard")
-    audio_url = integration_result.get("audio_url")
-    audio_mode = integration_result.get("audio_mode")
-    if integration_result.get("document_is_markdown", False):
-        # Backend already rendered the markdown (audio-visual pipeline ran server-side)
-        learning_document = document_structure
-    else:
-        learning_document = prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
-    if learning_document is None:
-        st.error("Failed to integrate knowledge document.")
-        return
-    st.success("Stage 3/4 📚 Knowledge document integrated successfully.")
-    learning_content = {
-        "document": learning_document,
-        "sources_used": sources_used,
-        "content_format": content_format,
-        "audio_url": audio_url,
-        "audio_mode": audio_mode,
-    }
-    with st.spinner("Stage 4/4 - Generating document quizzes..."):
-        quiz_mix = get_quiz_mix(
-            user_id=st.session_state.get("userId", ""),
-            goal_id=st.session_state["selected_goal_id"],
-            session_index=selected_sid,
-        )
-        quizzes = generate_document_quizzes(
-            goal["learner_profile"],
-            learning_document,
-            single_choice_count=quiz_mix["single_choice_count"],
-            multiple_choice_count=quiz_mix["multiple_choice_count"],
-            true_false_count=quiz_mix["true_false_count"],
-            short_answer_count=quiz_mix["short_answer_count"],
-            open_ended_count=quiz_mix.get("open_ended_count", 0),
-            llm_type="gpt4o"
-        )
-    learning_content["quizzes"] = quizzes
-    st.success("Stage 4/4 🎯 Document quizzes generated successfully.")
+
+    learning_content.setdefault("sources_used", [])
     st.session_state["document_caches"][session_uid] = learning_content
     try:
         save_persistent_state()

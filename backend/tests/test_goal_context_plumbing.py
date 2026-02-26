@@ -66,10 +66,10 @@ def test_schedule_learning_path_agentic_accepts_goal_context():
         assert call_payload["goal_context"] == goal_context
 
 
-@patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-@patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-@patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
 def test_create_learning_content_forwards_goal_context(
     mock_explore,
     mock_draft,
@@ -101,10 +101,10 @@ def test_create_learning_content_forwards_goal_context(
     assert mock_draft.call_args.kwargs["goal_context"] == goal_context
 
 
-@patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-@patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-@patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
 def test_create_learning_content_works_without_goal_context(
     mock_explore,
     mock_draft,
@@ -238,7 +238,7 @@ def test_drafter_falls_back_when_filtered_retrieval_empty(mock_invoke):
     rag.invoke_hybrid.assert_called()
 
 
-def test_tailor_knowledge_content_endpoint_forwards_goal_context():
+def test_generate_learning_content_endpoint_forwards_goal_context():
     from main import app
 
     payload = {
@@ -248,74 +248,63 @@ def test_tailor_knowledge_content_endpoint_forwards_goal_context():
         "use_search": True,
         "allow_parallel": True,
         "with_quiz": False,
+        "method_name": "ami",
         "goal_context": {"course_code": "DTI5902", "lecture_numbers": [1, 2]},
     }
 
     with patch("main.get_llm", return_value=MagicMock()), \
-         patch("main.create_learning_content_with_llm") as mock_create:
+         patch("main.generate_learning_content_with_llm") as mock_create:
         mock_create.return_value = {"document": "ok"}
         client = TestClient(app)
-        response = client.post("/tailor-knowledge-content", json=payload)
+        response = client.post("/generate-learning-content", json=payload)
 
     assert response.status_code == 200
-    assert response.json() == {"tailored_content": {"document": "ok"}}
+    assert response.json() == {"document": "ok"}
     assert mock_create.call_args.kwargs["goal_context"] == payload["goal_context"]
 
 
-def _integration_payload(fslsm_input: float) -> dict:
-    return {
-        "learner_profile": str({
-            "learning_preferences": {
-                "fslsm_dimensions": {"fslsm_input": fslsm_input}
-            }
-        }),
+def test_generate_learning_content_rejects_non_ami_method():
+    from main import app
+
+    payload = {
+        "learner_profile": "{}",
         "learning_path": "{}",
-        "learning_session": str({"title": "Session A"}),
-        "knowledge_points": str([{"name": "Topic A", "type": "foundational"}]),
-        "knowledge_drafts": str([{"title": "Draft A", "content": "Body"}]),
-        "output_markdown": False,
+        "learning_session": "{}",
+        "method_name": "genmentor",
     }
+    client = TestClient(app)
+    response = client.post("/generate-learning-content", json=payload)
+    assert response.status_code == 400
 
 
-def test_integrate_learning_document_moderate_audio_uses_narration_mode():
+def test_removed_content_generation_endpoints_return_404():
     from main import app
 
-    payload = _integration_payload(0.3)
-    with patch("main.get_llm", return_value=MagicMock()), \
-         patch("main.integrate_learning_document_with_llm", return_value="## Document\n\nContent here."), \
-         patch("modules.content_generator.agents.media_resource_finder.find_media_resources", return_value=[]), \
-         patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm", return_value=[]), \
-         patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm") as mock_podcast, \
-         patch("modules.content_generator.agents.tts_generator.generate_tts_audio", return_value="/static/audio/moderate.mp3") as mock_tts:
-        client = TestClient(app)
-        response = client.post("/integrate-learning-document", json=payload)
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["content_format"] == "audio_enhanced"
-    assert body["audio_mode"] == "narration_optional"
-    assert body["audio_url"] == "/static/audio/moderate.mp3"
-    mock_podcast.assert_not_called()
-    mock_tts.assert_called_once_with("## Document\n\nContent here.")
+    client = TestClient(app)
+    for endpoint in (
+        "/explore-knowledge-points",
+        "/draft-knowledge-points",
+        "/integrate-learning-document",
+        "/generate-document-quizzes",
+        "/tailor-knowledge-content",
+    ):
+        assert client.post(endpoint, json={}).status_code == 404
 
 
-def test_integrate_learning_document_strong_audio_uses_host_expert_mode():
+def test_draft_knowledge_point_endpoint_still_available():
     from main import app
 
-    payload = _integration_payload(0.7)
+    payload = {
+        "learner_profile": "{}",
+        "learning_path": "{}",
+        "learning_session": "{}",
+        "knowledge_points": "[]",
+        "knowledge_point": "{}",
+        "use_search": False,
+    }
     with patch("main.get_llm", return_value=MagicMock()), \
-         patch("main.integrate_learning_document_with_llm", return_value="## Document\n\nContent here."), \
-         patch("modules.content_generator.agents.media_resource_finder.find_media_resources", return_value=[]), \
-         patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm", return_value=[]), \
-         patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm", return_value="## Podcast Document\n\nConverted.") as mock_podcast, \
-         patch("modules.content_generator.agents.tts_generator.generate_tts_audio", return_value="/static/audio/strong.mp3") as mock_tts:
+         patch("main.draft_knowledge_point_with_llm", return_value={"title": "Draft", "content": "Body"}):
         client = TestClient(app)
-        response = client.post("/integrate-learning-document", json=payload)
-
+        response = client.post("/draft-knowledge-point", json=payload)
     assert response.status_code == 200
-    body = response.json()
-    assert body["content_format"] == "audio_enhanced"
-    assert body["audio_mode"] == "host_expert_optional"
-    assert body["audio_url"] == "/static/audio/strong.mp3"
-    mock_podcast.assert_called_once()
-    mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")
+    assert response.json()["knowledge_draft"]["title"] == "Draft"

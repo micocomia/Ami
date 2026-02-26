@@ -76,66 +76,20 @@ def run_schedule_path(base_url: str, profile_body: dict) -> dict:
     )
 
 
-def run_explore_kps(base_url: str, profile_body: dict, path_body: dict) -> dict:
+def run_generate_learning_content(base_url: str, profile_body: dict, path_body: dict) -> dict:
     sessions = path_body.get("learning_path", [])
     first_session = sessions[0] if sessions else {}
     return timed_post(
-        httpx.Client(timeout=90.0),
-        f"{base_url}/explore-knowledge-points",
+        httpx.Client(timeout=240.0),
+        f"{base_url}/generate-learning-content",
         _base_payload({
             "learner_profile": repr(profile_body),
             "learning_path": repr(path_body),
             "learning_session": repr(first_session),
-        }),
-    )
-
-
-def run_draft_kps(base_url: str, profile_body: dict, path_body: dict, knowledge_points: list) -> dict:
-    sessions = path_body.get("learning_path", [])
-    first_session = sessions[0] if sessions else {}
-    return timed_post(
-        httpx.Client(timeout=180.0),
-        f"{base_url}/draft-knowledge-points",
-        _base_payload({
-            "learner_profile": repr(profile_body),
-            "learning_path": repr(path_body),
-            "learning_session": repr(first_session),
-            "knowledge_points": repr(knowledge_points),
             "use_search": True,
-            "allow_parallel": False,
-        }),
-    )
-
-
-def run_integrate_doc(base_url: str, profile_body: dict, path_body: dict, knowledge_points: list, knowledge_drafts: list) -> dict:
-    sessions = path_body.get("learning_path", [])
-    first_session = sessions[0] if sessions else {}
-    return timed_post(
-        httpx.Client(timeout=120.0),
-        f"{base_url}/integrate-learning-document",
-        _base_payload({
-            "learner_profile": repr(profile_body),
-            "learning_path": repr(path_body),
-            "learning_session": repr(first_session),
-            "knowledge_points": repr(knowledge_points),
-            "knowledge_drafts": repr(knowledge_drafts),
-            "output_markdown": False,
-        }),
-    )
-
-
-def run_generate_quizzes(base_url: str, profile_body: dict, learning_document: str) -> dict:
-    return timed_post(
-        httpx.Client(timeout=90.0),
-        f"{base_url}/generate-document-quizzes",
-        _base_payload({
-            "learner_profile": repr(profile_body),
-            "learning_document": learning_document,
-            "single_choice_count": 3,
-            "multiple_choice_count": 1,
-            "true_false_count": 1,
-            "short_answer_count": 1,
-            "open_ended_count": 0,
+            "allow_parallel": True,
+            "with_quiz": True,
+            "method_name": "ami",
         }),
     )
 
@@ -152,20 +106,20 @@ def run_chat(base_url: str, profile_body: dict) -> dict:
 
 
 def run_rag_draft_single_kp(base_url: str, profile_body: dict, path_body: dict, kp_name: str) -> dict:
-    """Call /draft-knowledge-points for one RAG eval KP using real pipeline state."""
+    """Call /draft-knowledge-point for one RAG eval KP using real pipeline state."""
     sessions = path_body.get("learning_path", [])
     first_session = sessions[0] if sessions else {}
     kp_list = [{"name": kp_name, "type": "foundational"}]
     return timed_post(
         httpx.Client(timeout=120.0),
-        f"{base_url}/draft-knowledge-points",
+        f"{base_url}/draft-knowledge-point",
         _base_payload({
             "learner_profile": repr(profile_body),
             "learning_path": repr(path_body),
             "learning_session": repr(first_session),
             "knowledge_points": repr(kp_list),
+            "knowledge_point": repr(kp_list[0]),
             "use_search": True,
-            "allow_parallel": False,
         }),
     )
 
@@ -226,8 +180,7 @@ def run_rag_draft_cases(
                 if r.get("error") or r.get("status_code", 200) >= 400:
                     drafts[key] = {"error": r.get("error") or f"http_{r.get('status_code')}"}
                 else:
-                    kd_list = (r.get("body") or {}).get("knowledge_drafts", [])
-                    drafts[key] = kd_list[0] if kd_list else {}
+                    drafts[key] = (r.get("body") or {}).get("knowledge_draft", {})
             except Exception as e:
                 print(f"    ERROR: {e}")
                 drafts[key] = {"error": str(e)}
@@ -242,7 +195,7 @@ def run_eval_rag_drafts(
     resume: bool = False,
 ) -> dict[str, dict]:
     """
-    Run pipeline-backed /draft-knowledge-points for every RAG test case KP on enhanced only.
+    Run pipeline-backed /draft-knowledge-point for every RAG test case KP on enhanced only.
     Saves results under rag_drafts in the checkpoint file.
 
     goal_id_to_scenario maps G1-G4 and META_60001 to a representative scenario so the
@@ -311,10 +264,7 @@ ENDPOINT_NAMES = [
     "identify_skill_gap",
     "create_learner_profile",
     "schedule_learning_path",
-    "explore_knowledge_points",
-    "draft_knowledge_points",
-    "integrate_learning_document",
-    "generate_document_quizzes",
+    "generate_learning_content",
     "chat_with_tutor",
 ]
 
@@ -431,10 +381,7 @@ def run_scenario_perf(base_url: str, scenario: dict, version_key: str) -> dict[s
     if r.get("error") or (r.get("status_code", 200) >= 400):
         timings["create_learner_profile"] = _skipped("identify_skill_gap")
         timings["schedule_learning_path"] = _skipped("create_learner_profile")
-        timings["explore_knowledge_points"] = _skipped("schedule_learning_path")
-        timings["draft_knowledge_points"] = _skipped("explore_knowledge_points")
-        timings["integrate_learning_document"] = _skipped("draft_knowledge_points")
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
+        timings["generate_learning_content"] = _skipped("schedule_learning_path")
         timings["chat_with_tutor"] = _skipped("create_learner_profile")
         return timings
     sg_body = r.get("body") or {}
@@ -457,10 +404,7 @@ def run_scenario_perf(base_url: str, scenario: dict, version_key: str) -> dict[s
     timings["create_learner_profile"] = r
     if r.get("error") or (r.get("status_code", 200) >= 400):
         timings["schedule_learning_path"] = _skipped("create_learner_profile")
-        timings["explore_knowledge_points"] = _skipped("schedule_learning_path")
-        timings["draft_knowledge_points"] = _skipped("explore_knowledge_points")
-        timings["integrate_learning_document"] = _skipped("draft_knowledge_points")
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
+        timings["generate_learning_content"] = _skipped("schedule_learning_path")
         timings["chat_with_tutor"] = _skipped("create_learner_profile")
         return timings
     profile_body = _unwrap_profile_body(r.get("body") or {})
@@ -469,52 +413,19 @@ def run_scenario_perf(base_url: str, scenario: dict, version_key: str) -> dict[s
     r = run_schedule_path(base_url, profile_body)
     timings["schedule_learning_path"] = r
     if r.get("error") or (r.get("status_code", 200) >= 400):
-        timings["explore_knowledge_points"] = _skipped("schedule_learning_path")
-        timings["draft_knowledge_points"] = _skipped("explore_knowledge_points")
-        timings["integrate_learning_document"] = _skipped("draft_knowledge_points")
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
+        timings["generate_learning_content"] = _skipped("schedule_learning_path")
         timings["chat_with_tutor"] = _skipped("schedule_learning_path")
         return timings
     path_body = r.get("body") or {}
 
-    # 5. Explore knowledge points
-    r = run_explore_kps(base_url, profile_body, path_body)
-    timings["explore_knowledge_points"] = r
+    # 5. Generate learning content (unified endpoint)
+    r = run_generate_learning_content(base_url, profile_body, path_body)
+    timings["generate_learning_content"] = r
     if r.get("error") or (r.get("status_code", 200) >= 400):
-        timings["draft_knowledge_points"] = _skipped("explore_knowledge_points")
-        timings["integrate_learning_document"] = _skipped("draft_knowledge_points")
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
-        timings["chat_with_tutor"] = _skipped("explore_knowledge_points")
-        return timings
-    knowledge_points = (r.get("body") or {}).get("knowledge_points", [])
-
-    # 6. Draft knowledge points
-    r = run_draft_kps(base_url, profile_body, path_body, knowledge_points)
-    timings["draft_knowledge_points"] = r
-    if r.get("error") or (r.get("status_code", 200) >= 400):
-        timings["integrate_learning_document"] = _skipped("draft_knowledge_points")
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
-        timings["chat_with_tutor"] = _skipped("draft_knowledge_points")
-        return timings
-    knowledge_drafts = (r.get("body") or {}).get("knowledge_drafts", [])
-
-    # 7. Integrate learning document
-    r = run_integrate_doc(base_url, profile_body, path_body, knowledge_points, knowledge_drafts)
-    timings["integrate_learning_document"] = r
-    if r.get("error") or (r.get("status_code", 200) >= 400):
-        timings["generate_document_quizzes"] = _skipped("integrate_learning_document")
-        timings["chat_with_tutor"] = _skipped("integrate_learning_document")
-        return timings
-    learning_document = str((r.get("body") or {}).get("learning_document", ""))
-
-    # 8. Generate document quizzes
-    r = run_generate_quizzes(base_url, profile_body, learning_document)
-    timings["generate_document_quizzes"] = r
-    if r.get("error") or (r.get("status_code", 200) >= 400):
-        timings["chat_with_tutor"] = _skipped("generate_document_quizzes")
+        timings["chat_with_tutor"] = _skipped("generate_learning_content")
         return timings
 
-    # 9. Chat
+    # 6. Chat
     r = run_chat(base_url, profile_body)
     timings["chat_with_tutor"] = r
 

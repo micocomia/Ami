@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 class BaseRequest(BaseModel):
     model_provider: Optional[str] = None
     model_name: Optional[str] = None
-    method_name: str = "genmentor"
+    method_name: str = "ami"
 
 
 class ChatWithAutorRequest(BaseRequest):
@@ -78,61 +78,7 @@ class LearningPathReschedulingRequest(BaseRequest):
     other_feedback: str = ""
 
 
-class TailoredContentGenerationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-
-
-class KnowledgePerspectiveExplorationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-
-
-class KnowledgePerspectiveDraftingRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    knowledge_perspective: str
-    use_search: bool = True
-
-
-class KnowledgeDocumentIntegrationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    drafts_of_perspectives: str
-
-
-class PointPerspectivesDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    use_search: bool
-    allow_parallel: bool
- 
-
-class KnowledgeQuizGenerationRequest(BaseModel):
-
-    learner_profile: str
-    learning_document: str
-    single_choice_count: int = 3
-    multiple_choice_count: int = 0
-    true_false_count: int = 0
-    short_answer_count: int = 0
-    open_ended_count: int = 0
-
-
-class TailoredContentGenerationRequest(BaseModel):
+class LearningContentGenerationRequest(BaseRequest):
 
     learner_profile: str
     learning_path: str
@@ -141,13 +87,6 @@ class TailoredContentGenerationRequest(BaseModel):
     allow_parallel: bool = True
     with_quiz: bool = True
     goal_context: Optional[Any] = None
-
-
-class KnowledgePointExplorationRequest(BaseModel):
-    
-    learner_profile: str
-    learning_path: str
-    learning_session: str
 
 
 class KnowledgePointDraftingRequest(BaseModel):
@@ -159,27 +98,6 @@ class KnowledgePointDraftingRequest(BaseModel):
     knowledge_point: str
     use_search: bool
     goal_context: Optional[Any] = None
-
-
-class KnowledgePointsDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: str
-    use_search: bool
-    allow_parallel: bool
-    goal_context: Optional[Any] = None
-
-
-class LearningDocumentIntegrationRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: str
-    knowledge_drafts: str
-    output_markdown: bool = False
 
 
 class LearningContentFeedbackRequest(BaseRequest):

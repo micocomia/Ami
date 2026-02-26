@@ -139,16 +139,7 @@ API_NAMES = {
     "schedule_path_agentic": "schedule-learning-path-agentic",
     "reschedule_path": "reschedule-learning-path",
     "adapt_path": "adapt-learning-path",
-    "explore_knowledge_perspectives": "explore-knowledge-perspectives",
-    "draft_knowledge_perspective": "draft-knowledge-perspective",
-    "draft_point_perspectives": "draft-point-perspectives",
-    "integrate_knowledge_document": "integrate-knowledge-document",
-    "tailor_learning_content": "tailor-learning-content",
-    "explore_knowledge_points": "explore-knowledge-points",
-    "draft_knowledge_point": "draft-knowledge-point",
-    "draft_knowledge_points": "draft-knowledge-points",
-    "integrate_learning_document": "integrate-learning-document",
-    "generate_document_quizzes": "generate-document-quizzes",
+    "generate_learning_content": "generate-learning-content",
     "simulate_path_feedback": "simulate-path-feedback",
     "refine_path": "refine-learning-path",
     "iterative_refine_path": "iterative-refine-path",
@@ -500,43 +491,13 @@ def reschedule_learning_path(learning_path, learner_profile, session_count, othe
     response = make_post_request(API_NAMES["reschedule_path"], data, "./assets/data_example/learning_path.json")
     return response.get("rescheduled_learning_path") if response else None
 
-# @st.cache_resource
-def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count=0, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_document": str(learning_document),
-        "single_choice_count": single_choice_count,
-        "multiple_choice_count": multiple_choice_count,
-        "true_false_count": true_false_count,
-        "short_answer_count": short_answer_count,
-        "open_ended_count": open_ended_count,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("generate-document-quizzes", data, "./assets/data_example/document_quiz.json")
-    return response.get("document_quiz") if response else None
-
-# @st.cache_resource
-def explore_knowledge_points(learner_profile, learning_path, learning_session, llm_type=None, method_name=None):
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-    }
-    response = make_post_request("explore-knowledge-points", data, "./assets/data_example/knowledge_points.json")
-    return response.get("knowledge_points") if response else None
-
-# @st.cache_resource
-def draft_knowledge_point(
+def generate_learning_content(
     learner_profile,
     learning_path,
     learning_session,
-    knowledge_points,
-    knowledge_point,
-    use_search,
+    use_search=True,
+    allow_parallel=True,
+    with_quiz=True,
     goal_context=None,
     llm_type=None,
     method_name=None,
@@ -548,73 +509,19 @@ def draft_knowledge_point(
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
         "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "knowledge_point": str(knowledge_point),
-        "use_search": use_search,
+        "use_search": bool(use_search),
+        "allow_parallel": bool(allow_parallel),
+        "with_quiz": bool(with_quiz),
         "goal_context": _coerce_jsonable(goal_context),
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
-    response = make_post_request("draft-knowledge-point", data, "./assets/data_example/knowledge_point.json")
-    return response.get("knowledge_draft") if response else None
-
-# @st.cache_resource
-def draft_knowledge_points(
-    learner_profile,
-    learning_path,
-    learning_session,
-    knowledge_points,
-    allow_parallel,
-    use_search,
-    goal_context=None,
-    llm_type=None,
-    method_name=None,
-):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "allow_parallel": allow_parallel,
-        "use_search": use_search,
-        "goal_context": _coerce_jsonable(goal_context),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("draft-knowledge-points", data, "./assets/data_example/knowledge_points.json")
-    return response.get("knowledge_drafts") if response else None
-
-# @st.cache_resource
-def integrate_learning_document(learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown=False, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "knowledge_drafts": str(knowledge_drafts),
-        "output_markdown": output_markdown,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("integrate-learning-document", data, "./assets/data_example/learning_document.json")
+    response = make_post_request(API_NAMES["generate_learning_content"], data, "./assets/data_example/learning_document.json")
     if not response:
         return None
-    # Return enriched dict including audio-visual metadata from Sprint 3 backend
-    return {
-        "learning_document": response.get("learning_document"),
-        "content_format": response.get("content_format", "standard"),
-        "audio_url": response.get("audio_url"),
-        "audio_mode": response.get("audio_mode"),
-        "inline_assets_count": response.get("inline_assets_count", 0),
-        "inline_assets_placement_stats": response.get("inline_assets_placement_stats", {}),
-        "document_is_markdown": response.get("document_is_markdown", False),
-    }
+    if isinstance(response, dict) and isinstance(response.get("learning_content"), dict):
+        return response["learning_content"]
+    return response if isinstance(response, dict) else None
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
     """Submit quiz answers for mastery evaluation."""
@@ -825,7 +732,7 @@ _LOCAL_APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
     "default_llm_type": "gpt4o",
-    "default_method_name": "genmentor",
+    "default_method_name": "ami",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
     "fslsm_thresholds": {

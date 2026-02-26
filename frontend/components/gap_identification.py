@@ -127,7 +127,7 @@ def has_any_gap(skill_gaps):
     return any(g.get("is_gap", False) for g in (skill_gaps or []))
 
 
-def render_identified_skill_gap(goal, method_name="genmentor"):
+def render_identified_skill_gap(goal, method_name="ami"):
     """
     Render skill gaps in a card-style with prev/next switching.
     """

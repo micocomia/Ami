@@ -22,16 +22,12 @@ logger.setLevel(logging.DEBUG)
 
 import ast
 import json
-import time
 import uvicorn
-import hydra
-from omegaconf import DictConfig, OmegaConf
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header
 from io import BytesIO
 import pdfplumber
 from base.llm_factory import LLMFactory
-from base.searcher_factory import SearchRunner
 from base.search_rag import SearchRagManager
 from fastapi.responses import JSONResponse
 from modules.skill_gap import *
@@ -791,7 +787,7 @@ APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
     "default_llm_type": "gpt4o",
-    "default_method_name": "genmentor",
+    "default_method_name": "ami",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
     "mastery_threshold_default": 70,
@@ -1208,28 +1204,13 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/explore-knowledge-points")
-async def explore_knowledge_points(request: KnowledgePointExplorationRequest):
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    if isinstance(learner_profile, str) and learner_profile.strip():
-        learner_profile = ast.literal_eval(learner_profile)
-    if isinstance(learning_path, str) and learning_path.strip():
-        learning_path = ast.literal_eval(learning_path)
-    if isinstance(learning_session, str) and learning_session.strip():
-        learning_session = ast.literal_eval(learning_session)
-    try:
-        knowledge_points = explore_knowledge_points_with_llm(llm, learner_profile, learning_path, learning_session)
-        return knowledge_points
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/draft-knowledge-point")
 async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
+    from modules.content_generator.utils import (
+        get_fslsm_dim,
+        get_fslsm_input,
+        processing_perception_hints,
+        visual_formatting_hints,
     )
     llm = get_llm()
     learner_profile = request.learner_profile
@@ -1239,11 +1220,11 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     knowledge_point = request.knowledge_point
     use_search = request.use_search
     goal_context = request.goal_context
-    fslsm_input = _get_fslsm_input(learner_profile)
-    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
-    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
-    visual_hints = _visual_formatting_hints(fslsm_input)
-    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
+    fslsm_input = get_fslsm_input(learner_profile)
+    fslsm_processing = get_fslsm_dim(learner_profile, "fslsm_processing")
+    fslsm_perception = get_fslsm_dim(learner_profile, "fslsm_perception")
+    visual_hints = visual_formatting_hints(fslsm_input)
+    proc_perc_hints = processing_perception_hints(fslsm_processing, fslsm_perception)
     try:
         knowledge_draft = draft_knowledge_point_with_llm(
             llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
@@ -1257,214 +1238,12 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/draft-knowledge-points")
-async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
-    )
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    use_search = request.use_search
-    allow_parallel = request.allow_parallel
-    goal_context = request.goal_context
-    fslsm_input = _get_fslsm_input(learner_profile)
-    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
-    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
-    visual_hints = _visual_formatting_hints(fslsm_input)
-    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
-    try:
-        knowledge_drafts = draft_knowledge_points_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points,
-            allow_parallel, use_search,
-            goal_context=goal_context,
-            visual_formatting_hints=visual_hints,
-            processing_perception_hints=proc_perc_hints,
-            search_rag_manager=search_rag_manager,
-        )
-        return {"knowledge_drafts": knowledge_drafts}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/generate-learning-content")
+async def generate_learning_content(request: LearningContentGenerationRequest):
+    if request.method_name != "ami":
+        raise HTTPException(status_code=400, detail="Unsupported method_name. Expected 'ami'.")
 
-@app.post("/integrate-learning-document")
-async def integrate_learning_document(request: LearningDocumentIntegrationRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _understanding_hints,
-        _FSLSM_STRONG, _FSLSM_MODERATE, _narrative_allowance,
-    )
-    from modules.content_generator.agents.learning_document_integrator import build_inline_assets_plan
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    knowledge_drafts = request.knowledge_drafts
-    output_markdown = request.output_markdown
-    fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
-    fslsm_input = _get_fslsm_input(learner_profile)
-    und_hints = _understanding_hints(fslsm_understanding)
-
-    # Audio-visual pipeline requires a rendered markdown string to operate on.
-    # When any adaptation applies, force output_markdown=True so the integrator
-    # returns a string rather than a raw document_structure dict.
-    needs_av = fslsm_input <= -_FSLSM_MODERATE or fslsm_input >= _FSLSM_MODERATE
-    effective_output_markdown = True if needs_av else output_markdown
-
-    # Normalise knowledge_points: the request field may arrive as a JSON string
-    if isinstance(knowledge_points, str):
-        try:
-            knowledge_points = ast.literal_eval(knowledge_points)
-        except Exception:
-            knowledge_points = []
-    if not isinstance(knowledge_points, list):
-        knowledge_points = []
-    if isinstance(knowledge_drafts, str):
-        try:
-            knowledge_drafts = ast.literal_eval(knowledge_drafts)
-        except Exception:
-            knowledge_drafts = []
-    if not isinstance(knowledge_drafts, list):
-        knowledge_drafts = []
-
-    # Find media resources for visual and verbal learners before integration
-    media_resources = []
-    narrative_resources = []
-    inline_assets_plan = None
-    inline_assets_stats = {"placed_assets": 0}
-    session_title = learning_session.get("title", "") if isinstance(learning_session, dict) else ""
-    max_videos, max_images, max_audio = 0, 0, 0
-    if fslsm_input <= -_FSLSM_MODERATE:
-        max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-        max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
-    elif fslsm_input >= _FSLSM_MODERATE:
-        max_audio = 2 if fslsm_input >= _FSLSM_STRONG else 1
-
-    if max_videos or max_images or max_audio:
-        from modules.content_generator.agents.media_resource_finder import find_media_resources
-        from modules.content_generator.agents.media_relevance_evaluator import filter_media_resources_with_llm
-        _search_runner = getattr(search_rag_manager, "search_runner", None)
-        if _search_runner is None:
-            try:
-                from config.loader import default_config
-                from base.searcher_factory import SearchRunner
-                _search_runner = SearchRunner.from_config(default_config)
-            except Exception:
-                pass
-        try:
-            media_resources = find_media_resources(
-                _search_runner,
-                knowledge_points,
-                max_videos=max_videos,
-                max_images=max_images,
-                max_audio=max_audio,
-                session_context=session_title,
-            )
-        except Exception:
-            media_resources = []
-        if media_resources:
-            kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
-            media_resources = filter_media_resources_with_llm(
-                llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
-            )
-
-    # Generate verbal narrative equivalents (short stories/poems), then plan inline placement.
-    narrative_allowance = _narrative_allowance(fslsm_input)
-    if narrative_allowance > 0:
-        try:
-            from modules.content_generator.agents.narrative_resource_generator import (
-                generate_narrative_resources_with_llm,
-            )
-            narrative_resources = generate_narrative_resources_with_llm(
-                llm,
-                knowledge_points,
-                knowledge_drafts,
-                session_title=session_title,
-                max_narratives=narrative_allowance,
-                include_tts=True,
-            )
-        except Exception:
-            narrative_resources = []
-
-    if media_resources or narrative_resources:
-        inline_assets_plan, inline_assets_stats = build_inline_assets_plan(
-            knowledge_points=knowledge_points,
-            knowledge_drafts=knowledge_drafts,
-            media_resources=media_resources,
-            narrative_resources=narrative_resources,
-            max_assets_per_subsection=2,
-        )
-
-    try:
-        learning_document = integrate_learning_document_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts,
-            effective_output_markdown,
-            understanding_hints=und_hints,
-            media_resources=media_resources if media_resources else None,
-            narrative_resources=narrative_resources if narrative_resources else None,
-            inline_assets_plan=inline_assets_plan,
-        )
-
-        # Determine content format and optional listen mode.
-        content_format = "standard"
-        audio_url = None
-        audio_mode = None
-
-        if fslsm_input <= -_FSLSM_MODERATE:
-            content_format = "visual_enhanced"
-
-        if fslsm_input >= _FSLSM_MODERATE:
-            content_format = "audio_enhanced"
-            from modules.content_generator.agents.tts_generator import generate_tts_audio
-            try:
-                tts_source_document = learning_document
-                if fslsm_input >= _FSLSM_STRONG:
-                    from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
-                    audio_mode = "host_expert_optional"
-                    tts_source_document = convert_to_podcast_with_llm(
-                        llm, learning_document, learner_profile, mode="full"
-                    )
-                else:
-                    audio_mode = "narration_optional"
-
-                audio_url = generate_tts_audio(tts_source_document)
-            except Exception:
-                audio_url = None
-
-        return {
-            "learning_document": learning_document,
-            "content_format": content_format,
-            "audio_url": audio_url,
-            "audio_mode": audio_mode,
-            "inline_assets_count": int((inline_assets_stats or {}).get("placed_assets", 0)),
-            "inline_assets_placement_stats": inline_assets_stats or {},
-            # Tells the frontend whether learning_document is already a rendered
-            # markdown string (True) or still a raw document_structure dict (False).
-            "document_is_markdown": needs_av,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate-document-quizzes")
-async def generate_document_quizzes(request: KnowledgeQuizGenerationRequest):
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_document = request.learning_document
-    single_choice_count = request.single_choice_count
-    multiple_choice_count = request.multiple_choice_count
-    true_false_count = request.true_false_count
-    short_answer_count = request.short_answer_count
-    open_ended_count = request.open_ended_count
-    try:
-        document_quiz = generate_document_quizzes_with_llm(llm, learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count)
-        return {"document_quiz": document_quiz}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/tailor-knowledge-content")
-async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
-    llm = get_llm()
+    llm = get_llm(request.model_provider, request.model_name)
     learning_path = request.learning_path
     learner_profile = request.learner_profile
     learning_session = request.learning_session
@@ -1472,14 +1251,22 @@ async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
     allow_parallel = request.allow_parallel
     with_quiz = request.with_quiz
     goal_context = request.goal_context
+
     try:
-        tailored_content = create_learning_content_with_llm(
-            llm, learner_profile, learning_path, learning_session,
-            allow_parallel=allow_parallel, with_quiz=with_quiz, use_search=use_search,
+        learning_content = generate_learning_content_with_llm(
+            llm,
+            learner_profile,
+            learning_path,
+            learning_session,
+            allow_parallel=allow_parallel,
+            with_quiz=with_quiz,
+            use_search=use_search,
             goal_context=goal_context,
             quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
+            method_name=request.method_name,
+            search_rag_manager=search_rag_manager,
         )
-        return {"tailored_content": tailored_content}
+        return learning_content
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

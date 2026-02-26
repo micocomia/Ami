@@ -640,14 +640,14 @@ class TestContentFormatRouting:
             search_rag_manager=mock_search_rag,
         )
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_strong_visual(self, mock_explore, mock_draft, mock_integrate,
                            mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         result = self._call(-0.9, mock_explore, mock_draft, mock_integrate,
@@ -655,14 +655,14 @@ class TestContentFormatRouting:
         assert result["content_format"] == "visual_enhanced"
         assert "audio_url" not in result
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_moderate_visual(self, mock_explore, mock_draft, mock_integrate,
                              mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         result = self._call(-0.5, mock_explore, mock_draft, mock_integrate,
@@ -670,14 +670,14 @@ class TestContentFormatRouting:
         assert result["content_format"] == "visual_enhanced"
         assert "audio_url" not in result
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_standard(self, mock_explore, mock_draft, mock_integrate,
                       mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         result = self._call(0.0, mock_explore, mock_draft, mock_integrate,
@@ -687,14 +687,14 @@ class TestContentFormatRouting:
         mock_podcast.assert_not_called()
         mock_tts.assert_not_called()
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_moderate_audio(self, mock_explore, mock_draft, mock_integrate,
                             mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         mock_tts.return_value = "/static/audio/host_expert.mp3"
@@ -706,14 +706,14 @@ class TestContentFormatRouting:
         mock_podcast.assert_not_called()
         mock_tts.assert_called_once_with("## Document\n\nContent here.")
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_strong_audio(self, mock_explore, mock_draft, mock_integrate,
                           mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         mock_tts.return_value = "/static/audio/abc123.mp3"
@@ -726,14 +726,14 @@ class TestContentFormatRouting:
         mock_podcast.assert_called_once()
         mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_audio_boundary_moderate_threshold(self, mock_explore, mock_draft, mock_integrate,
                                                mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         mock_tts.return_value = "/static/audio/moderate.mp3"
@@ -744,14 +744,14 @@ class TestContentFormatRouting:
         mock_podcast.assert_not_called()
         mock_tts.assert_called_once_with("## Document\n\nContent here.")
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_audio_boundary_strong_threshold(self, mock_explore, mock_draft, mock_integrate,
                                              mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         mock_tts.return_value = "/static/audio/strong.mp3"
@@ -762,14 +762,14 @@ class TestContentFormatRouting:
         mock_podcast.assert_called_once()
         mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")
 
-    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
-    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
-    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
-    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
-    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
-    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
-    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
-    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
     def test_tts_failure_no_crash(self, mock_explore, mock_draft, mock_integrate,
                                   mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
         mock_tts.side_effect = RuntimeError("TTS service unavailable")
