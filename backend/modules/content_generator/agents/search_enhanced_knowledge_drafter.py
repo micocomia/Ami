@@ -167,8 +167,10 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
 
     def _goal_retrieval_filters(self, value: Any) -> dict[str, Any]:
         ctx = self._as_mapping(value)
-        course_code = str(ctx.get("course_code", "")).strip() or None
-        content_category = str(ctx.get("content_category", "")).strip() or None
+        # Use `or ""` before str() so that Python None is not converted to the
+        # string "None", which would be truthy and incorrectly activate RAG.
+        course_code = str(ctx.get("course_code") or "").strip() or None
+        content_category = str(ctx.get("content_category") or "").strip() or None
         page_number = ctx.get("page_number")
         if not isinstance(page_number, int) or page_number <= 0:
             page_number = None
