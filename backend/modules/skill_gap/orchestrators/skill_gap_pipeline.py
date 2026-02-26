@@ -134,8 +134,11 @@ def identify_skill_gap_with_llm(
                 if evaluation.get("is_acceptable", False):
                     break  # result accepted
                 evaluator_feedback = evaluation.get("feedback", "")
+                issues = evaluation.get("issues", [])
+                if issues:
+                    logger.info("SkillGapEvaluator issues: %s", " | ".join(str(i) for i in issues))
                 if evaluator_feedback:
-                    logger.info(f"SkillGapEvaluator rejected result: {evaluator_feedback[:100]}")
+                    logger.info("SkillGapEvaluator rejected result: %s", evaluator_feedback)
             except Exception as e:
                 logger.warning(f"SkillGapEvaluator failed: {e}")
                 break

@@ -43,15 +43,24 @@ quality here. Focus entirely on the quality of the skill gap assessment.
 6. **Anti-Collapse Guard**: Reject outputs when many skills are marked `unlearned` despite relevant
    technical/quantitative background evidence. Require recalibration using conservative transferable inference
    (`beginner` or `intermediate` where justified).
+   - Apply this guard ONLY when allowed evidence exists (education/work/projects/self-claims).
+   - Do NOT trigger anti-collapse from persona/preference-only input.
 7. **Reason quality**: Reject generic reasons (e.g., "no evidence", "unknown") when learner information
    contains usable allowed evidence.
 8. **Preference Leakage Check**: The learner's preferences may inform pedagogy later, but must not
    influence cognitive-level judgments here. Reject if `current_level` (or confidence) appears driven
    by preference-style signals (e.g., "hands-on", "visual", "active", "likes practice").
+9. **No-Allowed-Evidence Acceptance Rule (Explicit)**:
+   - If learner information contains no allowed evidence for skill inference and only disallowed persona/
+     preference/motivation-style signals, then `current_level = "unlearned"` is valid and should NOT be rejected
+     for being too low.
+   - In this case, do not request `beginner`/`intermediate` recalibration unless concrete allowed evidence is cited.
 
 **Decision Rules**:
 - Return `is_acceptable: true` when all gaps are well-justified, complete relative to requirements
   and retrieved content, and consistent with the learner's background.
+- If the learner profile is persona/preference-only with no allowed evidence, accept conservative
+  `unlearned` levels when reasons correctly state lack of allowed evidence.
 - Return `is_acceptable: false` and provide specific, actionable `issues` and `feedback` otherwise.
 - Write `feedback` as direct instructions to the identifier agent for revision
   (e.g., "Revise current_level for X because...").
@@ -61,6 +70,8 @@ quality here. Focus entirely on the quality of the skill gap assessment.
   3) the minimum corrected level expectation (typically `beginner` or `intermediate` when transfer evidence exists).
 - If rejection is due to disallowed evidence, state that preference/motivation signals are invalid for
   level inference and instruct recalibration using only allowed evidence.
+- Never request upward level calibration (`beginner`/`intermediate`) without explicitly citing allowed
+  evidence that supports transfer.
 - Be strict but fair. Minor wording differences are acceptable. Focus on factual errors and
   missing coverage.
 
