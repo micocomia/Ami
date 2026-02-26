@@ -78,11 +78,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 from fastapi.staticfiles import StaticFiles
-import os
-os.makedirs("data/audio", exist_ok=True)
-app.mount("/static/audio", StaticFiles(directory="data/audio"), name="audio")
-os.makedirs("data/diagrams", exist_ok=True)
-app.mount("/static/diagrams", StaticFiles(directory="data/diagrams"), name="diagrams")
+_BACKEND_ROOT = Path(__file__).resolve().parent
+_AUDIO_DIR = _BACKEND_ROOT / "data" / "audio"
+_DIAGRAMS_DIR = _BACKEND_ROOT / "data" / "diagrams"
+_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/audio", StaticFiles(directory=str(_AUDIO_DIR)), name="audio")
+_DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime

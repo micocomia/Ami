@@ -3,6 +3,7 @@ import config
 from utils.state import save_persistent_state, load_persistent_state, clear_user_state
 import requests
 import re
+from urllib.parse import urlparse
 from pathlib import Path
 from utils.request_api import get_available_models, auth_register, auth_login
 
@@ -82,6 +83,11 @@ def render_topbar():
     # Ensure expected session keys exist (prevents KeyError on first load / direct page nav)
     st.session_state.setdefault("logged_in", False)
     st.session_state.setdefault("userId", "default")
+    st.session_state.setdefault("backend_endpoint", getattr(config, "backend_endpoint", "http://127.0.0.1:8000/"))
+    st.session_state.setdefault(
+        "backend_public_endpoint",
+        getattr(config, "backend_public_endpoint", st.session_state["backend_endpoint"]),
+    )
     st.session_state.setdefault("if_complete_onboarding", False)
     st.session_state.setdefault("goals", [])
     st.session_state.setdefault("_navigated_lp_once", False)
@@ -92,8 +98,8 @@ def render_topbar():
     if not st.session_state["checked_backend"]:
         try:
             # try a fast GET to backend root
-            backend_endpoint = st.session_state.get("backend_endpoint")
-            models = get_available_models(backend_endpoint)
+            internal_backend_endpoint = st.session_state.get("backend_endpoint")
+            models = get_available_models(internal_backend_endpoint)
             model_id_list = [f"{m['model_provider']}/{m['model_name']}" for m in models]
             st.session_state["available_models"] = model_id_list
             backend_ok = True
@@ -125,15 +131,31 @@ def render_topbar():
 
 @st.dialog("Settings")
 def settings():
-    """Settings dialog to edit backend endpoint and LLM API key stored in frontend/config.py
+    """Settings dialog to edit runtime backend endpoints."""
+    def _normalize_endpoint(value: str) -> str:
+        value = (value or "").strip()
+        if value and not value.endswith("/"):
+            value += "/"
+        return value
 
-    This writes updates back to the `frontend/config.py` file and triggers a rerun.
-    """
-    # current backend endpoint
+    def _looks_like_url(value: str) -> bool:
+        parsed = urlparse(value)
+        return bool(parsed.scheme in {"http", "https"} and parsed.netloc)
+
+    # current backend endpoint values
     is_valid_backend = False
     if_check_api = False
-    cur_backend = getattr(config, "backend_endpoint", "http://127.0.0.1:8000/")
-    new_backend = st.text_input("Backend endpoint (include protocol and port)", value=cur_backend)
+    did_check_api = False
+    cur_backend = st.session_state.get("backend_endpoint", getattr(config, "backend_endpoint", "http://127.0.0.1:8000/"))
+    cur_public_backend = st.session_state.get(
+        "backend_public_endpoint",
+        getattr(config, "backend_public_endpoint", cur_backend),
+    )
+    new_backend = st.text_input("Backend endpoint (internal, include protocol and port)", value=cur_backend)
+    new_public_backend = st.text_input(
+        "Public backend URL (for browser media/static files)",
+        value=cur_public_backend,
+    )
 
     st.markdown("---")
 
@@ -141,11 +163,11 @@ def settings():
     with col3:
         if st.button("Check & Save", type="primary", use_container_width=True):
             if_check_api = True
-            # normalize backend
-            if not new_backend.endswith("/"):
-                new_backend = new_backend + "/"
+            new_backend = _normalize_endpoint(new_backend)
+            new_public_backend = _normalize_endpoint(new_public_backend)
 
     if if_check_api:
+        did_check_api = True
         try:
             models = get_available_models(new_backend)
             model_id_list = [f"{m['model_provider']}/{m['model_name']}" for m in models]
@@ -159,7 +181,10 @@ def settings():
 
     if is_valid_backend:
         st.session_state["backend_endpoint"] = new_backend
+        st.session_state["backend_public_endpoint"] = new_public_backend or new_backend
         st.session_state["available_models"] = model_id_list
+        if new_public_backend and not _looks_like_url(new_public_backend):
+            st.warning("Public backend URL format looks invalid; saved anyway. Audio/static links may fail in browser.")
         try:
             save_persistent_state()
             st.success("Settings saved. Restarting app...")
@@ -167,7 +192,8 @@ def settings():
         except Exception as e:
             st.error(f"Failed to save settings: {e}")
 
-    if not is_valid_backend:
+    if did_check_api and not is_valid_backend:
         st.warning("Backend endpoint not reachable or invalid.")
         st.info("Ensure the Ami backend API is running and the endpoint is correct, including protocol and port (e.g., http://127.0.0.1:8000/).")
+        st.info("Set Public backend URL to a browser-reachable host (e.g., http://localhost:8000/) when internal endpoint uses host.docker.internal.")
         st.info("Please refer to the [Ami Backend Setup Instructions] for more details on how to set up and run the backend service.")

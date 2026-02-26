@@ -1,8 +1,27 @@
 import json
 import httpx
 import streamlit as st
+from typing import Optional
 from config import backend_endpoint, use_mock_data, use_search
 from datetime import datetime, timezone
+
+
+def _get_backend_endpoint() -> str:
+    """Resolve backend endpoint from live session state, falling back to config."""
+    endpoint = st.session_state.get("backend_endpoint", backend_endpoint)
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        endpoint = backend_endpoint
+    endpoint = endpoint.strip()
+    if not endpoint.endswith("/"):
+        endpoint += "/"
+    return endpoint
+
+
+def _normalize_endpoint(endpoint: Optional[str]) -> str:
+    value = (endpoint or "").strip()
+    if not value:
+        return _get_backend_endpoint()
+    return value if value.endswith("/") else f"{value}/"
 
 
 def _debug_enabled() -> bool:
@@ -160,7 +179,7 @@ def make_post_request(api_name, data, mock_data_path=None, timeout=500):
     if use_mock_data and mock_data_path:
         return json.load(open(mock_data_path))
 
-    backend_url = f"{backend_endpoint}{api_name}"
+    backend_url = f"{_get_backend_endpoint()}{api_name}"
 
     try:
         response = httpx.post(backend_url, json=data, timeout=timeout)
@@ -197,7 +216,7 @@ def make_post_request(api_name, data, mock_data_path=None, timeout=500):
 
 def extract_pdf_text(file):
     """Extract text from a PDF file using the backend API."""
-    backend_url = f"{backend_endpoint}extract-pdf-text"
+    backend_url = f"{_get_backend_endpoint()}extract-pdf-text"
     try:
         files = {"file": (file.name, file.getvalue(), "application/pdf")}
         response = httpx.post(backend_url, files=files, timeout=60)
@@ -211,7 +230,7 @@ def extract_pdf_text(file):
         return ""
 
 def get_available_models(backend_endpoint):
-    backend_url = f"{backend_endpoint}list-llm-models"
+    backend_url = f"{_normalize_endpoint(backend_endpoint)}list-llm-models"
     try:
         response = httpx.get(backend_url, timeout=30)
         if response.status_code == 200:
@@ -611,7 +630,7 @@ def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
 
 def get_session_mastery_status(user_id, goal_id):
     """Get mastery status for all sessions in a goal."""
-    url = f"{backend_endpoint}session-mastery-status/{user_id}?goal_id={goal_id}"
+    url = f"{_get_backend_endpoint()}session-mastery-status/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -623,7 +642,7 @@ def get_session_mastery_status(user_id, goal_id):
 
 def get_behavioral_metrics(user_id, goal_id=None):
     """Fetch computed behavioral metrics from the backend."""
-    url = f"{backend_endpoint}behavioral-metrics/{user_id}"
+    url = f"{_get_backend_endpoint()}behavioral-metrics/{user_id}"
     if goal_id is not None:
         url += f"?goal_id={goal_id}"
     try:
@@ -642,7 +661,7 @@ def get_quiz_mix(user_id, goal_id, session_index):
     true_false_count, short_answer_count, open_ended_count.
     Falls back to a standard beginner mix if the endpoint is unavailable.
     """
-    url = f"{backend_endpoint}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
+    url = f"{_get_backend_endpoint()}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -717,7 +736,7 @@ def auth_register(username, password):
     if use_mock_data:
         return 200, {"token": "mock-token", "username": username}
     data = {"username": username, "password": password}
-    backend_url = f"{backend_endpoint}{API_NAMES['auth_register']}"
+    backend_url = f"{_get_backend_endpoint()}{API_NAMES['auth_register']}"
     try:
         response = httpx.post(backend_url, json=data, timeout=30)
         return response.status_code, response.json()
@@ -730,7 +749,7 @@ def auth_login(username, password):
     if use_mock_data:
         return 200, {"token": "mock-token", "username": username}
     data = {"username": username, "password": password}
-    backend_url = f"{backend_endpoint}{API_NAMES['auth_login']}"
+    backend_url = f"{_get_backend_endpoint()}{API_NAMES['auth_login']}"
     try:
         response = httpx.post(backend_url, json=data, timeout=30)
         return response.status_code, response.json()
@@ -742,7 +761,7 @@ def auth_delete_user(token):
     """Delete the authenticated user's account via DELETE /auth/user."""
     if use_mock_data:
         return 200, {"ok": True}
-    url = f"{backend_endpoint}auth/user"
+    url = f"{_get_backend_endpoint()}auth/user"
     try:
         headers = {"Authorization": f"Bearer {token}"}
         resp = httpx.delete(url, headers=headers, timeout=30)
@@ -753,7 +772,7 @@ def auth_delete_user(token):
 
 def sync_profile(user_id, goal_id):
     """Sync a goal's profile with shared fields from all other goals."""
-    backend_url = f"{backend_endpoint}sync-profile/{user_id}/{goal_id}"
+    backend_url = f"{_get_backend_endpoint()}sync-profile/{user_id}/{goal_id}"
     try:
         response = httpx.post(backend_url, timeout=30)
         if response.status_code == 200:
@@ -765,7 +784,7 @@ def sync_profile(user_id, goal_id):
 
 def get_learner_profile(user_id, goal_id):
     """Retrieve an existing learner profile from the backend store. Returns None if not found."""
-    url = f"{backend_endpoint}profile/{user_id}?goal_id={goal_id}"
+    url = f"{_get_backend_endpoint()}profile/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -777,7 +796,7 @@ def get_learner_profile(user_id, goal_id):
 
 def save_learner_profile(user_id, goal_id, learner_profile):
     """Persist a learner profile to the backend store without triggering an LLM call."""
-    backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"
+    backend_url = f"{_get_backend_endpoint()}profile/{user_id}/{goal_id}"
     try:
         response = httpx.put(backend_url, json={"learner_profile": learner_profile}, timeout=30)
         return response.status_code == 200
@@ -790,7 +809,7 @@ def get_personas():
     from utils.personas import PERSONAS as LOCAL_PERSONAS
     if use_mock_data:
         return LOCAL_PERSONAS
-    url = f"{backend_endpoint}personas"
+    url = f"{_get_backend_endpoint()}personas"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -852,7 +871,7 @@ def get_app_config():
     if use_mock_data:
         _cached_app_config = _LOCAL_APP_CONFIG
         return _cached_app_config
-    url = f"{backend_endpoint}config"
+    url = f"{_get_backend_endpoint()}config"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:

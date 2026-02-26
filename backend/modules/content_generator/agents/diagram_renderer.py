@@ -5,7 +5,8 @@ import re
 import uuid
 from pathlib import Path
 
-DIAGRAM_DIR = Path("data/diagrams")
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+DIAGRAM_DIR = BACKEND_ROOT / "data" / "diagrams"
 KROKI_URL = "https://kroki.io"
 SUPPORTED_TYPES = ["mermaid", "plantuml", "graphviz"]
 _PATTERN = re.compile(
@@ -37,11 +38,8 @@ def render_diagrams_in_markdown(text: str, base_url: str = "/static/diagrams") -
             resp.raise_for_status()
             filename = f"{uuid.uuid4().hex}.svg"
             (DIAGRAM_DIR / filename).write_bytes(resp.content)
-            # Embed SVG inline so the browser never needs to fetch a URL.
-            # URL-based references break when the browser can't reach the backend
-            # directly (Docker, remote deployments, proxies, etc.).
-            svg_xml = resp.text
-            return f'<div style="overflow-x:auto;margin:1rem 0;max-width:100%;">{svg_xml}</div>'
+            static_url = f"{base_url.rstrip('/')}/{filename}"
+            return f"![Rendered diagram]({static_url})"
         except Exception:
             return match.group(0)   # keep original block on failure
 

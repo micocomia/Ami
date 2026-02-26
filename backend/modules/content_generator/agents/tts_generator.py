@@ -7,7 +7,8 @@ from pathlib import Path
 
 VOICES = ["en-US-JennyNeural", "en-US-GuyNeural"]
 HOST_VOICE = VOICES[0]
-AUDIO_DIR = Path("data/audio")
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+AUDIO_DIR = BACKEND_ROOT / "data" / "audio"
 
 
 def _strip_markdown(text: str) -> str:

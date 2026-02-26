@@ -101,10 +101,12 @@ def initialize_session_state():
 
     if "backend_endpoint" not in st.session_state:
         st.session_state["backend_endpoint"] = config.backend_endpoint
+    if "backend_public_endpoint" not in st.session_state:
+        st.session_state["backend_public_endpoint"] = config.backend_public_endpoint
 
     if "available_models" not in st.session_state:
         from utils.request_api import get_available_models, get_app_config
-        models = get_available_models(config.backend_endpoint)
+        models = get_available_models(st.session_state["backend_endpoint"])
         if models:
             st.session_state["available_models"] = [f"{m.get('model_provider', '')}/{m.get('model_name', '')}" for m in models]
         else:

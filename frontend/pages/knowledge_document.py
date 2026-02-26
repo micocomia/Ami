@@ -10,11 +10,28 @@ from components.time_tracking import track_session_learning_start_time
 from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
-from config import use_mock_data, use_search, backend_endpoint
+from config import use_mock_data, use_search, backend_endpoint, backend_public_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
 
 
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
+
+
+def _current_backend_public_base() -> str:
+    """Resolve browser-facing backend endpoint from live session settings, fallback to config."""
+    endpoint = st.session_state.get("backend_public_endpoint", backend_public_endpoint)
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        endpoint = backend_public_endpoint or backend_endpoint
+    return endpoint.rstrip("/")
+
+
+def _absolutize_backend_url(path_or_url: str) -> str:
+    """Build absolute browser-facing URL for backend-served static assets."""
+    if not isinstance(path_or_url, str):
+        return ""
+    if path_or_url.startswith(("http://", "https://")):
+        return path_or_url
+    return f"{_current_backend_public_base()}/{path_or_url.lstrip('/')}"
 
 
 def render_learning_content():
@@ -51,14 +68,17 @@ def render_learning_content():
         content_format = learning_content.get("content_format", "standard")
         audio_url = learning_content.get("audio_url")
         audio_mode = learning_content.get("audio_mode")
+        if not audio_url:
+            st.session_state.pop("last_media_url", None)
         if content_format == "audio_enhanced":
             if audio_mode == "narration_optional":
                 st.info("🎧 This lesson keeps written content and offers an optional narrated audio version.")
             else:
                 st.info("🎙️ This lesson keeps written content and offers an optional host-expert audio version.")
             if audio_url:
-                full_audio_url = audio_url if audio_url.startswith("http") else f"{__import__('config').backend_endpoint.rstrip('/')}{audio_url}"
-                st.audio(full_audio_url, format="audio/mp3")
+                media_url = _absolutize_backend_url(audio_url)
+                st.session_state["last_media_url"] = media_url
+                st.audio(media_url, format="audio/mpeg")
         elif content_format == "visual_enhanced":
             st.info("📊 This content includes visual resources (diagrams, videos, images) for visual learners.")
 
@@ -381,7 +401,7 @@ def render_document_content_by_section(document, sources_used=None):
     if sources_used:
         section_md = inject_citation_tooltips(section_md, sources_used)
     # Absolutize backend static URLs (diagrams, audio) for the Streamlit renderer
-    _backend_base = backend_endpoint.rstrip('/')
+    _backend_base = _current_backend_public_base()
     section_md = section_md.replace('/static/', f'{_backend_base}/static/')
     st.markdown(section_md, unsafe_allow_html=True)
 
