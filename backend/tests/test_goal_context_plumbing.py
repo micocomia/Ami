@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from fastapi.testclient import TestClient
+
 
 def test_schedule_learning_path_with_llm_accepts_goal_context():
     from modules.learning_plan_generator.agents.learning_path_scheduler import schedule_learning_path_with_llm
@@ -131,3 +133,130 @@ def test_create_learning_content_works_without_goal_context(
 
     assert "goal_context" in mock_draft.call_args.kwargs
     assert mock_draft.call_args.kwargs["goal_context"] is None
+
+
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.SearchEnhancedKnowledgeDrafter.invoke")
+def test_drafter_skips_retrieval_when_goal_context_empty(mock_invoke):
+    from modules.content_generator.agents.search_enhanced_knowledge_drafter import SearchEnhancedKnowledgeDrafter
+
+    mock_invoke.return_value = {"title": "Draft", "content": "Body"}
+    rag = MagicMock()
+    rag.max_retrieval_results = 5
+    drafter = SearchEnhancedKnowledgeDrafter(MagicMock(), search_rag_manager=rag, use_search=True)
+
+    result = drafter.draft(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Intro"},
+            "knowledge_points": [{"name": "Variables"}],
+            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "goal_context": {},
+        }
+    )
+
+    assert "retrieval_queries" not in result
+    rag.invoke_hybrid.assert_not_called()
+    rag.invoke_hybrid_filtered.assert_not_called()
+
+
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.SearchEnhancedKnowledgeDrafter.invoke")
+def test_drafter_retrieves_when_goal_context_present(mock_invoke):
+    from modules.content_generator.agents.search_enhanced_knowledge_drafter import SearchEnhancedKnowledgeDrafter
+
+    mock_invoke.return_value = {"title": "Draft", "content": "Body"}
+    rag = MagicMock()
+    rag.max_retrieval_results = 5
+    rag.invoke_hybrid_filtered.return_value = []
+    drafter = SearchEnhancedKnowledgeDrafter(MagicMock(), search_rag_manager=rag, use_search=True)
+
+    result = drafter.draft(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Intro"},
+            "knowledge_points": [{"name": "Variables"}],
+            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "goal_context": {"course_code": "DTI5902"},
+        }
+    )
+
+    assert "retrieval_queries" in result
+    rag.invoke_hybrid_filtered.assert_called()
+    _, kwargs = rag.invoke_hybrid_filtered.call_args
+    assert kwargs["course_code"] == "DTI5902"
+
+
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.SearchEnhancedKnowledgeDrafter.invoke")
+def test_drafter_skips_retrieval_when_goal_context_has_no_retrieval_fields(mock_invoke):
+    from modules.content_generator.agents.search_enhanced_knowledge_drafter import SearchEnhancedKnowledgeDrafter
+
+    mock_invoke.return_value = {"title": "Draft", "content": "Body"}
+    rag = MagicMock()
+    rag.max_retrieval_results = 5
+    drafter = SearchEnhancedKnowledgeDrafter(MagicMock(), search_rag_manager=rag, use_search=True)
+
+    result = drafter.draft(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Intro"},
+            "knowledge_points": [{"name": "Variables"}],
+            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "goal_context": {"is_vague": False},
+        }
+    )
+
+    assert "retrieval_queries" not in result
+    rag.invoke_hybrid.assert_not_called()
+    rag.invoke_hybrid_filtered.assert_not_called()
+
+
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.SearchEnhancedKnowledgeDrafter.invoke")
+def test_drafter_falls_back_when_filtered_retrieval_empty(mock_invoke):
+    from modules.content_generator.agents.search_enhanced_knowledge_drafter import SearchEnhancedKnowledgeDrafter
+
+    mock_invoke.return_value = {"title": "Draft", "content": "Body"}
+    rag = MagicMock()
+    rag.max_retrieval_results = 5
+    rag.invoke_hybrid_filtered.return_value = []
+    rag.invoke_hybrid.return_value = []
+    drafter = SearchEnhancedKnowledgeDrafter(MagicMock(), search_rag_manager=rag, use_search=True)
+
+    drafter.draft(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Intro"},
+            "knowledge_points": [{"name": "Variables"}],
+            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "goal_context": {"course_code": "DTI5902"},
+        }
+    )
+
+    rag.invoke_hybrid_filtered.assert_called()
+    rag.invoke_hybrid.assert_called()
+
+
+def test_tailor_knowledge_content_endpoint_forwards_goal_context():
+    from main import app
+
+    payload = {
+        "learner_profile": "{}",
+        "learning_path": "{}",
+        "learning_session": "{}",
+        "use_search": True,
+        "allow_parallel": True,
+        "with_quiz": False,
+        "goal_context": {"course_code": "DTI5902", "lecture_numbers": [1, 2]},
+    }
+
+    with patch("main.get_llm", return_value=MagicMock()), \
+         patch("main.create_learning_content_with_llm") as mock_create:
+        mock_create.return_value = {"document": "ok"}
+        client = TestClient(app)
+        response = client.post("/tailor-knowledge-content", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"tailored_content": {"document": "ok"}}
+    assert mock_create.call_args.kwargs["goal_context"] == payload["goal_context"]

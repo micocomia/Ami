@@ -184,6 +184,7 @@ class SearchRagManager:
         course_code: Optional[str] = None,
         content_category: Optional[str] = None,
         lecture_number: Optional[int] = None,
+        page_number: Optional[int] = None,
         exclude_file_names: Optional[List[str]] = None,
         require_lecture: bool = False,
         allow_web_fallback: bool = True,
@@ -200,6 +201,7 @@ class SearchRagManager:
                     course_code=course_code,
                     content_category=content_category,
                     lecture_number=lecture_number,
+                    page_number=page_number,
                     exclude_file_names=exclude_file_names,
                     require_lecture=require_lecture,
                 )

@@ -25,11 +25,17 @@ def extract_sources_used(knowledge_drafts):
     """
     if isinstance(knowledge_drafts, str):
         knowledge_drafts = ast.literal_eval(knowledge_drafts)
+    if not knowledge_drafts:
+        return []
+
     sources = []
     seen_keys = set()
     for draft in knowledge_drafts:
         if isinstance(draft, dict):
-            for s in draft.get("sources_used", []):
+            draft_sources = draft.get("sources_used") or []
+            if not isinstance(draft_sources, list):
+                continue
+            for s in draft_sources:
                 key = _source_dedup_key(s)
                 if key not in seen_keys:
                     seen_keys.add(key)

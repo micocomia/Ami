@@ -273,8 +273,13 @@ def identify_skill_gap(
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
     if not response:
-        return None, None, None
-    return response.get("skill_gaps"), response.get("goal_assessment"), response.get("retrieved_sources")
+        return None, None, None, None
+    return (
+        response.get("skill_gaps"),
+        response.get("goal_assessment"),
+        response.get("retrieved_sources"),
+        response.get("goal_context"),
+    )
 
 
 def audit_skill_gap_bias(skill_gaps_dict, learner_information, llm_type=None, method_name=None):
@@ -506,7 +511,17 @@ def explore_knowledge_points(learner_profile, learning_path, learning_session, l
     return response.get("knowledge_points") if response else None
 
 # @st.cache_resource
-def draft_knowledge_point(learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search, llm_type=None, method_name=None):
+def draft_knowledge_point(
+    learner_profile,
+    learning_path,
+    learning_session,
+    knowledge_points,
+    knowledge_point,
+    use_search,
+    goal_context=None,
+    llm_type=None,
+    method_name=None,
+):
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
     method_name = method_name or cfg["default_method_name"]
@@ -517,6 +532,7 @@ def draft_knowledge_point(learner_profile, learning_path, learning_session, know
         "knowledge_points": str(knowledge_points),
         "knowledge_point": str(knowledge_point),
         "use_search": use_search,
+        "goal_context": _coerce_jsonable(goal_context),
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
@@ -524,7 +540,17 @@ def draft_knowledge_point(learner_profile, learning_path, learning_session, know
     return response.get("knowledge_draft") if response else None
 
 # @st.cache_resource
-def draft_knowledge_points(learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search, llm_type=None, method_name=None):
+def draft_knowledge_points(
+    learner_profile,
+    learning_path,
+    learning_session,
+    knowledge_points,
+    allow_parallel,
+    use_search,
+    goal_context=None,
+    llm_type=None,
+    method_name=None,
+):
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
     method_name = method_name or cfg["default_method_name"]
@@ -535,6 +561,7 @@ def draft_knowledge_points(learner_profile, learning_path, learning_session, kno
         "knowledge_points": str(knowledge_points),
         "allow_parallel": allow_parallel,
         "use_search": use_search,
+        "goal_context": _coerce_jsonable(goal_context),
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }

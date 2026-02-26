@@ -140,6 +140,7 @@ class TailoredContentGenerationRequest(BaseModel):
     use_search: bool = True
     allow_parallel: bool = True
     with_quiz: bool = True
+    goal_context: Optional[Any] = None
 
 
 class KnowledgePointExplorationRequest(BaseModel):
@@ -157,6 +158,7 @@ class KnowledgePointDraftingRequest(BaseModel):
     knowledge_points: str
     knowledge_point: str
     use_search: bool
+    goal_context: Optional[Any] = None
 
 
 class KnowledgePointsDraftingRequest(BaseModel):
@@ -167,6 +169,7 @@ class KnowledgePointsDraftingRequest(BaseModel):
     knowledge_points: str
     use_search: bool
     allow_parallel: bool
+    goal_context: Optional[Any] = None
 
 
 class LearningDocumentIntegrationRequest(BaseModel):

@@ -1,6 +1,13 @@
 import streamlit as st
 import time
-from utils.state import initialize_session_state, change_selected_goal_id, save_persistent_state, load_persistent_state
+from utils.state import (
+    change_selected_goal_id,
+    get_selected_goal,
+    initialize_session_state,
+    normalize_selected_goal_id,
+    save_persistent_state,
+    load_persistent_state,
+)
 from components.topbar import logout
 initialize_session_state()
 
@@ -134,25 +141,13 @@ render_debug_sidebar()
 st.session_state.setdefault("learned_skills_history", {})
 
 goals = st.session_state.get("goals") or []
-selected = st.session_state.get("selected_goal_id", 0)
-
-goal = None
-# If selected is a list index
-if isinstance(selected, int) and 0 <= selected < len(goals):
-    goal = goals[selected]
-# If selected is an id and goals are dicts with "id"
-elif goals:
-    for g in goals:
+if goals:
+    if normalize_selected_goal_id():
         try:
-            if isinstance(g, dict) and g.get("id") == selected:
-                goal = g
-                break
+            save_persistent_state()
         except Exception:
             pass
-    # Fallback: pick first goal to keep app functional
-    if goal is None:
-        goal = goals[0]
-        st.session_state["selected_goal_id"] = 0
+goal = get_selected_goal()
 
 if goal is not None:
     goal["start_time"] = time.time()
@@ -240,4 +235,3 @@ if len(st.session_state["goals"]) != 0:
         pass
 
 pg.run()
-

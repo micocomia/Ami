@@ -260,7 +260,7 @@ def create_learning_content_with_llm(
         if fslsm_input <= -_FSLSM_MODERATE:
             # Visual learner: fetch videos and images
             max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 1
         elif fslsm_input >= _FSLSM_MODERATE:
             # Verbal learner: fetch Commons audio as supplementary to TTS podcast
             max_audio = 2 if fslsm_input >= _FSLSM_STRONG else 1

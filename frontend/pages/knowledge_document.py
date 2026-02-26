@@ -9,7 +9,7 @@ import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
 from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
-from utils.state import get_current_session_uid, save_persistent_state
+from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
 from config import use_mock_data, use_search, backend_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
 
@@ -25,7 +25,10 @@ def render_learning_content():
         except Exception:
             pass
 
-    goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+    goal = get_selected_goal()
+    if not isinstance(goal, dict):
+        st.error("No active goal found. Please select an active goal first.")
+        return
     if not goal["learning_path"]:
         st.error("Learning path is still scheduling. Please visit this page later.")
         return
@@ -235,6 +238,7 @@ def render_content_preparation(goal):
             knowledge_points,
             use_search=use_search,
             allow_parallel=True,
+            goal_context=goal.get("goal_context"),
             llm_type="gpt4o"
         )
     if knowledge_drafts is None:
@@ -599,7 +603,10 @@ def render_questions(quiz_data):
                 # Mirror mastery data onto the learning path session so it
                 # survives save_persistent_state() and is available for the
                 # adapt-learning-path endpoint.
-                current_goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+                current_goal = get_selected_goal()
+                if not isinstance(current_goal, dict):
+                    st.error("No active goal found. Please reselect your goal and retry.")
+                    return
                 session_obj = current_goal["learning_path"][st.session_state["selected_session_id"]]
                 session_obj["mastery_score"] = result["score_percentage"]
                 session_obj["is_mastered"] = result["is_mastered"]

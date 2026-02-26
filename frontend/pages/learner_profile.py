@@ -13,12 +13,20 @@ from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
 from streamlit_extras.tags import tagger_component 
-from utils.state import save_persistent_state, delete_persistent_state, propagate_profile_fields_to_other_goals
+from utils.state import (
+    delete_persistent_state,
+    get_selected_goal,
+    save_persistent_state,
+    propagate_profile_fields_to_other_goals,
+)
 
 
 def render_learner_profile():
     # Title and introduction
-    goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+    goal = get_selected_goal()
+    if not isinstance(goal, dict):
+        st.info("No active goal selected.")
+        return
 
     st.title("Learner Profile")
     st.write("An overview of the learner's background, goals, progress, preferences, and behavioral patterns.")

@@ -208,6 +208,13 @@ def initialize_session_state():
             pass
         st.session_state["_state_loaded"] = True
 
+    selected_changed = normalize_selected_goal_id()
+    if selected_changed:
+        try:
+            save_persistent_state()
+        except Exception:
+            pass
+
 def clear_user_state():
     """Clear all persisted user state from the current session.
 
@@ -231,6 +238,8 @@ def reset_to_add_goal():
         "learning_goal": "",
         "skill_gaps": [],
         "goal_assessment": None,
+        "goal_context": {},
+        "retrieved_sources": [],
         "learner_profile": {},
         "learning_path": [],
         "is_completed": False,
@@ -240,19 +249,92 @@ def reset_to_add_goal():
 
 
 def index_goal_by_id(goal_id):
-    goal_id_list = [goal["id"] for goal in st.session_state["goals"]]
-    try:
-        return goal_id_list.index(goal_id)
-    except ValueError:
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list):
         return None
+    for idx, goal in enumerate(goals):
+        if not isinstance(goal, dict):
+            continue
+        gid = goal.get("id")
+        if gid == goal_id or str(gid) == str(goal_id):
+            return idx
+    return None
+
+
+def get_goal_by_id(goal_id):
+    idx = index_goal_by_id(goal_id)
+    if idx is None:
+        return None
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list) or idx >= len(goals):
+        return None
+    goal = goals[idx]
+    return goal if isinstance(goal, dict) else None
+
+
+def get_selected_goal():
+    return get_goal_by_id(st.session_state.get("selected_goal_id"))
+
+
+def normalize_selected_goal_id():
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list) or not goals:
+        return False
+
+    selected = st.session_state.get("selected_goal_id")
+    if get_goal_by_id(selected) is not None:
+        return False
+
+    normalized = None
+    if isinstance(selected, int) and 0 <= selected < len(goals):
+        maybe = goals[selected]
+        if isinstance(maybe, dict):
+            normalized = maybe.get("id")
+    else:
+        try:
+            selected_int = int(selected)
+            if 0 <= selected_int < len(goals):
+                maybe = goals[selected_int]
+                if isinstance(maybe, dict):
+                    normalized = maybe.get("id")
+        except Exception:
+            pass
+
+    if normalized is None:
+        for goal in goals:
+            if isinstance(goal, dict) and not goal.get("is_deleted"):
+                normalized = goal.get("id")
+                break
+    if normalized is None:
+        for goal in goals:
+            if isinstance(goal, dict):
+                normalized = goal.get("id")
+                break
+    if normalized is None:
+        return False
+
+    if st.session_state.get("selected_goal_id") != normalized:
+        st.session_state["selected_goal_id"] = normalized
+        return True
+    return False
 
 def change_selected_goal_id(new_goal_id):
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list):
+        return
+    goal_id_idx = index_goal_by_id(new_goal_id)
+    if goal_id_idx is None:
+        if normalize_selected_goal_id():
+            try:
+                save_persistent_state()
+            except Exception:
+                pass
+        return
+
     if new_goal_id == st.session_state["selected_goal_id"]:
         return
-    goals = st.session_state["goals"]
+
     st.session_state["selected_goal_id"] = new_goal_id
-    goal_id_list = [goal["id"] for goal in goals]
-    goal_id_idx = goal_id_list.index(new_goal_id)
     st.session_state["learning_goal"] = goals[goal_id_idx]["learning_goal"]
     st.session_state["learner_profile"] = goals[goal_id_idx]["learner_profile"]
     st.session_state["skill_gaps"] = goals[goal_id_idx]["skill_gaps"]
@@ -283,6 +365,13 @@ def get_existing_goal_id_list():
     return [goal["id"] for goal in st.session_state["goals"]]
 
 def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_profile={}, learning_path=[], is_completed=False, is_deleted=False, **_kwargs):
+    passthrough_keys = (
+        "goal_context",
+        "retrieved_sources",
+        "bias_audit",
+        "profile_fairness",
+        "_last_identified_goal",
+    )
     goal_uid = get_new_goal_uid()
     goal_info = {
         "id": goal_uid,
@@ -294,15 +383,17 @@ def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_
         "is_completed": is_completed,
         "is_deleted": is_deleted
     }
+    for key in passthrough_keys:
+        if key in _kwargs:
+            goal_info[key] = _kwargs[key]
     st.session_state.goals.append(goal_info)
-    goal_idx = index_goal_by_id(goal_uid)
     reset_to_add_goal()
     # persist after adding a goal
     try:
         save_persistent_state()
     except Exception:
         pass
-    return goal_idx
+    return goal_uid
 
 _PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
 

@@ -1236,6 +1236,7 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     knowledge_points = request.knowledge_points
     knowledge_point = request.knowledge_point
     use_search = request.use_search
+    goal_context = request.goal_context
     fslsm_input = _get_fslsm_input(learner_profile)
     fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
     fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
@@ -1245,6 +1246,7 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
         knowledge_draft = draft_knowledge_point_with_llm(
             llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
             use_search,
+            goal_context=goal_context,
             visual_formatting_hints=visual_hints,
             processing_perception_hints=proc_perc_hints,
             search_rag_manager=search_rag_manager,
@@ -1265,6 +1267,7 @@ async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
     knowledge_points = request.knowledge_points
     use_search = request.use_search
     allow_parallel = request.allow_parallel
+    goal_context = request.goal_context
     fslsm_input = _get_fslsm_input(learner_profile)
     fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
     fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
@@ -1274,6 +1277,7 @@ async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
         knowledge_drafts = draft_knowledge_points_with_llm(
             llm, learner_profile, learning_path, learning_session, knowledge_points,
             allow_parallel, use_search,
+            goal_context=goal_context,
             visual_formatting_hints=visual_hints,
             processing_perception_hints=proc_perc_hints,
             search_rag_manager=search_rag_manager,
@@ -1460,10 +1464,12 @@ async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
     use_search = request.use_search
     allow_parallel = request.allow_parallel
     with_quiz = request.with_quiz
+    goal_context = request.goal_context
     try:
         tailored_content = create_learning_content_with_llm(
             llm, learner_profile, learning_path, learning_session,
             allow_parallel=allow_parallel, with_quiz=with_quiz, use_search=use_search,
+            goal_context=goal_context,
             quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
         )
         return {"tailored_content": tailored_content}

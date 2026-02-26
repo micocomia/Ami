@@ -153,6 +153,44 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
                 return {}
         return {}
 
+    @staticmethod
+    def _normalize_lecture_numbers(value: Any) -> List[int]:
+        if value is None:
+            return []
+        if isinstance(value, int):
+            nums = [value]
+        elif isinstance(value, list):
+            nums = [x for x in value if isinstance(x, int)]
+        else:
+            return []
+        return sorted({n for n in nums if n > 0})
+
+    def _goal_retrieval_filters(self, value: Any) -> dict[str, Any]:
+        ctx = self._as_mapping(value)
+        course_code = str(ctx.get("course_code", "")).strip() or None
+        content_category = str(ctx.get("content_category", "")).strip() or None
+        page_number = ctx.get("page_number")
+        if not isinstance(page_number, int) or page_number <= 0:
+            page_number = None
+        lecture_numbers = self._normalize_lecture_numbers(
+            ctx.get("lecture_numbers", ctx.get("lecture_number"))
+        )
+        has_retrieval_fields = any(
+            [
+                course_code,
+                lecture_numbers,
+                content_category,
+                page_number,
+            ]
+        )
+        return {
+            "course_code": course_code,
+            "content_category": content_category,
+            "page_number": page_number,
+            "lecture_numbers": lecture_numbers,
+            "has_retrieval_fields": has_retrieval_fields,
+        }
+
     def _build_query_bundle(self, data: dict[str, Any]) -> tuple[list[str], str]:
         session = self._as_mapping(data.get("learning_session"))
         profile = self._as_mapping(data.get("learner_profile"))
@@ -356,7 +394,8 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
         retrieval_queries: List[str] = []
         retrieval_query_primary = ""
         retrieval_intent_text = ""
-        if self.use_search and self.search_rag_manager is not None:
+        goal_filters = self._goal_retrieval_filters(data.get("goal_context"))
+        if self.use_search and self.search_rag_manager is not None and goal_filters["has_retrieval_fields"]:
             queries, intent_text = self._build_query_bundle(data)
             retrieval_queries = list(queries)
             retrieval_query_primary = queries[0] if queries else ""
@@ -366,25 +405,52 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
             # Retrieve more candidates than default, then rerank down to a cleaner final set.
             fetch_k = max(base_k * 3, 12)
             final_k = min(max(base_k, 4), 5)
-            course_codes = self._extract_course_codes(intent_text)
-            primary_course_code = course_codes[0] if course_codes else None
-            lecture_intent = "lecture" in intent_text.lower()
+            extracted_course_codes = self._extract_course_codes(intent_text)
+            if goal_filters["course_code"]:
+                course_codes = [goal_filters["course_code"]]
+            else:
+                course_codes = extracted_course_codes
+            primary_course_code = goal_filters["course_code"] or (course_codes[0] if course_codes else None)
+            lecture_numbers = goal_filters["lecture_numbers"]
+            content_category = goal_filters["content_category"]
+            page_number = goal_filters["page_number"]
+            lecture_intent = (
+                bool(lecture_numbers)
+                or (content_category or "").lower() == "lectures"
+                or ("lecture" in intent_text.lower())
+            )
 
             candidates = []
             seen = set()
             for q in queries:
-                if primary_course_code:
+                docs = []
+                if lecture_numbers:
+                    for lecture_number in lecture_numbers:
+                        docs.extend(
+                            self.search_rag_manager.invoke_hybrid_filtered(
+                                q,
+                                k=fetch_k,
+                                course_code=primary_course_code,
+                                content_category=content_category or ("Lectures" if lecture_intent else None),
+                                lecture_number=lecture_number,
+                                page_number=page_number,
+                                exclude_file_names=["syllabus.json"] if lecture_intent else None,
+                                require_lecture=lecture_intent,
+                                allow_web_fallback=False,
+                            )
+                        )
+                else:
                     docs = self.search_rag_manager.invoke_hybrid_filtered(
                         q,
                         k=fetch_k,
                         course_code=primary_course_code,
-                        content_category="Lectures" if lecture_intent else None,
-                        exclude_file_names=["syllabus.json"],
+                        content_category=content_category or ("Lectures" if lecture_intent else None),
+                        lecture_number=None,
+                        page_number=page_number,
+                        exclude_file_names=["syllabus.json"] if lecture_intent else None,
                         require_lecture=lecture_intent,
                         allow_web_fallback=False,
                     )
-                else:
-                    docs = self.search_rag_manager.invoke_hybrid(q, k=fetch_k)
                 for d in docs:
                     meta = d.metadata or {}
                     key = (
@@ -398,6 +464,25 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
                         continue
                     seen.add(key)
                     candidates.append(d)
+
+            # If metadata-constrained retrieval is too restrictive, fall back to
+            # hybrid retrieval so we can still surface high-signal verified sources.
+            if not candidates:
+                for q in queries:
+                    fallback_docs = self.search_rag_manager.invoke_hybrid(q, k=fetch_k)
+                    for d in fallback_docs:
+                        meta = d.metadata or {}
+                        key = (
+                            str(meta.get("source_type", "")),
+                            str(meta.get("course_code", "")),
+                            str(meta.get("file_name", "")),
+                            str(meta.get("page_number", "")),
+                            d.page_content[:180],
+                        )
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        candidates.append(d)
 
             intent_tokens = self._tokenize(intent_text)
             filtered = [
