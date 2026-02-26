@@ -47,8 +47,8 @@ def render_learning_content():
         # Show content format badge and audio player (Sprint 3: audio-visual adaptive content)
         content_format = learning_content.get("content_format", "standard")
         audio_url = learning_content.get("audio_url")
-        if content_format == "podcast":
-            st.info("🎙️ This content has been adapted into a podcast-style format for auditory learners.")
+        if content_format == "audio_enhanced":
+            st.info("🎙️ This lesson keeps written content and offers an optional host-expert audio version.")
             if audio_url:
                 full_audio_url = audio_url if audio_url.startswith("http") else f"{__import__('config').backend_endpoint.rstrip('/')}{audio_url}"
                 st.audio(full_audio_url, format="audio/mp3")

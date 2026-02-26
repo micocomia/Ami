@@ -1286,8 +1286,9 @@ async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
 async def integrate_learning_document(request: LearningDocumentIntegrationRequest):
     from modules.content_generator.agents.learning_content_creator import (
         _get_fslsm_dim, _get_fslsm_input, _understanding_hints,
-        _FSLSM_STRONG, _FSLSM_MODERATE,
+        _FSLSM_STRONG, _FSLSM_MODERATE, _narrative_allowance,
     )
+    from modules.content_generator.agents.learning_document_integrator import build_inline_assets_plan
     llm = get_llm()
     learner_profile = request.learner_profile
     learning_path = request.learning_path
@@ -1313,9 +1314,19 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
             knowledge_points = []
     if not isinstance(knowledge_points, list):
         knowledge_points = []
+    if isinstance(knowledge_drafts, str):
+        try:
+            knowledge_drafts = ast.literal_eval(knowledge_drafts)
+        except Exception:
+            knowledge_drafts = []
+    if not isinstance(knowledge_drafts, list):
+        knowledge_drafts = []
 
     # Find media resources for visual and verbal learners before integration
     media_resources = []
+    narrative_resources = []
+    inline_assets_plan = None
+    inline_assets_stats = {"placed_assets": 0}
     session_title = learning_session.get("title", "") if isinstance(learning_session, dict) else ""
     max_videos, max_images, max_audio = 0, 0, 0
     if fslsm_input <= -_FSLSM_MODERATE:
@@ -1335,23 +1346,49 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
                 _search_runner = SearchRunner.from_config(default_config)
             except Exception:
                 pass
-        if _search_runner is not None:
-            try:
-                media_resources = find_media_resources(
-                    _search_runner,
-                    knowledge_points,
-                    max_videos=max_videos,
-                    max_images=max_images,
-                    max_audio=max_audio,
-                    session_context=session_title,
-                )
-            except Exception:
-                media_resources = []
-            if media_resources:
-                kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
-                media_resources = filter_media_resources_with_llm(
-                    llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
-                )
+        try:
+            media_resources = find_media_resources(
+                _search_runner,
+                knowledge_points,
+                max_videos=max_videos,
+                max_images=max_images,
+                max_audio=max_audio,
+                session_context=session_title,
+            )
+        except Exception:
+            media_resources = []
+        if media_resources:
+            kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
+            media_resources = filter_media_resources_with_llm(
+                llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
+            )
+
+    # Generate verbal narrative equivalents (short stories/poems), then plan inline placement.
+    narrative_allowance = _narrative_allowance(fslsm_input)
+    if narrative_allowance > 0:
+        try:
+            from modules.content_generator.agents.narrative_resource_generator import (
+                generate_narrative_resources_with_llm,
+            )
+            narrative_resources = generate_narrative_resources_with_llm(
+                llm,
+                knowledge_points,
+                knowledge_drafts,
+                session_title=session_title,
+                max_narratives=narrative_allowance,
+                include_tts=True,
+            )
+        except Exception:
+            narrative_resources = []
+
+    if media_resources or narrative_resources:
+        inline_assets_plan, inline_assets_stats = build_inline_assets_plan(
+            knowledge_points=knowledge_points,
+            knowledge_drafts=knowledge_drafts,
+            media_resources=media_resources,
+            narrative_resources=narrative_resources,
+            max_assets_per_subsection=2,
+        )
 
     try:
         learning_document = integrate_learning_document_with_llm(
@@ -1359,32 +1396,38 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
             effective_output_markdown,
             understanding_hints=und_hints,
             media_resources=media_resources if media_resources else None,
+            narrative_resources=narrative_resources if narrative_resources else None,
+            inline_assets_plan=inline_assets_plan,
         )
 
-        # Determine content format and apply audio-visual adaptations
+        # Determine content format and optional host-expert listen mode.
         content_format = "standard"
         audio_url = None
+        audio_mode = None
 
         if fslsm_input <= -_FSLSM_MODERATE:
             content_format = "visual_enhanced"
 
         if fslsm_input >= _FSLSM_MODERATE:
+            content_format = "audio_enhanced"
+            audio_mode = "host_expert_optional"
             from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
-            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
-            learning_document = convert_to_podcast_with_llm(llm, learning_document, learner_profile, mode=mode)
-            content_format = "podcast"
-
-            if fslsm_input >= _FSLSM_STRONG:
-                from modules.content_generator.agents.tts_generator import generate_tts_audio
-                try:
-                    audio_url = generate_tts_audio(learning_document)
-                except Exception:
-                    audio_url = None
+            from modules.content_generator.agents.tts_generator import generate_tts_audio
+            try:
+                host_expert_script = convert_to_podcast_with_llm(
+                    llm, learning_document, learner_profile, mode="full"
+                )
+                audio_url = generate_tts_audio(host_expert_script)
+            except Exception:
+                audio_url = None
 
         return {
             "learning_document": learning_document,
             "content_format": content_format,
             "audio_url": audio_url,
+            "audio_mode": audio_mode,
+            "inline_assets_count": int((inline_assets_stats or {}).get("placed_assets", 0)),
+            "inline_assets_placement_stats": inline_assets_stats or {},
             # Tells the frontend whether learning_document is already a rendered
             # markdown string (True) or still a raw document_structure dict (False).
             "document_is_markdown": needs_av,

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Mapping, Optional
+import re
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, field_validator
 
@@ -55,6 +56,8 @@ def integrate_learning_document_with_llm(
     knowledge_drafts,
     output_markdown=True,
     media_resources: Optional[List[dict]] = None,
+    narrative_resources: Optional[List[dict]] = None,
+    inline_assets_plan: Optional[List[dict]] = None,
     understanding_hints: str = "",
 ):
     logger.info(f'Integrating learning document with {len(knowledge_points)} knowledge points and {len(knowledge_drafts)} drafts...')
@@ -71,10 +74,186 @@ def integrate_learning_document_with_llm(
     if not output_markdown:
         return document_structure
     logger.info('Preparing markdown document...')
-    return prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts, media_resources=media_resources)
+    return prepare_markdown_document(
+        document_structure,
+        knowledge_points,
+        knowledge_drafts,
+        media_resources=media_resources,
+        narrative_resources=narrative_resources,
+        inline_assets_plan=inline_assets_plan,
+    )
 
 
-def prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts, media_resources: Optional[List[dict]] = None):
+def _tokenize(text: str) -> set[str]:
+    tokens = {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) > 2}
+    expanded = set(tokens)
+    # lightweight singularization improves keyword matching: loops -> loop
+    for t in tokens:
+        if t.endswith("s") and len(t) > 3:
+            expanded.add(t[:-1])
+    return expanded
+
+
+def _asset_text(asset: dict) -> str:
+    return " ".join(
+        str(asset.get(k, ""))
+        for k in ("title", "snippet", "description", "content")
+        if asset.get(k)
+    )
+
+
+def build_inline_assets_plan(
+    knowledge_points,
+    knowledge_drafts,
+    media_resources: Optional[List[dict]] = None,
+    narrative_resources: Optional[List[dict]] = None,
+    max_assets_per_subsection: int = 2,
+) -> Tuple[List[dict], Dict[str, Any]]:
+    """Build deterministic inline placement for adaptive assets by section index."""
+    if not isinstance(knowledge_points, list):
+        knowledge_points = []
+    if not isinstance(knowledge_drafts, list):
+        knowledge_drafts = []
+    media_resources = media_resources or []
+    narrative_resources = narrative_resources or []
+
+    section_tokens: Dict[int, set[str]] = {}
+    section_count = max(len(knowledge_points), len(knowledge_drafts))
+    for i in range(section_count):
+        kp_name = ""
+        kd_title = ""
+        if i < len(knowledge_points) and isinstance(knowledge_points[i], dict):
+            kp_name = str(knowledge_points[i].get("name", ""))
+        if i < len(knowledge_drafts) and isinstance(knowledge_drafts[i], dict):
+            kd_title = str(knowledge_drafts[i].get("title", ""))
+        section_tokens[i] = _tokenize(f"{kp_name} {kd_title}")
+
+    combined_assets: List[dict] = []
+    # Prefer pedagogical narrative inserts when subsection density cap is reached.
+    for a in narrative_resources:
+        if isinstance(a, dict):
+            combined_assets.append({**a, "asset_type": a.get("type", "short_story")})
+    for a in media_resources:
+        if isinstance(a, dict):
+            combined_assets.append({**a, "asset_type": a.get("type", "media")})
+
+    per_section_counts: Dict[int, int] = {i: 0 for i in range(section_count)}
+    plan: List[dict] = []
+    matched_count = 0
+    fallback_count = 0
+
+    for idx, asset in enumerate(combined_assets):
+        explicit_idx = asset.get("target_section_index")
+        target_idx = explicit_idx if isinstance(explicit_idx, int) else None
+        rationale = "explicit_target"
+
+        if target_idx is None or target_idx < 0 or target_idx >= section_count:
+            asset_tokens = _tokenize(_asset_text(asset))
+            best_score = 0
+            best_idx = None
+            for sec_idx, toks in section_tokens.items():
+                if not toks or not asset_tokens:
+                    continue
+                score = len(asset_tokens.intersection(toks))
+                if score > best_score:
+                    best_score = score
+                    best_idx = sec_idx
+            if best_idx is not None and best_score > 0:
+                target_idx = best_idx
+                matched_count += 1
+                rationale = "keyword_match"
+            elif section_count > 0:
+                target_idx = idx % section_count
+                fallback_count += 1
+                rationale = "round_robin_fallback"
+            else:
+                continue
+
+        if section_count > 0 and per_section_counts[target_idx] >= max_assets_per_subsection:
+            placed = False
+            for step in range(1, section_count + 1):
+                probe = (target_idx + step) % section_count
+                if per_section_counts[probe] < max_assets_per_subsection:
+                    target_idx = probe
+                    rationale = f"{rationale}_density_rollover"
+                    placed = True
+                    break
+            if not placed:
+                continue
+
+        per_section_counts[target_idx] += 1
+        item = dict(asset)
+        item["target_section_index"] = target_idx
+        item["rationale"] = rationale
+        plan.append(item)
+
+    stats = {
+        "sections": section_count,
+        "input_assets": len(combined_assets),
+        "placed_assets": len(plan),
+        "keyword_matches": matched_count,
+        "fallbacks": fallback_count,
+        "max_assets_per_subsection": max_assets_per_subsection,
+    }
+    return plan, stats
+
+
+def _render_inline_asset(resource: dict) -> str:
+    r_type = resource.get("asset_type") or resource.get("type", "")
+    r_title = resource.get("title", "Resource")
+    if r_type == "video":
+        video_id = resource.get("video_id", "")
+        url = resource.get("url", f"https://www.youtube.com/watch?v={video_id}")
+        thumb_url = resource.get("thumbnail_url", "")
+        block = f"\n#### 🎬 {r_title}\n"
+        if thumb_url:
+            block += f"[![{r_title}]({thumb_url})]({url})\n"
+        else:
+            watch_label = "Watch on Wikimedia Commons" if resource.get("source") == "wikimedia_commons" else "Watch on YouTube"
+            block += f"[{watch_label}]({url})\n"
+        return block
+    if r_type in ("image", "diagram"):
+        url = resource.get("url", "")
+        image_url = resource.get("image_url", "")
+        description = resource.get("description", "")
+        icon = "🧩" if r_type == "diagram" else "🖼️"
+        block = f"\n#### {icon} {r_title}\n"
+        if image_url:
+            block += f"[![{r_title}]({image_url})]({url})\n"
+        elif url:
+            block += f"[View resource]({url})\n"
+        if description:
+            block += f"*{description}*\n"
+        return block
+    if r_type == "audio":
+        audio_url = resource.get("audio_url", "")
+        url = resource.get("url", "")
+        block = f"\n#### 🔊 {r_title}\n"
+        if audio_url:
+            block += f'<audio controls src="{audio_url}"></audio>\n'
+        if url:
+            block += f"[View source]({url})\n"
+        return block
+    if r_type in ("short_story", "poem"):
+        icon = "📖" if r_type == "short_story" else "✍️"
+        label = "Short Story" if r_type == "short_story" else "Poem"
+        content = resource.get("content", "")
+        audio_url = resource.get("audio_url", "")
+        block = f"\n#### {icon} {label}: {r_title}\n\n{content}\n"
+        if audio_url:
+            block += f'\n<audio controls src="{audio_url}"></audio>\n'
+        return block
+    return ""
+
+
+def prepare_markdown_document(
+    document_structure,
+    knowledge_points,
+    knowledge_drafts,
+    media_resources: Optional[List[dict]] = None,
+    narrative_resources: Optional[List[dict]] = None,
+    inline_assets_plan: Optional[List[dict]] = None,
+):
     """Render a markdown learning document from the integrated structure and drafts.
 
     Expects document_structure with keys: title, overview, summary.
@@ -111,6 +290,19 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
         'strategic': "## Strategic Insights",
     }
 
+    if inline_assets_plan is None:
+        inline_assets_plan, _ = build_inline_assets_plan(
+            knowledge_points=knowledge_points,
+            knowledge_drafts=knowledge_drafts,
+            media_resources=media_resources,
+            narrative_resources=narrative_resources,
+        )
+    inline_by_section: Dict[int, List[dict]] = {}
+    for item in inline_assets_plan or []:
+        sec_idx = item.get("target_section_index")
+        if isinstance(sec_idx, int):
+            inline_by_section.setdefault(sec_idx, []).append(item)
+
     title = document_structure.get('title', '') if isinstance(document_structure, dict) else ''
     md = f"# {title}"
     md += f"\n\n{document_structure.get('overview','') if isinstance(document_structure, dict) else ''}"
@@ -119,51 +311,11 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
         for idx, kp in enumerate(knowledge_points or []):
             if not isinstance(kp, dict) or kp.get('type') != k_type:
                 continue
-            kd = (knowledge_drafts or [])[idx]
+            kd = knowledge_drafts[idx] if idx < len(knowledge_drafts) else {}
             if isinstance(kd, dict):
                 md += f"\n\n### {kd.get('title','')}\n\n{kd.get('content','')}\n"
+                for asset in inline_by_section.get(idx, []):
+                    md += _render_inline_asset(asset)
     md += f"\n\n## Summary\n\n{document_structure.get('summary','') if isinstance(document_structure, dict) else ''}"
-
-    # Append media resources section if provided
-    if media_resources:
-        has_visual = any(r.get("type") in ("video", "image") for r in media_resources)
-        has_audio = any(r.get("type") == "audio" for r in media_resources)
-        if has_visual and has_audio:
-            section_label = "## 📚 Supplementary Learning Resources"
-        elif has_audio:
-            section_label = "## 🔊 Audio Learning Resources"
-        else:
-            section_label = "## 📺 Visual Learning Resources"
-        md += f"\n\n{section_label}\n"
-        for resource in media_resources:
-            r_type = resource.get("type", "")
-            r_title = resource.get("title", "Resource")
-            if r_type == "video":
-                video_id = resource.get("video_id", "")
-                url = resource.get("url", f"https://www.youtube.com/watch?v={video_id}")
-                thumb_url = resource.get("thumbnail_url", "")
-                md += f"\n### 🎬 {r_title}\n"
-                if thumb_url:
-                    md += f"[![{r_title}]({thumb_url})]({url})\n"
-                else:
-                    watch_label = "Watch on Wikimedia Commons" if resource.get("source") == "wikimedia_commons" else "Watch on YouTube"
-                    md += f"[{watch_label}]({url})\n"
-            elif r_type == "image":
-                url = resource.get("url", "")
-                image_url = resource.get("image_url", "")
-                description = resource.get("description", "")
-                md += f"\n### 🖼️ {r_title}\n"
-                if image_url:
-                    md += f"[![{r_title}]({image_url})]({url})\n"
-                if description:
-                    md += f"*{description}*\n"
-            elif r_type == "audio":
-                audio_url = resource.get("audio_url", "")
-                url = resource.get("url", "")
-                md += f"\n### 🔊 {r_title}\n"
-                if audio_url:
-                    md += f'<audio controls src="{audio_url}"></audio>\n'
-                if url:
-                    md += f"[View on Wikimedia Commons]({url})\n"
 
     return md

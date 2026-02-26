@@ -116,6 +116,22 @@ def initialize_session_state():
             st.session_state["llm_type"] = st.session_state["available_models"][0]
         else:
             st.session_state["llm_type"] = "None"
+    else:
+        # Safety: if restored/persisted llm_type is no longer available, fall back.
+        llm_type = st.session_state.get("llm_type")
+        available_models = st.session_state.get("available_models", [])
+        if (
+            isinstance(llm_type, str)
+            and isinstance(available_models, list)
+            and available_models
+            and llm_type not in available_models
+        ):
+            st.session_state["llm_type"] = available_models[0]
+        elif not isinstance(llm_type, str) or not llm_type.strip():
+            if isinstance(available_models, list) and available_models:
+                st.session_state["llm_type"] = available_models[0]
+            else:
+                st.session_state["llm_type"] = "None"
 
     if "userId" not in st.session_state:
         st.session_state["userId"] = "TestUser"

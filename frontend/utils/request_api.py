@@ -564,6 +564,9 @@ def integrate_learning_document(learner_profile, learning_path, learning_session
         "learning_document": response.get("learning_document"),
         "content_format": response.get("content_format", "standard"),
         "audio_url": response.get("audio_url"),
+        "audio_mode": response.get("audio_mode"),
+        "inline_assets_count": response.get("inline_assets_count", 0),
+        "inline_assets_placement_stats": response.get("inline_assets_placement_stats", {}),
         "document_is_markdown": response.get("document_is_markdown", False),
     }
 

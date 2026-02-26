@@ -5,6 +5,32 @@ from typing import List
 from urllib.parse import quote
 
 
+def _tokens(text: str) -> set[str]:
+    stop = {
+        "the", "and", "for", "with", "from", "that", "this", "your", "into",
+        "what", "when", "where", "how", "why", "guide", "course", "lesson",
+        "video", "tutorial", "walkthrough", "lecture", "explainer", "talk",
+        "podcast", "demo", "introduction", "intro", "basics",
+    }
+    toks = {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) > 2}
+    normalized = set()
+    for t in toks:
+        normalized.add(t)
+        if t.endswith("s") and len(t) > 3:
+            normalized.add(t[:-1])
+    return {t for t in normalized if t not in stop}
+
+
+def _is_video_on_topic(topic: str, session_context: str, title: str, snippet: str) -> bool:
+    target_tokens = _tokens(f"{topic} {session_context}")
+    if not target_tokens:
+        return True
+    candidate_tokens = _tokens(f"{title} {snippet}")
+    overlap = target_tokens.intersection(candidate_tokens)
+    # Require at least one concrete topic/session token overlap.
+    return len(overlap) >= 1
+
+
 def find_media_resources(
     search_runner,
     knowledge_points,
@@ -12,6 +38,7 @@ def find_media_resources(
     max_images: int = 2,
     max_audio: int = 0,
     session_context: str = "",
+    video_focus: str = "visual",
 ) -> List[dict]:
     """Find YouTube videos and Wikimedia Commons images/videos/audio for a list of knowledge points.
 
@@ -43,19 +70,28 @@ def find_media_resources(
     # --- YouTube Videos ---
     if max_videos > 0:
         seen_video_ids: set = set()
-        context = f" {session_context}" if session_context else ""
+        focus_terms = "lecture explainer talk" if video_focus == "audio" else "tutorial walkthrough visualization"
         for topic in topic_names:
             video_count = sum(1 for r in results if r["type"] == "video")
             if video_count >= max_videos:
                 break
             try:
-                query = f"site:youtube.com {topic}{context} tutorial"
+                if search_runner is None:
+                    break
+                context = f" {session_context}" if session_context else ""
+                query = f'site:youtube.com "{topic}"{context} {focus_terms}'
                 search_results = search_runner.invoke(query)
                 for sr in search_results:
                     video_count = sum(1 for r in results if r["type"] == "video")
                     if video_count >= max_videos:
                         break
                     link = sr.link or ""
+                    title = getattr(sr, "title", "") or topic
+                    snippet = getattr(sr, "snippet", "")
+                    if not isinstance(snippet, str):
+                        snippet = ""
+                    if not _is_video_on_topic(topic, session_context, title, snippet):
+                        continue
                     match = re.search(r"watch\?v=([A-Za-z0-9_-]{11})", link)
                     if match:
                         video_id = match.group(1)
@@ -63,11 +99,11 @@ def find_media_resources(
                             seen_video_ids.add(video_id)
                             results.append({
                                 "type": "video",
-                                "title": sr.title or topic,
+                                "title": title,
                                 "url": link,
                                 "video_id": video_id,
                                 "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
-                                "snippet": sr.snippet or "",
+                                "snippet": snippet,
                                 "source": "youtube",
                             })
             except Exception:

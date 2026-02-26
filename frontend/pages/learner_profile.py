@@ -406,6 +406,8 @@ def show_restart_onboarding_dialog():
             # Keep the user logged in after clearing progress
             user_id = st.session_state.get("userId", "default")
             backend_ep = st.session_state.get("backend_endpoint")
+            prev_llm_type = st.session_state.get("llm_type")
+            prev_available_models = st.session_state.get("available_models")
             try:
                 st.session_state["_autosave_enabled"] = False
             except Exception:
@@ -429,6 +431,10 @@ def show_restart_onboarding_dialog():
             st.session_state["userId"] = user_id
             if backend_ep:
                 st.session_state["backend_endpoint"] = backend_ep
+            if isinstance(prev_available_models, list) and prev_available_models:
+                st.session_state["available_models"] = prev_available_models
+            if isinstance(prev_llm_type, str) and prev_llm_type.strip():
+                st.session_state["llm_type"] = prev_llm_type
             try:
                 st.switch_page("pages/onboarding.py")
             except Exception:

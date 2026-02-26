@@ -184,6 +184,15 @@ def _visual_formatting_hints(fslsm_input: float) -> str:
     return ""
 
 
+def _narrative_allowance(fslsm_input: float) -> int:
+    """Narrative inserts (short stories/poems) for verbal learners."""
+    if fslsm_input >= _FSLSM_STRONG:
+        return 3
+    if fslsm_input >= _FSLSM_MODERATE:
+        return 1
+    return 0
+
+
 def create_learning_content_with_llm(
     llm,
     learner_profile,
@@ -203,7 +212,10 @@ def create_learning_content_with_llm(
 ):
     from .goal_oriented_knowledge_explorer import explore_knowledge_points_with_llm
     from .search_enhanced_knowledge_drafter import draft_knowledge_points_with_llm
-    from .learning_document_integrator import integrate_learning_document_with_llm
+    from .learning_document_integrator import (
+        integrate_learning_document_with_llm,
+        build_inline_assets_plan,
+    )
     from .document_quiz_generator import generate_document_quizzes_with_llm
 
     if method_name == "genmentor":
@@ -241,6 +253,8 @@ def create_learning_content_with_llm(
 
         # 4. Find media resources for visual and verbal learners
         media_resources = []
+        narrative_resources = []
+        inline_assets_plan = None
         session_title = learning_session.get("title", "") if isinstance(learning_session, dict) else ""
         max_videos, max_images, max_audio = 0, 0, 0
         if fslsm_input <= -_FSLSM_MODERATE:
@@ -264,25 +278,51 @@ def create_learning_content_with_llm(
                     _search_runner = SearchRunner.from_config(default_config)
                 except Exception:
                     pass
-            if _search_runner is not None:
-                try:
-                    media_resources = find_media_resources(
-                        _search_runner,
-                        knowledge_points,
-                        max_videos=max_videos,
-                        max_images=max_images,
-                        max_audio=max_audio,
-                        session_context=session_title,
-                    )
-                except Exception:
-                    media_resources = []
-                if media_resources:
-                    kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
-                    media_resources = filter_media_resources_with_llm(
-                        llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
-                    )
+            try:
+                media_resources = find_media_resources(
+                    _search_runner,
+                    knowledge_points,
+                    max_videos=max_videos,
+                    max_images=max_images,
+                    max_audio=max_audio,
+                    session_context=session_title,
+                )
+            except Exception:
+                media_resources = []
+            if media_resources:
+                kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
+                media_resources = filter_media_resources_with_llm(
+                    llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
+                )
 
-        # 5. Integrate document (with media appended for visual learners and understanding hints)
+        # 4b. Generate narrative resources (short stories/poems) for verbal learners.
+        narrative_allowance = _narrative_allowance(fslsm_input)
+        if narrative_allowance > 0:
+            try:
+                from .narrative_resource_generator import generate_narrative_resources_with_llm
+                narrative_resources = generate_narrative_resources_with_llm(
+                    llm,
+                    knowledge_points,
+                    knowledge_drafts,
+                    session_title=session_title,
+                    max_narratives=narrative_allowance,
+                    include_tts=True,
+                )
+            except Exception:
+                narrative_resources = []
+
+        if media_resources or narrative_resources:
+            inline_assets_plan, inline_stats = build_inline_assets_plan(
+                knowledge_points=knowledge_points,
+                knowledge_drafts=knowledge_drafts,
+                media_resources=media_resources,
+                narrative_resources=narrative_resources,
+                max_assets_per_subsection=2,
+            )
+        else:
+            inline_stats = {"placed_assets": 0}
+
+        # 5. Integrate document (assets are injected inline inside sections)
         learning_document = integrate_learning_document_with_llm(
             llm,
             learner_profile,
@@ -292,6 +332,8 @@ def create_learning_content_with_llm(
             knowledge_drafts,
             output_markdown=output_markdown,
             media_resources=media_resources if media_resources else None,
+            narrative_resources=narrative_resources if narrative_resources else None,
+            inline_assets_plan=inline_assets_plan,
             understanding_hints=und_hints,
         )
 
@@ -299,32 +341,34 @@ def create_learning_content_with_llm(
         content_format = "standard"
         if fslsm_input <= -_FSLSM_MODERATE:
             content_format = "visual_enhanced"
+        elif fslsm_input >= _FSLSM_MODERATE:
+            content_format = "audio_enhanced"
 
-        # 7. Podcast conversion for auditory learners
+        # 7. Optional host-expert listen mode for auditory learners (text remains canonical)
         audio_url = None
+        audio_mode = None
         if fslsm_input >= _FSLSM_MODERATE:
             from .podcast_style_converter import convert_to_podcast_with_llm
-            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
-            learning_document = convert_to_podcast_with_llm(
-                llm, learning_document, learner_profile, mode=mode
-            )
-            content_format = "podcast"
+            from .tts_generator import generate_tts_audio
+            audio_mode = "host_expert_optional"
+            try:
+                host_expert_script = convert_to_podcast_with_llm(
+                    llm, learning_document, learner_profile, mode="full"
+                )
+                audio_url = generate_tts_audio(host_expert_script)
+            except Exception:
+                audio_url = None
 
-            # 8. TTS generation for strong auditory learners
-            if fslsm_input >= _FSLSM_STRONG:
-                from .tts_generator import generate_tts_audio
-                try:
-                    audio_url = generate_tts_audio(learning_document)
-                    learning_document = (
-                        f'<audio controls src="{audio_url}"></audio>\n\n'
-                        + learning_document
-                    )
-                except Exception:
-                    audio_url = None
-
-        learning_content = {"document": learning_document, "content_format": content_format}
+        learning_content = {
+            "document": learning_document,
+            "content_format": content_format,
+            "inline_assets_count": int((inline_stats or {}).get("placed_assets", 0)),
+            "inline_assets_placement_stats": inline_stats or {},
+        }
         if audio_url is not None:
             learning_content["audio_url"] = audio_url
+        if audio_mode is not None:
+            learning_content["audio_mode"] = audio_mode
 
         if not with_quiz:
             return learning_content

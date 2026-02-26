@@ -9,6 +9,8 @@ Resources may be of three types: [VIDEO] (YouTube or Wikimedia Commons video), [
 - The resource directly covers or closely relates to the session topic or one of its key concepts.
 - A learner studying this session would gain value from consulting this resource.
 - Generic or tangentially related resources (e.g., a broad "Python Tutorial" for a session on "Sorting Algorithms") should be marked false.
+- Be conservative: if you are uncertain, return false.
+- A resource should be true only when its title/description clearly references at least one key topic or a tightly related concept.
 
 **Output Format:**
 Return a JSON object with a single key "relevance" containing a boolean array — one value per resource, in the same order as the input list.

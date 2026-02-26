@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, List
 
 from base import BaseAgent
@@ -9,6 +10,39 @@ from modules.content_generator.prompts.media_relevance_evaluator import (
     media_relevance_evaluator_task_prompt,
 )
 from modules.content_generator.schemas import MediaRelevanceResult
+
+
+def _tokens(text: str) -> set[str]:
+    stop = {
+        "the", "and", "for", "with", "from", "that", "this", "your", "into",
+        "what", "when", "where", "how", "why", "guide", "course", "lesson",
+        "video", "tutorial", "walkthrough", "lecture", "explainer", "talk",
+        "podcast", "demo", "introduction", "intro", "basics", "learn",
+    }
+    toks = {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) > 2}
+    normalized = set()
+    for t in toks:
+        normalized.add(t)
+        if t.endswith("s") and len(t) > 3:
+            normalized.add(t[:-1])
+    return {t for t in normalized if t not in stop}
+
+
+def _is_on_topic(resource: dict, target_tokens: set[str]) -> bool:
+    if not target_tokens:
+        return True
+    candidate_text = " ".join(
+        str(resource.get(k, "")) for k in ("title", "snippet", "description", "url")
+    )
+    candidate_tokens = _tokens(candidate_text)
+    overlap = target_tokens.intersection(candidate_tokens)
+    return len(overlap) >= 1
+
+
+def _deterministic_topic_filter(resources: List[dict], session_title: str, knowledge_point_names: List[str]) -> List[dict]:
+    target_text = f"{session_title} {' '.join(knowledge_point_names or [])}"
+    target_tokens = _tokens(target_text)
+    return [r for r in resources if isinstance(r, dict) and _is_on_topic(r, target_tokens)]
 
 
 class MediaRelevanceEvaluator(BaseAgent):
@@ -34,16 +68,19 @@ def filter_media_resources_with_llm(
     knowledge_point_names: List[str],
 ) -> List[dict]:
     """Use MediaRelevanceEvaluator to filter candidate resources for session relevance.
-    Falls back to returning all resources if evaluation fails."""
+    Strict mode: fail-closed with deterministic topicality gate."""
     if not resources:
         return resources
+    prefiltered = _deterministic_topic_filter(resources, session_title, knowledge_point_names)
+    if not prefiltered:
+        return []
 
     def _resource_line(i, r):
         label = f"[{r['type'].upper()}] \"{r['title']}\""
         desc = r.get("snippet") or r.get("description") or ""
         return f"{i + 1}. {label}" + (f" — {desc[:200]}" if desc else "")
 
-    resource_lines = "\n".join(_resource_line(i, r) for i, r in enumerate(resources))
+    resource_lines = "\n".join(_resource_line(i, r) for i, r in enumerate(prefiltered))
     payload = {
         "session_title": session_title,
         "key_topics": ", ".join(knowledge_point_names) if knowledge_point_names else session_title,
@@ -59,8 +96,9 @@ def filter_media_resources_with_llm(
         evaluator = MediaRelevanceEvaluator(lightweight_llm)
         result = evaluator.evaluate(payload)
         judgments = result.get("relevance", [])
-        if len(judgments) == len(resources):
-            return [r for r, keep in zip(resources, judgments) if keep]
+        if len(judgments) == len(prefiltered):
+            kept = [r for r, keep in zip(prefiltered, judgments) if keep]
+            return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
     except Exception:
         try:
             # Compatibility fallback: use the caller-provided model if mini is unavailable.
@@ -68,9 +106,11 @@ def filter_media_resources_with_llm(
                 evaluator = MediaRelevanceEvaluator(llm)
                 result = evaluator.evaluate(payload)
                 judgments = result.get("relevance", [])
-                if len(judgments) == len(resources):
-                    return [r for r, keep in zip(resources, judgments) if keep]
+                if len(judgments) == len(prefiltered):
+                    kept = [r for r, keep in zip(prefiltered, judgments) if keep]
+                    return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
         except Exception:
             pass
 
-    return resources  # graceful fallback: return all candidates
+    # Fail-closed fallback: keep only deterministic topic matches.
+    return prefiltered
