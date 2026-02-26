@@ -197,6 +197,12 @@ class ProfileFairnessRequest(BaseRequest):
     persona_name: str = ""
 
 
+class ContentBiasAuditRequest(BaseRequest):
+
+    generated_content: str
+    learner_information: str
+
+
 class AuthRegisterRequest(BaseModel):
     username: str
     password: str

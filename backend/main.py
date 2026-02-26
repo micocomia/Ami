@@ -958,6 +958,18 @@ async def validate_profile_fairness(request: ProfileFairnessRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
+@app.post("/audit-content-bias")
+async def audit_content_bias(request: ContentBiasAuditRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    generated_content = request.generated_content
+    learner_information = request.learner_information
+    try:
+        result = audit_content_bias_with_llm(llm, generated_content, learner_information)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 @app.post("/update-learner-profile")
 async def update_learner_profile(request: LearnerProfileUpdateRequest):
     llm = get_llm(request.model_provider, request.model_name)

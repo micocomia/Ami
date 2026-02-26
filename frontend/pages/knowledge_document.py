@@ -7,11 +7,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from components.time_tracking import track_session_learning_start_time
-from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
+from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix, audit_content_bias
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
 from config import use_mock_data, use_search
 from assets.js.doc_reading import doc_reading_auto_scroll_js
+from components.content_bias import render_content_bias_banners
 
 
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
@@ -54,6 +55,9 @@ def render_learning_content():
                 st.audio(full_audio_url, format="audio/mp3")
         elif content_format == "visual_enhanced":
             st.info("📊 This content includes visual resources (diagrams, videos, images) for visual learners.")
+
+        # Content bias audit banners
+        render_content_bias_banners(goal)
 
         render_type = "by_section"
         document = learning_content["document"]
@@ -291,6 +295,13 @@ def render_content_preparation(goal):
         )
     learning_content["quizzes"] = quizzes
     st.success("Stage 4/4 🎯 Document quizzes generated successfully.")
+    # Run content bias audit (non-blocking)
+    try:
+        learner_information = st.session_state.get("learner_information", "")
+        content_bias_result = audit_content_bias(learning_document, learner_information)
+        goal["content_bias_audit"] = content_bias_result
+    except Exception:
+        goal["content_bias_audit"] = None
     st.session_state["document_caches"][session_uid] = learning_content
     try:
         save_persistent_state()
