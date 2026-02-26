@@ -542,6 +542,36 @@ class TestSkillGapEvaluator:
         assert "issues" in result
         assert "feedback" in result
 
+    @patch("modules.skill_gap.agents.skill_gap_evaluator.SkillGapEvaluator.invoke")
+    def test_normalizes_structured_issues_to_strings(self, mock_invoke):
+        """Structured issue dicts are normalized to strings before schema validation."""
+        mock_invoke.return_value = {
+            "is_acceptable": False,
+            "issues": [
+                {
+                    "skill_name": "Python",
+                    "observed_level": "unlearned",
+                    "expected_level": "beginner",
+                    "reason": "Work evidence indicates transferable coding basics.",
+                }
+            ],
+            "feedback": "Revise current_level for Python.",
+        }
+        llm = MagicMock()
+        evaluator = SkillGapEvaluator(llm)
+        result = evaluator.evaluate({
+            "learning_goal": "Learn Python",
+            "learner_information": "",
+            "retrieved_context": "",
+            "skill_requirements": {"skill_requirements": [{"name": "Python", "required_level": "intermediate"}]},
+            "skill_gaps": {"skill_gaps": []},
+        })
+
+        assert result["is_acceptable"] is False
+        assert isinstance(result["issues"], list)
+        assert all(isinstance(issue, str) for issue in result["issues"])
+        assert "Skill 'Python'" in result["issues"][0]
+
 
 # ===================================================================
 # TestLearningGoalRefiner helper

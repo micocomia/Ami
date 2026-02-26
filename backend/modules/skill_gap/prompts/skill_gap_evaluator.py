@@ -1,7 +1,9 @@
 skill_gap_evaluation_output_format = """
 {
     "is_acceptable": true,
-    "issues": [],
+    "issues": [
+        "Skill 'Python': current_level 'unlearned' is too low; work evidence supports at least 'beginner'."
+    ],
     "feedback": ""
 }
 """.strip()
@@ -65,6 +67,9 @@ quality here. Focus entirely on the quality of the skill gap assessment.
 - In **Mode B (allowed evidence exists)**:
   - Reject when levels ignore strong allowed evidence, misuse transfer, or violate SOLO calibration.
 - Return `is_acceptable: false` and provide specific, actionable `issues` and `feedback` otherwise.
+- `issues` MUST be a JSON array of plain strings only.
+  - Do NOT return objects/dicts inside `issues`.
+  - Each issue string should identify the skill and the correction in one sentence.
 - Write `feedback` as direct instructions to the identifier agent for revision
   (e.g., "Revise current_level for X because...").
 - In rejection feedback, explicitly include:

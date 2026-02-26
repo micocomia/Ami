@@ -61,5 +61,47 @@ class SkillGapEvaluator(BaseAgent):
             "skill_gaps": json.dumps(payload.skill_gaps, indent=2),
         }
         raw_output = self.invoke(prompt_vars, task_prompt=skill_gap_evaluator_task_prompt)
-        validated = SkillGapEvaluationResult.model_validate(raw_output)
+        normalized_output = self._normalize_issues(raw_output)
+        validated = SkillGapEvaluationResult.model_validate(normalized_output)
         return validated.model_dump()
+
+    @staticmethod
+    def _normalize_issues(raw_output: Any) -> Any:
+        """Coerce non-string issue entries into concise strings for schema compatibility."""
+        if not isinstance(raw_output, dict):
+            return raw_output
+
+        issues = raw_output.get("issues")
+        if not isinstance(issues, list):
+            return raw_output
+
+        normalized_issues: List[str] = []
+        for issue in issues:
+            if isinstance(issue, str):
+                normalized_issues.append(issue)
+                continue
+
+            if isinstance(issue, dict):
+                skill_name = str(issue.get("skill_name") or issue.get("name") or "Unknown skill").strip()
+                observed = str(issue.get("observed_level") or issue.get("current_level") or "").strip()
+                expected = str(issue.get("expected_level") or issue.get("required_level") or "").strip()
+                reason = str(issue.get("reason") or issue.get("issue") or "").strip()
+
+                details: List[str] = []
+                if observed and expected:
+                    details.append(f"current_level '{observed}' should be at least '{expected}'")
+                elif expected:
+                    details.append(f"minimum expected level is '{expected}'")
+                if reason:
+                    details.append(reason)
+
+                if details:
+                    normalized_issues.append(f"Skill '{skill_name}': {'; '.join(details)}")
+                else:
+                    normalized_issues.append(f"Skill '{skill_name}': needs revision.")
+                continue
+
+            normalized_issues.append(str(issue))
+
+        raw_output["issues"] = normalized_issues
+        return raw_output
