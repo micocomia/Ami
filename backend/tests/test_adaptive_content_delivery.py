@@ -8,6 +8,7 @@ Run from backend directory:
 
 import sys
 import os
+import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -275,6 +276,42 @@ class TestParseDialogueTurns:
         doc = "This is plain prose with no speaker labels."
         turns = _parse_dialogue_turns(doc)
         assert turns == []
+
+
+# ---------------------------------------------------------------------------
+# TestGenerateTtsAudio
+# ---------------------------------------------------------------------------
+
+class TestGenerateTtsAudio:
+
+    def test_generate_audio_inside_running_loop(self):
+        from pathlib import Path
+        import tempfile
+        import shutil
+
+        from modules.content_generator.agents import tts_generator
+        from modules.content_generator.agents.tts_generator import generate_tts_audio
+
+        async def _fake_generate_segments(turns, tmp_dir, voice_map):
+            seg = tmp_dir / "turn_0000.mp3"
+            seg.write_bytes(b"audio-bytes")
+            return [seg]
+
+        async def _run_in_async_context(out_dir: Path):
+            with patch.object(tts_generator, "AUDIO_DIR", out_dir), \
+                 patch.object(tts_generator, "_generate_segments", side_effect=_fake_generate_segments):
+                return generate_tts_audio("Plain narration content")
+
+        out_dir = Path(tempfile.mkdtemp())
+        try:
+            url = asyncio.run(_run_in_async_context(out_dir))
+            assert url.startswith("/static/audio/")
+            out_name = url.rsplit("/", 1)[-1]
+            out_file = out_dir / out_name
+            assert out_file.exists()
+            assert out_file.read_bytes() == b"audio-bytes"
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -665,9 +702,9 @@ class TestContentFormatRouting:
                             mock_quiz, mock_media, mock_podcast, mock_tts, mock_narrative)
         assert result["content_format"] == "audio_enhanced"
         assert result["audio_url"] == "/static/audio/host_expert.mp3"
-        assert result["audio_mode"] == "host_expert_optional"
-        mock_podcast.assert_called_once()
-        mock_tts.assert_called_once()
+        assert result["audio_mode"] == "narration_optional"
+        mock_podcast.assert_not_called()
+        mock_tts.assert_called_once_with("## Document\n\nContent here.")
 
     @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
     @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
@@ -687,7 +724,43 @@ class TestContentFormatRouting:
         assert result["audio_url"] == "/static/audio/abc123.mp3"
         assert result["audio_mode"] == "host_expert_optional"
         mock_podcast.assert_called_once()
-        mock_tts.assert_called_once()
+        mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_audio_boundary_moderate_threshold(self, mock_explore, mock_draft, mock_integrate,
+                                               mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
+        mock_tts.return_value = "/static/audio/moderate.mp3"
+        result = self._call(+0.3, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts, mock_narrative)
+        assert result["content_format"] == "audio_enhanced"
+        assert result["audio_mode"] == "narration_optional"
+        mock_podcast.assert_not_called()
+        mock_tts.assert_called_once_with("## Document\n\nContent here.")
+
+    @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
+    @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")
+    @patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm")
+    @patch("modules.content_generator.agents.media_resource_finder.find_media_resources")
+    @patch("modules.content_generator.agents.document_quiz_generator.generate_document_quizzes_with_llm")
+    @patch("modules.content_generator.agents.learning_document_integrator.integrate_learning_document_with_llm")
+    @patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.draft_knowledge_points_with_llm")
+    @patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.explore_knowledge_points_with_llm")
+    def test_audio_boundary_strong_threshold(self, mock_explore, mock_draft, mock_integrate,
+                                             mock_quiz, mock_media, mock_narrative, mock_podcast, mock_tts):
+        mock_tts.return_value = "/static/audio/strong.mp3"
+        result = self._call(+0.7, mock_explore, mock_draft, mock_integrate,
+                            mock_quiz, mock_media, mock_podcast, mock_tts, mock_narrative)
+        assert result["content_format"] == "audio_enhanced"
+        assert result["audio_mode"] == "host_expert_optional"
+        mock_podcast.assert_called_once()
+        mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")
 
     @patch("modules.content_generator.agents.tts_generator.generate_tts_audio")
     @patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm")

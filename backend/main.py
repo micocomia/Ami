@@ -1404,7 +1404,7 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
             inline_assets_plan=inline_assets_plan,
         )
 
-        # Determine content format and optional host-expert listen mode.
+        # Determine content format and optional listen mode.
         content_format = "standard"
         audio_url = None
         audio_mode = None
@@ -1414,14 +1414,19 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
 
         if fslsm_input >= _FSLSM_MODERATE:
             content_format = "audio_enhanced"
-            audio_mode = "host_expert_optional"
-            from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
             from modules.content_generator.agents.tts_generator import generate_tts_audio
             try:
-                host_expert_script = convert_to_podcast_with_llm(
-                    llm, learning_document, learner_profile, mode="full"
-                )
-                audio_url = generate_tts_audio(host_expert_script)
+                tts_source_document = learning_document
+                if fslsm_input >= _FSLSM_STRONG:
+                    from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
+                    audio_mode = "host_expert_optional"
+                    tts_source_document = convert_to_podcast_with_llm(
+                        llm, learning_document, learner_profile, mode="full"
+                    )
+                else:
+                    audio_mode = "narration_optional"
+
+                audio_url = generate_tts_audio(tts_source_document)
             except Exception:
                 audio_url = None
 

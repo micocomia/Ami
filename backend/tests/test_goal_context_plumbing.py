@@ -260,3 +260,62 @@ def test_tailor_knowledge_content_endpoint_forwards_goal_context():
     assert response.status_code == 200
     assert response.json() == {"tailored_content": {"document": "ok"}}
     assert mock_create.call_args.kwargs["goal_context"] == payload["goal_context"]
+
+
+def _integration_payload(fslsm_input: float) -> dict:
+    return {
+        "learner_profile": str({
+            "learning_preferences": {
+                "fslsm_dimensions": {"fslsm_input": fslsm_input}
+            }
+        }),
+        "learning_path": "{}",
+        "learning_session": str({"title": "Session A"}),
+        "knowledge_points": str([{"name": "Topic A", "type": "foundational"}]),
+        "knowledge_drafts": str([{"title": "Draft A", "content": "Body"}]),
+        "output_markdown": False,
+    }
+
+
+def test_integrate_learning_document_moderate_audio_uses_narration_mode():
+    from main import app
+
+    payload = _integration_payload(0.3)
+    with patch("main.get_llm", return_value=MagicMock()), \
+         patch("main.integrate_learning_document_with_llm", return_value="## Document\n\nContent here."), \
+         patch("modules.content_generator.agents.media_resource_finder.find_media_resources", return_value=[]), \
+         patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm", return_value=[]), \
+         patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm") as mock_podcast, \
+         patch("modules.content_generator.agents.tts_generator.generate_tts_audio", return_value="/static/audio/moderate.mp3") as mock_tts:
+        client = TestClient(app)
+        response = client.post("/integrate-learning-document", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content_format"] == "audio_enhanced"
+    assert body["audio_mode"] == "narration_optional"
+    assert body["audio_url"] == "/static/audio/moderate.mp3"
+    mock_podcast.assert_not_called()
+    mock_tts.assert_called_once_with("## Document\n\nContent here.")
+
+
+def test_integrate_learning_document_strong_audio_uses_host_expert_mode():
+    from main import app
+
+    payload = _integration_payload(0.7)
+    with patch("main.get_llm", return_value=MagicMock()), \
+         patch("main.integrate_learning_document_with_llm", return_value="## Document\n\nContent here."), \
+         patch("modules.content_generator.agents.media_resource_finder.find_media_resources", return_value=[]), \
+         patch("modules.content_generator.agents.narrative_resource_generator.generate_narrative_resources_with_llm", return_value=[]), \
+         patch("modules.content_generator.agents.podcast_style_converter.convert_to_podcast_with_llm", return_value="## Podcast Document\n\nConverted.") as mock_podcast, \
+         patch("modules.content_generator.agents.tts_generator.generate_tts_audio", return_value="/static/audio/strong.mp3") as mock_tts:
+        client = TestClient(app)
+        response = client.post("/integrate-learning-document", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content_format"] == "audio_enhanced"
+    assert body["audio_mode"] == "host_expert_optional"
+    assert body["audio_url"] == "/static/audio/strong.mp3"
+    mock_podcast.assert_called_once()
+    mock_tts.assert_called_once_with("## Podcast Document\n\nConverted.")

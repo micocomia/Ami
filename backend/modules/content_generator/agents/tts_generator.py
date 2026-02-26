@@ -42,6 +42,22 @@ async def _generate_segments(turns, tmp_dir: Path, voice_map: dict):
     return paths
 
 
+def _run_generate_segments(turns, tmp_dir: Path, voice_map: dict):
+    """Run async segment generation from both sync and async call contexts."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_generate_segments(turns, tmp_dir, voice_map))
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _runner():
+        return asyncio.run(_generate_segments(turns, tmp_dir, voice_map))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_runner).result()
+
+
 def generate_tts_audio(document: str) -> str:
     """Parse dialogue turns, generate per-turn MP3s with dual voices,
     concatenate bytes, save to data/audio/, return /static/audio/ URL.
@@ -69,7 +85,7 @@ def generate_tts_audio(document: str) -> str:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        seg_paths = asyncio.run(_generate_segments(turns, tmp_dir, voice_map))
+        seg_paths = _run_generate_segments(turns, tmp_dir, voice_map)
         with open(output_path, "wb") as out:
             for seg in seg_paths:
                 out.write(seg.read_bytes())

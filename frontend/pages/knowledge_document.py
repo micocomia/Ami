@@ -50,8 +50,12 @@ def render_learning_content():
         # Show content format badge and audio player (Sprint 3: audio-visual adaptive content)
         content_format = learning_content.get("content_format", "standard")
         audio_url = learning_content.get("audio_url")
+        audio_mode = learning_content.get("audio_mode")
         if content_format == "audio_enhanced":
-            st.info("🎙️ This lesson keeps written content and offers an optional host-expert audio version.")
+            if audio_mode == "narration_optional":
+                st.info("🎧 This lesson keeps written content and offers an optional narrated audio version.")
+            else:
+                st.info("🎙️ This lesson keeps written content and offers an optional host-expert audio version.")
             if audio_url:
                 full_audio_url = audio_url if audio_url.startswith("http") else f"{__import__('config').backend_endpoint.rstrip('/')}{audio_url}"
                 st.audio(full_audio_url, format="audio/mp3")
@@ -262,6 +266,7 @@ def render_content_preparation(goal):
     document_structure = integration_result["learning_document"]
     content_format = integration_result.get("content_format", "standard")
     audio_url = integration_result.get("audio_url")
+    audio_mode = integration_result.get("audio_mode")
     if integration_result.get("document_is_markdown", False):
         # Backend already rendered the markdown (audio-visual pipeline ran server-side)
         learning_document = document_structure
@@ -276,6 +281,7 @@ def render_content_preparation(goal):
         "sources_used": sources_used,
         "content_format": content_format,
         "audio_url": audio_url,
+        "audio_mode": audio_mode,
     }
     with st.spinner("Stage 4/4 - Generating document quizzes..."):
         quiz_mix = get_quiz_mix(
