@@ -10,7 +10,7 @@ from components.time_tracking import track_session_learning_start_time
 from utils.request_api import draft_knowledge_points, explore_knowledge_points, generate_document_quizzes, integrate_learning_document, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery, get_quiz_mix
 from utils.format import prepare_markdown_document, extract_sources_used, inject_citation_tooltips
 from utils.state import get_current_session_uid, save_persistent_state
-from config import use_mock_data, use_search
+from config import use_mock_data, use_search, backend_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
 
 
@@ -370,6 +370,9 @@ def render_document_content_by_section(document, sources_used=None):
     section_md = section_documents[current_page]
     if sources_used:
         section_md = inject_citation_tooltips(section_md, sources_used)
+    # Absolutize backend static URLs (diagrams, audio) for the Streamlit renderer
+    _backend_base = backend_endpoint.rstrip('/')
+    section_md = section_md.replace('/static/', f'{_backend_base}/static/')
     st.markdown(section_md, unsafe_allow_html=True)
 
     if references_section:

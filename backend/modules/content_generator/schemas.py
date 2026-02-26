@@ -89,6 +89,10 @@ def parse_document_quiz(data) -> DocumentQuiz:
     return DocumentQuiz.model_validate(data)
 
 
+class MediaRelevanceResult(BaseModel):
+    relevance: List[bool]  # one bool per resource, in input order
+
+
 class MediaResource(BaseModel):
     type: str
     title: str

@@ -1,6 +1,14 @@
 import math
 import streamlit as st
-from utils.request_api import create_learner_profile, get_learner_profile, update_learning_preferences, auth_delete_user, get_app_config, get_behavioral_metrics
+from utils.request_api import (
+    create_learner_profile,
+    get_learner_profile,
+    update_learning_preferences,
+    auth_delete_user,
+    get_app_config,
+    get_behavioral_metrics,
+    delete_user_data,
+)
 from components.skill_info import render_skill_info
 from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
@@ -403,7 +411,14 @@ def show_restart_onboarding_dialog():
             except Exception:
                 pass
             try:
-                delete_persistent_state()
+                # Full reset: clear profiles/events/snapshots/state, not only UI state.
+                if backend_ep:
+                    status, _resp = delete_user_data(backend_ep, user_id)
+                    if status != 200:
+                        # Fallback for compatibility if /user-data is unavailable.
+                        delete_persistent_state()
+                else:
+                    delete_persistent_state()
             except Exception:
                 pass
             try:

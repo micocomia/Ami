@@ -503,7 +503,15 @@ def draft_knowledge_point_with_llm(
         "visual_formatting_hints": visual_formatting_hints,
         "processing_perception_hints": processing_perception_hints,
     }
-    return drafter.draft(payload)
+    result = drafter.draft(payload)
+    # Post-process: render diagram code blocks to SVG static files
+    try:
+        from .diagram_renderer import render_diagrams_in_markdown
+        if result.get("content"):
+            result["content"] = render_diagrams_in_markdown(result["content"])
+    except Exception:
+        pass   # never break drafting due to diagram rendering failure
+    return result
 
 
 def draft_knowledge_points_with_llm(

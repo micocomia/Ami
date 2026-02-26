@@ -126,7 +126,15 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
 
     # Append media resources section if provided
     if media_resources:
-        md += "\n\n## 📺 Visual Learning Resources\n"
+        has_visual = any(r.get("type") in ("video", "image") for r in media_resources)
+        has_audio = any(r.get("type") == "audio" for r in media_resources)
+        if has_visual and has_audio:
+            section_label = "## 📚 Supplementary Learning Resources"
+        elif has_audio:
+            section_label = "## 🔊 Audio Learning Resources"
+        else:
+            section_label = "## 📺 Visual Learning Resources"
+        md += f"\n\n{section_label}\n"
         for resource in media_resources:
             r_type = resource.get("type", "")
             r_title = resource.get("title", "Resource")
@@ -138,7 +146,8 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
                 if thumb_url:
                     md += f"[![{r_title}]({thumb_url})]({url})\n"
                 else:
-                    md += f"[Watch on YouTube]({url})\n"
+                    watch_label = "Watch on Wikimedia Commons" if resource.get("source") == "wikimedia_commons" else "Watch on YouTube"
+                    md += f"[{watch_label}]({url})\n"
             elif r_type == "image":
                 url = resource.get("url", "")
                 image_url = resource.get("image_url", "")
@@ -148,5 +157,13 @@ def prepare_markdown_document(document_structure, knowledge_points, knowledge_dr
                     md += f"[![{r_title}]({image_url})]({url})\n"
                 if description:
                     md += f"*{description}*\n"
+            elif r_type == "audio":
+                audio_url = resource.get("audio_url", "")
+                url = resource.get("url", "")
+                md += f"\n### 🔊 {r_title}\n"
+                if audio_url:
+                    md += f'<audio controls src="{audio_url}"></audio>\n'
+                if url:
+                    md += f"[View on Wikimedia Commons]({url})\n"
 
     return md

@@ -239,10 +239,21 @@ def create_learning_content_with_llm(
             search_rag_manager=search_rag_manager,
         )
 
-        # 4. Find media resources for visual learners
+        # 4. Find media resources for visual and verbal learners
         media_resources = []
+        session_title = learning_session.get("title", "") if isinstance(learning_session, dict) else ""
+        max_videos, max_images, max_audio = 0, 0, 0
         if fslsm_input <= -_FSLSM_MODERATE:
+            # Visual learner: fetch videos and images
+            max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
+            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+        elif fslsm_input >= _FSLSM_MODERATE:
+            # Verbal learner: fetch Commons audio as supplementary to TTS podcast
+            max_audio = 2 if fslsm_input >= _FSLSM_STRONG else 1
+
+        if max_videos or max_images or max_audio:
             from .media_resource_finder import find_media_resources
+            from .media_relevance_evaluator import filter_media_resources_with_llm
             _search_runner = None
             if search_rag_manager is not None:
                 _search_runner = getattr(search_rag_manager, "search_runner", None)
@@ -254,17 +265,22 @@ def create_learning_content_with_llm(
                 except Exception:
                     pass
             if _search_runner is not None:
-                max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-                max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
                 try:
                     media_resources = find_media_resources(
                         _search_runner,
                         knowledge_points,
                         max_videos=max_videos,
                         max_images=max_images,
+                        max_audio=max_audio,
+                        session_context=session_title,
                     )
                 except Exception:
                     media_resources = []
+                if media_resources:
+                    kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
+                    media_resources = filter_media_resources_with_llm(
+                        llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
+                    )
 
         # 5. Integrate document (with media appended for visual learners and understanding hints)
         learning_document = integrate_learning_document_with_llm(

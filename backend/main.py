@@ -1,10 +1,24 @@
 import os
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 os.environ.setdefault("USER_AGENT", "Ami/1.0 (educational-platform)")
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+# Add to root so all module-level loggers (propagate=True by default) flow here.
+# Uvicorn's own loggers have propagate=False so they are unaffected — no double-logging.
+logging.root.addHandler(_handler)
+logging.root.setLevel(logging.INFO)
+# Allow DEBUG from our own code specifically.
+logger = logging.getLogger("ami")
+logger.setLevel(logging.DEBUG)
 
 import ast
 import json
@@ -40,10 +54,35 @@ app_config = load_config(config_name="main")
 search_rag_manager = SearchRagManager.from_config(app_config)
 
 app = FastAPI()
+
+from fastapi import Request
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        # Recover the original exception via Python's implicit exception chaining.
+        # When an endpoint does `except Exception as e: raise HTTPException(...)`,
+        # the original exception is stored on exc.__context__ with its traceback intact.
+        original = exc.__cause__ or exc.__context__
+        if original and original.__traceback__:
+            logger.error(
+                "500 Internal Server Error on %s %s\n%s",
+                request.method, request.url.path, exc.detail,
+                exc_info=(type(original), original, original.__traceback__),
+            )
+        else:
+            logger.error(
+                "500 Internal Server Error on %s %s: %s",
+                request.method, request.url.path, exc.detail,
+            )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
 from fastapi.staticfiles import StaticFiles
 import os
 os.makedirs("data/audio", exist_ok=True)
 app.mount("/static/audio", StaticFiles(directory="data/audio"), name="audio")
+os.makedirs("data/diagrams", exist_ok=True)
+app.mount("/static/diagrams", StaticFiles(directory="data/diagrams"), name="diagrams")
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -234,6 +273,14 @@ async def put_user_state(user_id: str, body: UserStateRequest):
 @app.delete("/user-state/{user_id}")
 async def delete_user_state(user_id: str):
     store.delete_user_state(user_id)
+    return {"ok": True}
+
+
+@app.delete("/user-data/{user_id}")
+async def delete_user_data(user_id: str):
+    """Delete all non-auth data for a user (profiles, events, state, snapshots).
+    Used by Restart Onboarding so mastered skills and persona info are fully cleared."""
+    store.delete_all_user_data(user_id)
     return {"ok": True}
 
 
@@ -1258,10 +1305,28 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
     needs_av = fslsm_input <= -_FSLSM_MODERATE or fslsm_input >= _FSLSM_MODERATE
     effective_output_markdown = True if needs_av else output_markdown
 
-    # Find media resources for visual learners before integration
+    # Normalise knowledge_points: the request field may arrive as a JSON string
+    if isinstance(knowledge_points, str):
+        try:
+            knowledge_points = ast.literal_eval(knowledge_points)
+        except Exception:
+            knowledge_points = []
+    if not isinstance(knowledge_points, list):
+        knowledge_points = []
+
+    # Find media resources for visual and verbal learners before integration
     media_resources = []
+    session_title = learning_session.get("title", "") if isinstance(learning_session, dict) else ""
+    max_videos, max_images, max_audio = 0, 0, 0
     if fslsm_input <= -_FSLSM_MODERATE:
+        max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
+        max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
+    elif fslsm_input >= _FSLSM_MODERATE:
+        max_audio = 2 if fslsm_input >= _FSLSM_STRONG else 1
+
+    if max_videos or max_images or max_audio:
         from modules.content_generator.agents.media_resource_finder import find_media_resources
+        from modules.content_generator.agents.media_relevance_evaluator import filter_media_resources_with_llm
         _search_runner = getattr(search_rag_manager, "search_runner", None)
         if _search_runner is None:
             try:
@@ -1271,17 +1336,22 @@ async def integrate_learning_document(request: LearningDocumentIntegrationReques
             except Exception:
                 pass
         if _search_runner is not None:
-            max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
             try:
                 media_resources = find_media_resources(
                     _search_runner,
                     knowledge_points,
                     max_videos=max_videos,
                     max_images=max_images,
+                    max_audio=max_audio,
+                    session_context=session_title,
                 )
             except Exception:
                 media_resources = []
+            if media_resources:
+                kp_names = [kp.get("name", "") if isinstance(kp, dict) else str(kp) for kp in knowledge_points]
+                media_resources = filter_media_resources_with_llm(
+                    llm, media_resources, session_title=session_title, knowledge_point_names=kp_names
+                )
 
     try:
         learning_document = integrate_learning_document_with_llm(

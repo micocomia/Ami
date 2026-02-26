@@ -1,6 +1,9 @@
 import re
 import json
+import logging
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 def _fix_invalid_escapes(s: str) -> str:
@@ -54,8 +57,24 @@ def convert_json_output(output: str) -> Dict[str, Any]:
         try:
             return json.loads(json_str)
         except json.JSONDecodeError:
-            json_str = _fix_invalid_escapes(json_str)
-            return json.loads(json_str)
+            pass
+        try:
+            return json.loads(_fix_invalid_escapes(json_str))
+        except json.JSONDecodeError:
+            pass
+    # Last resort: use json-repair to fix structural issues such as
+    # unescaped double quotes inside string values (common in LLM markdown output)
+    try:
+        from json_repair import repair_json
+        repaired = repair_json(output, return_objects=True)
+        if isinstance(repaired, dict) and repaired:
+            return repaired
+    except Exception:
+        pass
+    logger.error(
+        "All JSON parse attempts failed. Raw LLM output (first 500 chars):\n%s",
+        output[:500],
+    )
     raise json.JSONDecodeError("No valid JSON found in response", output, 0)
 
 def get_text_from_response(response):
@@ -84,8 +103,7 @@ def preprocess_response(response, only_text=True, exclude_think=False, json_outp
         try:
             response = convert_json_output(response)
         except json.JSONDecodeError as e:
-            print(f"Error parsing JSON output: {e}")
-            response = {"error": "Invalid JSON output", "raw_content": response}
+            logger.error("JSON parse failed: %s\nRaw output (first 500 chars):\n%s", e, response[:500])
             raise e
     return response
 

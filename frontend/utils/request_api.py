@@ -665,6 +665,23 @@ def delete_user_state(backend_ep, user_id):
         return None, {"detail": str(e)}
 
 
+def delete_user_data(backend_ep, user_id):
+    """DELETE /user-data/{user_id} → (status_code, response_json)
+
+    Clears all non-auth data: profiles (mastered skills, FSLSM, learner info),
+    events, user state, and profile snapshots. Does NOT remove auth credentials.
+    Used by Restart Onboarding.
+    """
+    if use_mock_data:
+        return 200, {"ok": True}
+    url = f"{backend_ep}user-data/{user_id}"
+    try:
+        resp = httpx.delete(url, timeout=30)
+        return resp.status_code, resp.json()
+    except Exception as e:
+        return None, {"detail": str(e)}
+
+
 def auth_register(username, password):
     """Register a new user via the backend."""
     if use_mock_data:
