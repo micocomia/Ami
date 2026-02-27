@@ -10,12 +10,13 @@ from modules.learning_plan_generator.agents.learning_path_scheduler import (
 )
 
 
-def _profile(*, processing=0.0, perception=0.0, understanding=0.0):
+def _profile(*, processing=0.0, perception=0.0, understanding=0.0, input_dim=0.0):
     return {
         "learning_preferences": {
             "fslsm_dimensions": {
                 "fslsm_processing": processing,
                 "fslsm_perception": perception,
+                "fslsm_input": input_dim,
                 "fslsm_understanding": understanding,
             }
         }
@@ -86,3 +87,19 @@ class TestFSLSMStructuralOverrides:
         assert result[0]["thinking_time_buffer_minutes"] == 10
         assert result[0]["session_sequence_hint"] == "application-first"
         assert result[0]["navigation_mode"] == "free"
+        assert result[0]["input_mode_hint"] == "mixed"
+
+    def test_input_mode_hint_visual_and_verbal(self):
+        sessions = [_session("Session 1")]
+
+        visual_result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(input_dim=-0.8),
+        )
+        verbal_result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(input_dim=0.8),
+        )
+
+        assert visual_result[0]["input_mode_hint"] == "visual"
+        assert verbal_result[0]["input_mode_hint"] == "verbal"

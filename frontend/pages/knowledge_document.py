@@ -664,10 +664,6 @@ def render_questions(quiz_data):
                 session_obj["mastery_score"] = result["score_percentage"]
                 session_obj["is_mastered"] = result["is_mastered"]
                 session_obj["mastery_threshold"] = result["threshold"]
-                # Flag adaptation suggestion if backend suggests it
-                if result.get("plan_adaptation_suggested"):
-                    goal_id = st.session_state.get("selected_goal_id")
-                    st.session_state[f"adaptation_suggested_{goal_id}"] = True
                 try:
                     save_persistent_state()
                 except Exception:
@@ -754,7 +750,7 @@ def _render_quiz_explanations(quiz_data, mastery_info=None):
                 st.write(f"Feedback: {fb.get('feedback', '')}")
 
 def render_content_feedback_form(goal):
-    st.header("🌟 Value Your Feedback!") 
+    st.header("🌟 Session Feedback") 
     with st.form("feedback_form"):
         st.info("Your feedback helps us improve the learning experience.\nPlease take a moment to share your thoughts.")
 

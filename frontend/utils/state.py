@@ -101,9 +101,6 @@ def initialize_session_state():
     if "if_refining_learning_goal" not in st.session_state:
         st.session_state["if_refining_learning_goal"] = False
 
-    if "if_rescheduling_learning_path" not in st.session_state:
-        st.session_state["if_rescheduling_learning_path"] = False
-
     if "if_updating_learner_profile" not in st.session_state:
         st.session_state["if_updating_learner_profile"] = False
 
@@ -161,7 +158,6 @@ def clear_user_state():
         "learner_information_text",
         "learner_persona",
         "if_refining_learning_goal",
-        "if_rescheduling_learning_path",
         "if_updating_learner_profile",
         "selected_goal_id",
         "selected_session_id",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,6 +36,10 @@ class SessionItem(BaseModel):
     thinking_time_buffer_minutes: int = Field(0, ge=0, description="Reflective learners: recommended buffer time before next session")
     session_sequence_hint: Optional[str] = Field(None, description="Perception hint: 'application-first' or 'theory-first'")
     navigation_mode: str = Field("linear", description="'linear' (sequential) or 'free' (global)")
+    input_mode_hint: Literal["visual", "verbal", "mixed"] = Field(
+        "mixed",
+        description="Input modality hint inferred from FSLSM input dimension.",
+    )
 
     @field_validator("associated_skills")
     @classmethod

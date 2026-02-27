@@ -10,7 +10,12 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session, get_quiz_mix_for_session
+from utils.quiz_scorer import (
+    compute_quiz_score,
+    get_mastery_threshold_for_session,
+    get_quiz_mix_for_session,
+    is_strong_success,
+)
 
 
 # ── Sample quiz data ──────────────────────────────────────────────────────────
@@ -299,3 +304,16 @@ class TestGetMasteryThreshold:
     def test_no_outcomes_key_uses_default(self):
         session = {}
         assert get_mastery_threshold_for_session(session, self.THRESHOLD_MAP, default=75) == 75
+
+
+class TestStrongSuccess:
+    def test_standard_margin(self):
+        assert is_strong_success(70.0, 60.0) is True
+        assert is_strong_success(69.9, 60.0) is False
+
+    def test_caps_margin_target_at_max_score(self):
+        assert is_strong_success(100.0, 95.0) is True
+        assert is_strong_success(99.0, 95.0) is False
+
+    def test_requires_mastery(self):
+        assert is_strong_success(59.0, 60.0) is False

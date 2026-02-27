@@ -3,9 +3,7 @@ import streamlit as st
 from components.skill_info import render_skill_info
 from utils.request_api import (
     schedule_learning_path_agentic,
-    reschedule_learning_path,
     adapt_learning_path,
-    save_learner_profile,
     get_app_config,
     get_goal_runtime_state,
     post_session_activity,
@@ -105,6 +103,43 @@ def _get_runtime_state(goal_id):
         st.session_state[f"goal_runtime_state_{goal_id}"] = runtime
     return runtime or st.session_state.get(f"goal_runtime_state_{goal_id}")
 
+
+def _auto_adapt_if_needed(goal, runtime_state=None):
+    adaptation = (runtime_state or {}).get("adaptation", {})
+    if not adaptation.get("suggested", False):
+        return
+    user_id = st.session_state.get("userId")
+    goal_id = goal.get("id")
+    if not user_id or goal_id is None:
+        return
+    inflight_key = f"auto_adapt_inflight_{goal_id}"
+    if st.session_state.get(inflight_key):
+        return
+    st.session_state[inflight_key] = True
+    try:
+        result = adapt_learning_path(user_id=user_id, goal_id=goal_id)
+    finally:
+        st.session_state[inflight_key] = False
+    if not isinstance(result, dict):
+        return
+    _store_agent_reasoning(result, "adapt_learning_path")
+    adaptation_status = (result.get("adaptation") or {}).get("status")
+    if adaptation_status == "applied" and result.get("learning_path"):
+        goal["learning_path"] = result["learning_path"]
+        goal["plan_agent_metadata"] = result.get("agent_metadata", {})
+        update_goal(
+            user_id,
+            goal_id,
+            {"learning_path": goal["learning_path"], "plan_agent_metadata": goal["plan_agent_metadata"]},
+        )
+        load_persistent_state()
+        try:
+            save_persistent_state()
+        except Exception:
+            pass
+        st.toast("Learning path adapted automatically.")
+        st.rerun()
+
 def render_learning_path():
     if not st.session_state.get("if_complete_onboarding"):
         st.switch_page("main.py")
@@ -193,11 +228,12 @@ def render_learning_path():
         st.rerun()
 
     else:
+        _auto_adapt_if_needed(goal, runtime_state)
+        runtime_state = _get_runtime_state(goal.get("id"))
         render_overall_information(goal, runtime_state)
+        render_plan_quality_section(goal)
         render_module_map(goal, runtime_state)
         render_narrative_overview(goal)
-        render_plan_quality_section(goal)
-        render_adaptation_section(goal, runtime_state)
         render_learning_sessions(goal, runtime_state)
 
 
@@ -287,10 +323,13 @@ def render_narrative_overview(goal):
         return  # Only for verbal learners
 
     st.write("#### Your Learning Journey")
+    first_upcoming_idx = next((i for i, session in enumerate(goal["learning_path"]) if not session["if_learned"]), None)
     with st.container(border=True):
         for i, session in enumerate(goal["learning_path"]):
             if session["if_learned"]:
                 prefix = "You've completed"
+            elif first_upcoming_idx is not None and i == first_upcoming_idx:
+                prefix = "First, you'll explore"
             else:
                 prefix = "Next, you'll explore"
             st.write(f"**Chapter {i+1}:** {prefix} *{session['title']}* -- {session['abstract']}")
@@ -329,121 +368,8 @@ def render_plan_quality_section(goal):
         st.caption(f"Refinement iterations: {iterations}")
 
 
-def render_adaptation_section(goal, runtime_state=None):
-    """Show adaptation suggestion banner when preferences change significantly."""
-    goal_id = st.session_state.get("selected_goal_id")
-    user_id = st.session_state.get("userId", "")
-
-    # Check for pending adaptation suggestion (set by mastery evaluation or preference change)
-    adaptation_key = f"adaptation_suggested_{goal_id}"
-    runtime_adaptation = ((runtime_state or {}).get("adaptation") or {}).get("suggested", False)
-    # Display adaptation result from a previous run (persists across rerun)
-    adapt_result_key = f"adaptation_result_{goal_id}"
-    if st.session_state.get(adapt_result_key):
-        result_info = st.session_state[adapt_result_key]
-        if result_info["level"] == "info":
-            st.info(result_info["message"])
-        else:
-            st.success(result_info["message"])
-        if st.button("OK", key=f"ack_adapt_{goal_id}"):
-            st.session_state[adapt_result_key] = None
-            st.rerun()
-
-    if runtime_adaptation or st.session_state.get(adaptation_key):
-        message = ((runtime_state or {}).get("adaptation") or {}).get("message")
-        st.warning(message or "Your learning preferences or quiz results suggest your learning path may need adjustment.")
-        col_adapt, col_dismiss = st.columns([1, 1])
-        with col_dismiss:
-            if st.button("Dismiss", key=f"dismiss_adapt_{goal_id}"):
-                save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
-                st.session_state[adaptation_key] = False
-                save_persistent_state()
-                st.rerun()
-        with col_adapt:
-            if st.button("Adapt Learning Path", type="primary", key=f"adapt_btn_{goal_id}"):
-                with st.spinner("Analyzing changes and adapting your learning path..."):
-                    result = adapt_learning_path(
-                        user_id=user_id,
-                        goal_id=goal_id,
-                        new_learner_profile=goal.get("learner_profile", {}),
-                    )
-                if result and result.get("learning_path"):
-                    agent_meta = result.get("agent_metadata", {})
-                    decision = agent_meta.get("decision", {})
-                    action = decision.get("action", "keep")
-                    reason = decision.get("reason", "")
-
-                    if action == "keep":
-                        st.session_state[adapt_result_key] = {
-                            "level": "info",
-                            "message": f"Your current plan is still on track. {reason}",
-                        }
-                    elif action == "adjust_future":
-                        goal["learning_path"] = result["learning_path"]
-                        goal["plan_agent_metadata"] = agent_meta
-                        update_goal(user_id, goal_id, {"learning_path": result["learning_path"], "plan_agent_metadata": agent_meta})
-                        st.session_state[adapt_result_key] = {
-                            "level": "success",
-                            "message": f"Future sessions have been adjusted. {reason}",
-                        }
-                    elif action == "regenerate":
-                        goal["learning_path"] = result["learning_path"]
-                        goal["plan_agent_metadata"] = agent_meta
-                        update_goal(user_id, goal_id, {"learning_path": result["learning_path"], "plan_agent_metadata": agent_meta})
-                        st.session_state[adapt_result_key] = {
-                            "level": "success",
-                            "message": f"Your learning path has been regenerated. {reason}",
-                        }
-
-                    # Now persist the updated profile to the store (deferred from
-                    # the preferences update so the adapt endpoint could compare
-                    # old vs new FSLSM dimensions).
-                    save_learner_profile(user_id, goal_id, goal.get("learner_profile", {}))
-
-                    st.session_state[adaptation_key] = False
-                    load_persistent_state()
-                    save_persistent_state()
-                    st.rerun()
-                else:
-                    st.error("Failed to adapt learning path.")
-
-
 def render_learning_sessions(goal, runtime_state=None):
     st.write("#### 📖 Learning Sessions")
-    total_sessions = len(goal["learning_path"])
-    with st.expander("Re-schedule Learning Path", expanded=False):
-        st.info("Customize your learning path by re-scheduling sessions or marking them as complete.")
-        expected_session_count = st.number_input("Expected Sessions", min_value=0, max_value=10, value=total_sessions)
-        st.session_state["expected_session_count"] = expected_session_count
-        try:
-            save_persistent_state()
-        except Exception:
-            pass
-        if st.button("Re-schedule Learning Path", type="primary"):
-            st.session_state["if_rescheduling_learning_path"] = True
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            st.rerun()
-        if st.session_state.get("if_rescheduling_learning_path"):
-            with st.spinner('Re-scheduling Learning Path ...'):
-                result = reschedule_learning_path(goal["learning_path"], goal["learner_profile"], expected_session_count)
-                _store_agent_reasoning(result, 'reschedule_learning_path')
-                goal["learning_path"] = result.get('learning_path', result) if isinstance(result, dict) else result
-                update_goal(
-                    st.session_state.get("userId"),
-                    goal.get("id"),
-                    {"learning_path": goal["learning_path"]},
-                )
-                load_persistent_state()
-                st.session_state["if_rescheduling_learning_path"] = False
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.toast("🎉 Successfully re-schedule learning path!")
-                st.rerun()
     save_persistent_state()
     runtime_sessions = (runtime_state or {}).get("sessions", [])
     columns_spec = 2

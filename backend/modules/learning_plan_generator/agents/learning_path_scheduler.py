@@ -44,6 +44,7 @@ def apply_fslsm_structural_overrides(
     """Deterministically align structural session fields with FSLSM values."""
     processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
     perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
+    input_dim = _get_fslsm_dim(learner_profile, "fslsm_input")
     understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
 
     base_updates = {
@@ -51,6 +52,7 @@ def apply_fslsm_structural_overrides(
         "thinking_time_buffer_minutes": 0,
         "session_sequence_hint": None,
         "navigation_mode": "linear",
+        "input_mode_hint": "mixed",
     }
 
     if processing <= -_FSLSM_MODERATE:
@@ -67,14 +69,25 @@ def apply_fslsm_structural_overrides(
 
     if understanding >= _FSLSM_MODERATE:
         base_updates["navigation_mode"] = "free"
+    if input_dim <= -_FSLSM_MODERATE:
+        base_updates["input_mode_hint"] = "visual"
+    elif input_dim >= _FSLSM_MODERATE:
+        base_updates["input_mode_hint"] = "verbal"
+
+    def _normalize_input_mode_hint(value: Any) -> str:
+        hint = str(value or "mixed").strip().lower()
+        return hint if hint in {"visual", "verbal", "mixed"} else "mixed"
 
     normalized_sessions: list[dict[str, Any]] = []
     for session in learning_path:
         session_dict = dict(session) if isinstance(session, Mapping) else {}
         if preserve_learned and session_dict.get("if_learned", False):
+            session_dict["input_mode_hint"] = _normalize_input_mode_hint(session_dict.get("input_mode_hint"))
             normalized_sessions.append(session_dict)
             continue
-        normalized_sessions.append({**session_dict, **base_updates})
+        updated = {**session_dict, **base_updates}
+        updated["input_mode_hint"] = _normalize_input_mode_hint(updated.get("input_mode_hint"))
+        normalized_sessions.append(updated)
     return normalized_sessions
 
 

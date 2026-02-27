@@ -144,7 +144,6 @@ API_NAMES = {
     "update_learning_preferences": "update-learning-preferences",
     "schedule_path": "schedule-learning-path",
     "schedule_path_agentic": "schedule-learning-path-agentic",
-    "reschedule_path": "reschedule-learning-path",
     "adapt_path": "adapt-learning-path",
     "generate_learning_content": "generate-learning-content",
     "simulate_path_feedback": "simulate-path-feedback",
@@ -459,7 +458,7 @@ def schedule_learning_path_agentic(learner_profile, session_count=None, llm_type
     return None
 
 
-def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, method_name=None):
+def adapt_learning_path(user_id, goal_id, new_learner_profile=None, force=False, llm_type=None, method_name=None):
     """Call the adaptive plan regeneration endpoint."""
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
@@ -467,36 +466,18 @@ def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, me
     data = {
         "user_id": str(user_id),
         "goal_id": int(goal_id),
-        "new_learner_profile": str(new_learner_profile),
+        "force": bool(force),
     }
+    if new_learner_profile is not None:
+        data["new_learner_profile"] = str(new_learner_profile)
     response = make_post_request(API_NAMES["adapt_path"], data, timeout=120)
     if response:
         return {
             "learning_path": response.get("learning_path"),
             "agent_metadata": response.get("agent_metadata", {}),
+            "adaptation": response.get("adaptation", {}),
         }
     return None
-
-
-def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    # Backend expects learner_profile and learning_path as strings.
-    try:
-        session_count_int = int(session_count)
-    except Exception:
-        session_count_int = cfg["default_session_count"]
-    data = {
-        "learning_path": str(learning_path),
-        "learner_profile": str(learner_profile),
-        "session_count": session_count_int,
-        "other_feedback": str(other_feedback),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["reschedule_path"], data, "./assets/data_example/learning_path.json")
-    return response.get("rescheduled_learning_path") if response else None
 
 def generate_learning_content(
     learner_profile,

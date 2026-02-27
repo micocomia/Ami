@@ -70,14 +70,6 @@ class LearningPathSchedulingRequest(BaseRequest):
     session_count: int
 
 
-class LearningPathReschedulingRequest(BaseRequest):
-    
-    learner_profile: str
-    learning_path: str
-    session_count: int = -1
-    other_feedback: str = ""
-
-
 class LearningContentGenerationRequest(BaseRequest):
 
     learner_profile: str

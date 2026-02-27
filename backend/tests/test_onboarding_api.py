@@ -41,12 +41,14 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_DATA_DIR", data_dir)
     monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
     monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
+    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
     monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
     monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
     monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
     monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
     monkeypatch.setattr(store, "_profiles", {})
     monkeypatch.setattr(store, "_events", {})
+    monkeypatch.setattr(store, "_profile_snapshots", {})
     monkeypatch.setattr(store, "_goals", {})
     monkeypatch.setattr(store, "_learning_content_cache", {})
     monkeypatch.setattr(store, "_session_activity", {})
@@ -582,3 +584,75 @@ class TestConfigEndpoint:
             assert isinstance(cfg["low_threshold"], (int, float))
             assert isinstance(cfg["high_threshold"], (int, float))
             assert cfg["low_threshold"] < cfg["high_threshold"]
+
+
+class TestAdaptationEndpoints:
+    def _seed_goal_and_profile(self):
+        goal = store.create_goal("alice", {
+            "learning_goal": "Learn Python",
+            "skill_gaps": [],
+            "learning_path": [{
+                "id": "Session 1",
+                "title": "Intro",
+                "abstract": "Read and discuss text-based concepts.",
+                "if_learned": False,
+                "associated_skills": ["Python Basics"],
+                "desired_outcome_when_completed": [{"name": "Python Basics", "level": "beginner"}],
+                "mastery_score": 20.0,
+                "is_mastered": False,
+                "mastery_threshold": 70.0,
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 10,
+                "session_sequence_hint": "theory-first",
+                "navigation_mode": "free",
+                "input_mode_hint": "verbal",
+            }],
+        })
+        store.upsert_profile("alice", goal["id"], {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_processing": 0.8,
+                    "fslsm_perception": 0.8,
+                    "fslsm_input": 0.8,
+                    "fslsm_understanding": 0.8,
+                }
+            }
+        })
+        return goal["id"]
+
+    def test_reschedule_endpoint_removed(self, client):
+        resp = client.post("/reschedule-learning-path", json={})
+        assert resp.status_code == 404
+
+    @patch("main.get_llm")
+    @patch("main.create_simulate_feedback_tool")
+    @patch("main.reschedule_learning_path_with_llm")
+    def test_adapt_learning_path_auto_mode_works(self, mock_reschedule, mock_sim_tool, mock_get_llm, client):
+        goal_id = self._seed_goal_and_profile()
+        mock_get_llm.return_value = MagicMock()
+        sim_tool = MagicMock()
+        sim_tool.invoke.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
+        mock_sim_tool.return_value = sim_tool
+        mock_reschedule.return_value = {
+            "learning_path": [{
+                "id": "Session 1",
+                "title": "Adjusted",
+                "abstract": "Adjusted plan.",
+                "if_learned": False,
+                "associated_skills": ["Python Basics"],
+                "desired_outcome_when_completed": [{"name": "Python Basics", "level": "beginner"}],
+                "mastery_score": 20.0,
+                "is_mastered": False,
+                "mastery_threshold": 70.0,
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 10,
+                "session_sequence_hint": "theory-first",
+                "navigation_mode": "free",
+                "input_mode_hint": "verbal",
+            }]
+        }
+        resp = client.post("/adapt-learning-path", json={"user_id": "alice", "goal_id": goal_id})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "adaptation" in data
+        assert "status" in data["adaptation"]
