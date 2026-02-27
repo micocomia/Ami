@@ -191,38 +191,9 @@ def _prepare_markdown_document(document_structure, knowledge_points, knowledge_d
     Inline equivalent of the frontend's prepare_markdown_document().
     Converts a structured document dict into a flat markdown string for use by the LLM judge.
     """
-    if isinstance(document_structure, str):
-        try:
-            import ast
-            document_structure = ast.literal_eval(document_structure)
-        except Exception:
-            return document_structure  # already a string, return as-is
+    from modules.content_generator.agents.learning_document_integrator import prepare_markdown_document
 
-    if not isinstance(document_structure, dict):
-        return json.dumps(document_structure)
-
-    part_titles = {
-        "foundational": "## Foundational Concepts",
-        "practical": "## Practical Applications",
-        "strategic": "## Strategic Insights",
-    }
-
-    doc = f"# {document_structure.get('title', '')}"
-    doc += f"\n\n{document_structure.get('overview', '')}"
-
-    for k_type, part_title in part_titles.items():
-        doc += f"\n\n{part_title}\n"
-        for k_id, kp in enumerate(knowledge_points):
-            if kp.get("type") != k_type:
-                continue
-            if k_id >= len(knowledge_drafts):
-                continue
-            kd = knowledge_drafts[k_id]
-            doc += f"\n\n### {kd.get('title', '')}\n"
-            doc += f"\n\n{kd.get('content', '')}\n"
-
-    doc += f"\n\n## Summary\n\n{document_structure.get('summary', '')}"
-    return doc
+    return prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
 
 
 def run_content_pipeline(base_url: str, learning_goal: str, learner_information: str) -> dict:

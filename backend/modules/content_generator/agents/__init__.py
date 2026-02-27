@@ -34,6 +34,11 @@ from .content_feedback_simulator import (
 	LearningContentFeedbackSimulator,
 	simulate_content_feedback_with_llm,
 )
+from .knowledge_draft_evaluator import (
+	KnowledgeDraftEvaluator,
+	deterministic_knowledge_draft_audit,
+	evaluate_knowledge_draft_with_llm,
+)
 
 __all__ = [
 	# Content creation pipeline
@@ -64,4 +69,8 @@ __all__ = [
 	# Content feedback simulator
 	"LearningContentFeedbackSimulator",
 	"simulate_content_feedback_with_llm",
+	# Knowledge draft evaluator
+	"KnowledgeDraftEvaluator",
+	"deterministic_knowledge_draft_audit",
+	"evaluate_knowledge_draft_with_llm",
 ]

@@ -19,6 +19,7 @@ from modules.content_generator.agents.search_enhanced_knowledge_drafter import d
 from modules.content_generator.utils import (
     _FSLSM_MODERATE,
     _FSLSM_STRONG,
+    build_session_adaptation_contract,
     collect_sources_used,
     find_media_resources,
     generate_tts_audio,
@@ -121,12 +122,14 @@ def generate_learning_content_with_llm(
     learning_session = _parse_jsonish(learning_session, {})
 
     _lightweight_llm = get_lightweight_llm(llm, lightweight_llm)
+    session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
 
     raw_knowledge_points = explore_knowledge_points_with_llm(
         llm,
         learner_profile,
         learning_path,
         learning_session,
+        session_adaptation_contract=session_adaptation_contract,
     )
     knowledge_points = _extract_knowledge_points(raw_knowledge_points)
 
@@ -147,6 +150,8 @@ def generate_learning_content_with_llm(
         max_workers=max_workers,
         visual_formatting_hints=visual_formatting_hints(fslsm_input),
         processing_perception_hints=processing_perception_hints(fslsm_processing, fslsm_perception),
+        session_adaptation_contract=session_adaptation_contract,
+        lightweight_llm=_lightweight_llm,
         search_rag_manager=search_rag_manager,
     )
     knowledge_drafts = _extract_knowledge_drafts(raw_knowledge_drafts)
@@ -237,6 +242,7 @@ def generate_learning_content_with_llm(
         media_resources=media_resources if media_resources else None,
         narrative_resources=narrative_resources if narrative_resources else None,
         inline_assets_plan=inline_assets_plan,
+        session_adaptation_contract=session_adaptation_contract,
         understanding_hints=understanding_hints(fslsm_understanding),
     )
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, field_validator
 from base import BaseAgent
 from ..prompts.learning_document_integrator import integrated_document_generator_system_prompt, integrated_document_generator_task_prompt
 from ..schemas import DocumentStructure
+from ..utils import build_session_adaptation_contract, format_session_adaptation_contract
 
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,17 @@ class IntegratedDocPayload(BaseModel):
     learning_session: Any
     knowledge_points: Any
     knowledge_drafts: Any
+    session_adaptation_contract: Any = ""
     understanding_hints: str = ""
 
-    @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_drafts")
+    @field_validator(
+        "learner_profile",
+        "learning_path",
+        "learning_session",
+        "knowledge_points",
+        "knowledge_drafts",
+        "session_adaptation_contract",
+    )
     @classmethod
     def coerce_jsonish(cls, v: Any) -> Any:
         if isinstance(v, BaseModel):
@@ -58,15 +67,19 @@ def integrate_learning_document_with_llm(
     media_resources: Optional[List[dict]] = None,
     narrative_resources: Optional[List[dict]] = None,
     inline_assets_plan: Optional[List[dict]] = None,
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
     understanding_hints: str = "",
 ):
     logger.info(f'Integrating learning document with {len(knowledge_points)} knowledge points and {len(knowledge_drafts)} drafts...')
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     input_dict = {
         'learner_profile': learner_profile,
         'learning_path': learning_path,
         'learning_session': learning_session,
         'knowledge_points': knowledge_points,
         'knowledge_drafts': knowledge_drafts,
+        'session_adaptation_contract': format_session_adaptation_contract(session_adaptation_contract),
         'understanding_hints': understanding_hints,
     }
     learning_document_integrator = LearningDocumentIntegrator(llm)
@@ -246,6 +259,54 @@ def _render_inline_asset(resource: dict) -> str:
     return ""
 
 
+def _sequential_section_body(knowledge_drafts) -> str:
+    body_parts: List[str] = []
+    for idx, draft in enumerate(knowledge_drafts or []):
+        if not isinstance(draft, dict):
+            continue
+        title = str(draft.get("title") or f"Section {idx + 1}").strip()
+        content = str(draft.get("content") or "").strip()
+        body_parts.append(f"## {title}\n\n{content}")
+    return "\n\n".join(body_parts).strip()
+
+
+def _canonical_body(document_structure, knowledge_points, knowledge_drafts) -> str:
+    content = str(document_structure.get("content", "") or "").strip() if isinstance(document_structure, dict) else ""
+    if content:
+        if re.search(r"^##\s+", content, re.MULTILINE):
+            return content
+        return _sequential_section_body(knowledge_drafts)
+    return _sequential_section_body(knowledge_drafts)
+
+
+def _inject_assets_into_body(body: str, inline_by_section: Dict[int, List[dict]]) -> str:
+    if not body.strip() or not inline_by_section:
+        return body
+    matches = list(re.finditer(r"^##\s+.+$", body, re.MULTILINE))
+    if not matches:
+        return body
+
+    sections: List[str] = []
+    for idx, match in enumerate(matches):
+        start = match.start()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+        section_text = body[start:end].rstrip()
+        asset_blocks = "".join(_render_inline_asset(asset) for asset in inline_by_section.get(idx, []))
+        if asset_blocks:
+            section_text = f"{section_text}\n{asset_blocks}".rstrip()
+        sections.append(section_text)
+
+    extras: List[dict] = []
+    for idx, assets in inline_by_section.items():
+        if idx >= len(matches):
+            extras.extend(assets)
+    if extras:
+        extra_block = "".join(_render_inline_asset(asset) for asset in extras)
+        if extra_block:
+            sections.append(f"## Additional Learning Resources\n{extra_block}".rstrip())
+    return "\n\n".join(sections).strip()
+
+
 def prepare_markdown_document(
     document_structure,
     knowledge_points,
@@ -284,12 +345,6 @@ def prepare_markdown_document(
     if not isinstance(knowledge_drafts, list):
         knowledge_drafts = []
 
-    part_titles = {
-        'foundational': "## Foundational Concepts",
-        'practical': "## Practical Applications",
-        'strategic': "## Strategic Insights",
-    }
-
     if inline_assets_plan is None:
         inline_assets_plan, _ = build_inline_assets_plan(
             knowledge_points=knowledge_points,
@@ -306,16 +361,10 @@ def prepare_markdown_document(
     title = document_structure.get('title', '') if isinstance(document_structure, dict) else ''
     md = f"# {title}"
     md += f"\n\n{document_structure.get('overview','') if isinstance(document_structure, dict) else ''}"
-    for k_type, header in part_titles.items():
-        md += f"\n\n{header}\n"
-        for idx, kp in enumerate(knowledge_points or []):
-            if not isinstance(kp, dict) or kp.get('type') != k_type:
-                continue
-            kd = knowledge_drafts[idx] if idx < len(knowledge_drafts) else {}
-            if isinstance(kd, dict):
-                md += f"\n\n### {kd.get('title','')}\n\n{kd.get('content','')}\n"
-                for asset in inline_by_section.get(idx, []):
-                    md += _render_inline_asset(asset)
+    body = _canonical_body(document_structure, knowledge_points, knowledge_drafts)
+    body = _inject_assets_into_body(body, inline_by_section)
+    if body:
+        md += f"\n\n{body}"
     md += f"\n\n## Summary\n\n{document_structure.get('summary','') if isinstance(document_structure, dict) else ''}"
 
     return md

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class KnowledgeType(str, Enum):
@@ -24,6 +24,30 @@ class KnowledgeDraft(BaseModel):
     title: str
     content: str
     sources_used: Optional[List[dict]] = None
+
+
+class KnowledgeDraftEvaluationFeedback(BaseModel):
+    coherence: str
+    content_completeness: str
+    personalization: str
+    solo_alignment: str
+
+
+class KnowledgeDraftEvaluation(BaseModel):
+    feedback: KnowledgeDraftEvaluationFeedback
+    is_acceptable: bool = Field(default=True)
+    issues: List[str] = Field(default_factory=list)
+    improvement_directives: str = Field(default="")
+
+    @field_validator("improvement_directives", mode="before")
+    @classmethod
+    def coerce_improvement_directives(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            parts = [str(item).strip() for item in value if str(item).strip()]
+            return "\n".join(parts)
+        return str(value).strip()
 
 
 class DocumentStructure(BaseModel):

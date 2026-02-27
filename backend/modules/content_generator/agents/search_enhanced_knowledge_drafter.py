@@ -15,6 +15,14 @@ from modules.content_generator.prompts.search_enhanced_knowledge_drafter import 
     search_enhanced_knowledge_drafter_task_prompt,
 )
 from modules.content_generator.schemas import KnowledgeDraft
+from .knowledge_draft_evaluator import (
+    deterministic_knowledge_draft_audit,
+    evaluate_knowledge_draft_with_llm,
+)
+from modules.content_generator.utils import (
+    build_session_adaptation_contract,
+    format_session_adaptation_contract,
+)
 from config.loader import default_config
 
 
@@ -27,9 +35,18 @@ class KnowledgeDraftPayload(BaseModel):
     external_resources: str | None = ""
     visual_formatting_hints: str = ""
     processing_perception_hints: str = ""
+    session_adaptation_contract: Any = ""
     goal_context: Optional[Mapping[str, Any]] = None
+    evaluator_feedback: str = ""
 
-    @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_point")
+    @field_validator(
+        "learner_profile",
+        "learning_path",
+        "learning_session",
+        "knowledge_points",
+        "knowledge_point",
+        "session_adaptation_contract",
+    )
     @classmethod
     def coerce_jsonish(cls, v: Any) -> Any:
         if isinstance(v, BaseModel):
@@ -574,12 +591,17 @@ def draft_knowledge_point_with_llm(
     use_search: bool = True,
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
+    lightweight_llm: Any = None,
+    max_revision_passes: int = 1,
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     goal_context: Optional[Mapping[str, Any]] = None,
 ):
     """Draft a single knowledge point using the agent, optionally enriching with a SearchRagManager."""
     drafter = SearchEnhancedKnowledgeDrafter(llm, search_rag_manager=search_rag_manager, use_search=use_search)
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     payload = {
         "learner_profile": learner_profile,
         "learning_path": learning_path,
@@ -589,15 +611,48 @@ def draft_knowledge_point_with_llm(
         "goal_context": goal_context,
         "visual_formatting_hints": visual_formatting_hints,
         "processing_perception_hints": processing_perception_hints,
+        "session_adaptation_contract": format_session_adaptation_contract(session_adaptation_contract),
+        "evaluator_feedback": "",
     }
-    result = drafter.draft(payload)
-    # Post-process: render diagram code blocks to SVG static files
-    try:
-        from .diagram_renderer import render_diagrams_in_markdown
-        if result.get("content"):
-            result["content"] = render_diagrams_in_markdown(result["content"])
-    except Exception:
-        pass   # never break drafting due to diagram rendering failure
+
+    evaluator_model = lightweight_llm or llm
+    evaluation_history: List[dict[str, Any]] = []
+    result: dict[str, Any] = {}
+
+    for attempt in range(max(0, int(max_revision_passes)) + 1):
+        result = drafter.draft(payload)
+        # Post-process: render diagram code blocks to SVG static files
+        try:
+            from .diagram_renderer import render_diagrams_in_markdown
+            if result.get("content"):
+                result["content"] = render_diagrams_in_markdown(result["content"])
+        except Exception:
+            pass   # never break drafting due to diagram rendering failure
+
+        deterministic_eval = deterministic_knowledge_draft_audit(result)
+        evaluation = deterministic_eval
+        if deterministic_eval.get("is_acceptable", False):
+            try:
+                evaluation = evaluate_knowledge_draft_with_llm(
+                    evaluator_model,
+                    learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                    learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                    knowledge_point=knowledge_point if isinstance(knowledge_point, Mapping) else {},
+                    knowledge_draft=result,
+                    session_adaptation_contract=payload["session_adaptation_contract"],
+                )
+            except Exception:
+                evaluation = deterministic_eval
+
+        evaluation_history.append(evaluation)
+        if evaluation.get("is_acceptable", True) or attempt >= max_revision_passes:
+            break
+        payload["evaluator_feedback"] = str(evaluation.get("improvement_directives", "") or "").strip()
+
+    if evaluation_history:
+        result["draft_quality_evaluation"] = evaluation_history[-1]
+        if len(evaluation_history) > 1:
+            result["draft_quality_evaluation_history"] = evaluation_history
     return result
 
 
@@ -612,6 +667,9 @@ def draft_knowledge_points_with_llm(
     max_workers: int = 8,
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
+    lightweight_llm: Any = None,
+    max_revision_passes: int = 1,
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     goal_context: Optional[Mapping[str, Any]] = None,
@@ -621,6 +679,8 @@ def draft_knowledge_points_with_llm(
         learning_session = ast.literal_eval(learning_session)
     if isinstance(knowledge_points, str):
         knowledge_points = ast.literal_eval(knowledge_points)
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     if search_rag_manager is None and use_search:
         search_rag_manager = SearchRagManager.from_config(default_config)
     def draft_one(kp):
@@ -635,6 +695,9 @@ def draft_knowledge_points_with_llm(
             use_search=use_search,
             visual_formatting_hints=visual_formatting_hints,
             processing_perception_hints=processing_perception_hints,
+            session_adaptation_contract=session_adaptation_contract,
+            lightweight_llm=lightweight_llm,
+            max_revision_passes=max_revision_passes,
             search_rag_manager=search_rag_manager,
         )
 

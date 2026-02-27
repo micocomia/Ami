@@ -1555,6 +1555,7 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
 @app.post("/draft-knowledge-point")
 async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     from modules.content_generator.utils import (
+        build_session_adaptation_contract,
         get_fslsm_dim,
         get_fslsm_input,
         processing_perception_hints,
@@ -1573,6 +1574,7 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     fslsm_perception = get_fslsm_dim(learner_profile, "fslsm_perception")
     visual_hints = visual_formatting_hints(fslsm_input)
     proc_perc_hints = processing_perception_hints(fslsm_processing, fslsm_perception)
+    session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     try:
         knowledge_draft = draft_knowledge_point_with_llm(
             llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
@@ -1580,6 +1582,7 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
             goal_context=goal_context,
             visual_formatting_hints=visual_hints,
             processing_perception_hints=proc_perc_hints,
+            session_adaptation_contract=session_adaptation_contract,
             search_rag_manager=search_rag_manager,
         )
         return {"knowledge_draft": knowledge_draft}

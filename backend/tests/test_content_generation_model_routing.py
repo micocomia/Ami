@@ -84,6 +84,7 @@ def test_orchestrator_passes_lightweight_to_support_steps(
 
     assert mock_filter_media.call_args.kwargs["lightweight_llm"] is lightweight
     assert mock_narratives.call_args.kwargs["lightweight_llm"] is lightweight
+    assert mock_draft.call_args.kwargs["lightweight_llm"] is lightweight
 
 
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
@@ -144,6 +145,7 @@ def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
 
     assert mock_filter_media.call_args.kwargs["lightweight_llm"] is primary
     assert mock_narratives.call_args.kwargs["lightweight_llm"] is primary
+    assert mock_draft.call_args.kwargs["lightweight_llm"] is primary
 
 
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")

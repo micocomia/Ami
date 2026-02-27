@@ -148,6 +148,61 @@ class TestProcessingPerceptionHints:
 
 
 # ---------------------------------------------------------------------------
+# TestSessionAdaptationContract
+# ---------------------------------------------------------------------------
+
+class TestSessionAdaptationContract:
+
+    def _import(self):
+        from modules.content_generator.utils.fslsm_adaptation import build_session_adaptation_contract
+        return build_session_adaptation_contract
+
+    def test_prefers_session_fields_and_recovers_strength(self):
+        build_session_adaptation_contract = self._import()
+        contract = build_session_adaptation_contract(
+            {
+                "has_checkpoint_challenges": True,
+                "thinking_time_buffer_minutes": 0,
+                "session_sequence_hint": "application-first",
+            },
+            {
+                "learning_preferences": {
+                    "fslsm_dimensions": {
+                        "fslsm_processing": -0.9,
+                        "fslsm_perception": -0.8,
+                    }
+                }
+            },
+        )
+        assert contract["processing"]["mode"] == "active"
+        assert contract["processing"]["checkpoint_frequency"] == "multiple"
+        assert contract["perception"]["mode"] == "application_first"
+        assert contract["perception"]["section_order"] == ["application", "example", "theory"]
+
+    def test_reflective_and_theory_first_contract(self):
+        build_session_adaptation_contract = self._import()
+        contract = build_session_adaptation_contract(
+            {
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 5,
+                "session_sequence_hint": "theory-first",
+            },
+            {
+                "learning_preferences": {
+                    "fslsm_dimensions": {
+                        "fslsm_processing": 0.5,
+                        "fslsm_perception": 0.6,
+                    }
+                }
+            },
+        )
+        assert contract["processing"]["mode"] == "reflective"
+        assert contract["processing"]["reflection_level"] == "brief"
+        assert contract["perception"]["mode"] == "theory_first"
+        assert contract["perception"]["section_order"] == ["theory", "pattern", "example"]
+
+
+# ---------------------------------------------------------------------------
 # TestUnderstandingHints
 # ---------------------------------------------------------------------------
 
@@ -556,6 +611,71 @@ class TestPrepareMarkdownDocumentWithMedia:
         assert "#### 📖 Short Story: The Variable Detective" in doc
         assert "youtube.com" in doc
         assert "Supplementary Learning Resources" not in doc
+
+    def test_integrated_content_is_canonical(self):
+        prepare_markdown_document = self._import()
+        doc = prepare_markdown_document(
+            {
+                "title": "My Doc",
+                "overview": "An overview.",
+                "content": "## Applied Example\n\nStart with the case.\n\n## Core Theory\n\nExplain the principle.",
+                "summary": "A summary.",
+            },
+            [
+                {"name": "Theory", "type": "foundational"},
+                {"name": "Example", "type": "practical"},
+            ],
+            [
+                {"title": "Theory", "content": "Foundational body."},
+                {"title": "Example", "content": "Practical body."},
+            ],
+            media_resources=None,
+        )
+        assert "## Applied Example" in doc
+        assert "## Core Theory" in doc
+        assert doc.index("## Applied Example") < doc.index("## Core Theory")
+        assert "## Foundational Concepts" not in doc
+
+    def test_content_without_h2_falls_back_to_sequential_sections(self):
+        prepare_markdown_document = self._import()
+        doc = prepare_markdown_document(
+            {
+                "title": "My Doc",
+                "overview": "An overview.",
+                "content": "Integrated body without explicit section headings.",
+                "summary": "A summary.",
+            },
+            [{"name": "Python Basics", "type": "foundational"}],
+            [{"title": "Variables", "content": "Intro content."}],
+            media_resources=None,
+        )
+        assert "## Variables" in doc
+        assert "Integrated body without explicit section headings." not in doc
+
+    def test_empty_content_uses_draft_order_not_legacy_grouping(self):
+        prepare_markdown_document = self._import()
+        doc = prepare_markdown_document(
+            {
+                "title": "My Doc",
+                "overview": "An overview.",
+                "content": "",
+                "summary": "A summary.",
+            },
+            [
+                {"name": "Theory", "type": "foundational"},
+                {"name": "Example", "type": "practical"},
+            ],
+            [
+                {"title": "Applied Example", "content": "Start with the case."},
+                {"title": "Core Theory", "content": "Explain the principle."},
+            ],
+            media_resources=None,
+        )
+        assert "## Applied Example" in doc
+        assert "## Core Theory" in doc
+        assert doc.index("## Applied Example") < doc.index("## Core Theory")
+        assert "## Foundational Concepts" not in doc
+        assert "## Practical Applications" not in doc
 
 
 class TestInlineAssetPlanner:

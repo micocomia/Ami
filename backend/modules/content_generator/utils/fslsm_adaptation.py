@@ -1,26 +1,27 @@
 from __future__ import annotations
 
 import ast
+import json
 from typing import Any
 
 _FSLSM_STRONG = 0.7
 _FSLSM_MODERATE = 0.3
 
 
-def _as_profile_dict(learner_profile: Any) -> dict:
-    if isinstance(learner_profile, str):
+def _as_mapping(value: Any) -> dict:
+    if isinstance(value, str):
         try:
-            learner_profile = ast.literal_eval(learner_profile)
+            value = ast.literal_eval(value)
         except Exception:
             return {}
-    if isinstance(learner_profile, dict):
-        return learner_profile
+    if isinstance(value, dict):
+        return value
     return {}
 
 
 def get_fslsm_input(learner_profile: Any) -> float:
     """Extract fslsm_input value from a learner profile dict. Returns 0.0 on missing/error."""
-    profile = _as_profile_dict(learner_profile)
+    profile = _as_mapping(learner_profile)
     if not profile:
         return 0.0
     try:
@@ -39,7 +40,7 @@ def get_fslsm_input(learner_profile: Any) -> float:
 
 def get_fslsm_dim(learner_profile: Any, dim_name: str) -> float:
     """Extract a named FSLSM dimension value from a learner profile dict. Returns 0.0 on missing/error."""
-    profile = _as_profile_dict(learner_profile)
+    profile = _as_mapping(learner_profile)
     if not profile:
         return 0.0
     try:
@@ -86,6 +87,96 @@ def processing_perception_hints(processing: float, perception: float) -> str:
     if not parts:
         return ""
     return "\n\n**Learning Style Instructions**:\n" + "\n".join(f"- {p}" for p in parts)
+
+
+def build_session_adaptation_contract(learning_session: Any, learner_profile: Any) -> dict[str, Any]:
+    """Derive a richer backend-only session adaptation contract.
+
+    Scheduled session fields are the primary source of truth. Raw FSLSM scores only
+    recover intensity when the scheduled session does not encode it directly.
+    """
+    session = _as_mapping(learning_session)
+    processing_score = get_fslsm_dim(learner_profile, "fslsm_processing")
+    perception_score = get_fslsm_dim(learner_profile, "fslsm_perception")
+
+    has_checkpoint = bool(session.get("has_checkpoint_challenges", False))
+    thinking_minutes = int(session.get("thinking_time_buffer_minutes") or 0)
+    sequence_hint = str(session.get("session_sequence_hint") or "").strip().lower()
+
+    processing_mode = "balanced"
+    processing_intensity = "none"
+    checkpoint_frequency = "none"
+    reflection_level = "none"
+
+    if has_checkpoint:
+        processing_mode = "active"
+        processing_intensity = "strong" if processing_score <= -_FSLSM_STRONG else "mild"
+        checkpoint_frequency = "multiple" if processing_intensity == "strong" else "single"
+    elif thinking_minutes > 0:
+        processing_mode = "reflective"
+        processing_intensity = "strong" if (thinking_minutes >= 10 or processing_score >= _FSLSM_STRONG) else "mild"
+        reflection_level = "extended" if thinking_minutes >= 10 else "brief"
+    elif processing_score <= -_FSLSM_MODERATE:
+        processing_mode = "active"
+        processing_intensity = "strong" if processing_score <= -_FSLSM_STRONG else "mild"
+        checkpoint_frequency = "multiple" if processing_intensity == "strong" else "single"
+    elif processing_score >= _FSLSM_MODERATE:
+        processing_mode = "reflective"
+        processing_intensity = "strong" if processing_score >= _FSLSM_STRONG else "mild"
+        reflection_level = "extended" if processing_intensity == "strong" else "brief"
+
+    perception_mode = "balanced"
+    perception_intensity = "none"
+    conceptual_leap_allowance = "normal"
+    section_order = ["concept", "example", "application"]
+
+    if sequence_hint == "application-first":
+        perception_mode = "application_first"
+        perception_intensity = "strong" if perception_score <= -_FSLSM_STRONG else "mild"
+        conceptual_leap_allowance = "low"
+        section_order = ["application", "example", "theory"]
+    elif sequence_hint == "theory-first":
+        perception_mode = "theory_first"
+        perception_intensity = "strong" if perception_score >= _FSLSM_STRONG else "mild"
+        conceptual_leap_allowance = "high" if perception_intensity == "strong" else "normal"
+        section_order = ["theory", "pattern", "example"]
+    elif perception_score <= -_FSLSM_MODERATE:
+        perception_mode = "application_first"
+        perception_intensity = "strong" if perception_score <= -_FSLSM_STRONG else "mild"
+        conceptual_leap_allowance = "low"
+        section_order = ["application", "example", "theory"]
+    elif perception_score >= _FSLSM_MODERATE:
+        perception_mode = "theory_first"
+        perception_intensity = "strong" if perception_score >= _FSLSM_STRONG else "mild"
+        conceptual_leap_allowance = "high" if perception_intensity == "strong" else "normal"
+        section_order = ["theory", "pattern", "example"]
+
+    return {
+        "processing": {
+            "mode": processing_mode,
+            "intensity": processing_intensity,
+            "checkpoint_frequency": checkpoint_frequency,
+            "reflection_level": reflection_level,
+        },
+        "perception": {
+            "mode": perception_mode,
+            "intensity": perception_intensity,
+            "conceptual_leap_allowance": conceptual_leap_allowance,
+            "section_order": section_order,
+        },
+    }
+
+
+def format_session_adaptation_contract(contract: Any) -> str:
+    """Return a stable prompt-friendly JSON rendering of the internal contract."""
+    if isinstance(contract, str):
+        return contract.strip()
+    if isinstance(contract, dict):
+        try:
+            return json.dumps(contract, indent=2, sort_keys=True)
+        except Exception:
+            return str(contract)
+    return ""
 
 
 def understanding_hints(understanding: float) -> str:
