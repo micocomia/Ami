@@ -1,12 +1,17 @@
 import json
-import time
-import copy
 import re
 import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
-from components.time_tracking import track_session_learning_start_time
-from utils.request_api import generate_learning_content, update_cognitive_status, update_learning_preferences, get_app_config, evaluate_mastery
+from utils.request_api import (
+    complete_session,
+    delete_learning_content,
+    evaluate_mastery,
+    generate_learning_content,
+    get_learning_content,
+    post_session_activity,
+    submit_content_feedback,
+)
 from utils.format import inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
 from config import use_mock_data, use_search, backend_endpoint, backend_public_endpoint
@@ -33,6 +38,33 @@ def _absolutize_backend_url(path_or_url: str) -> str:
     return f"{_current_backend_public_base()}/{path_or_url.lstrip('/')}"
 
 
+def _replace_current_goal(updated_goal):
+    if not isinstance(updated_goal, dict):
+        return
+    selected_goal_id = st.session_state.get("selected_goal_id")
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list):
+        return
+    for idx, goal in enumerate(goals):
+        if isinstance(goal, dict) and str(goal.get("id")) == str(selected_goal_id):
+            goals[idx] = updated_goal
+            break
+
+
+def _cache_learning_content(session_uid, learning_content):
+    st.session_state.setdefault("document_caches", {})[session_uid] = learning_content
+    return learning_content
+
+
+def _end_current_session_activity():
+    user_id = st.session_state.get("userId")
+    goal_id = st.session_state.get("selected_goal_id")
+    session_index = st.session_state.get("selected_session_id")
+    if user_id is None or goal_id is None or session_index is None:
+        return
+    post_session_activity(user_id, goal_id, session_index, "end")
+
+
 def render_learning_content():
     if 'if_render_qizzes' not in st.session_state:
         st.session_state['if_render_qizzes'] = False
@@ -51,8 +83,6 @@ def render_learning_content():
 
     render_session_details(goal)
     session_uid = get_current_session_uid()
-    session_id = st.session_state["selected_session_id"]
-    selected_gid = st.session_state["selected_goal_id"]
     is_document_available = st.session_state["document_caches"].get(session_uid, False)
     if not is_document_available and not st.session_state["if_updating_learner_profile"]:
         learning_content = render_content_preparation(goal)
@@ -60,7 +90,6 @@ def render_learning_content():
             st.error("Failed to prepare knowledge content.")
             return
     else:
-        track_session_learning_start_time()
         learning_content = st.session_state["document_caches"].get(session_uid, "")
 
         # Show content format badge and audio player (Sprint 3: audio-visual adaptive content)
@@ -85,7 +114,11 @@ def render_learning_content():
         document = learning_content["document"]
         sources_used = learning_content.get("sources_used", [])
         if render_type == "by_section":
-            render_document_content_by_section(document, sources_used)
+            render_document_content_by_section(
+                document,
+                sources_used,
+                learning_content.get("view_model"),
+            )
         else:
             render_document_content_by_document(document)
 
@@ -111,7 +144,13 @@ def render_learning_content():
                 complete_disabled_bottom = complete_button_status or st.session_state["if_updating_learner_profile"]
 
             if st.button("Regenerate", icon=":material/refresh:"):
+                _end_current_session_activity()
                 st.session_state["document_caches"].pop(session_uid)
+                delete_learning_content(
+                    st.session_state.get("userId"),
+                    st.session_state.get("selected_goal_id"),
+                    st.session_state.get("selected_session_id"),
+                )
                 try:
                     save_persistent_state()
                 except Exception:
@@ -129,30 +168,30 @@ def render_learning_content():
 
 
 def render_motivational_triggers():
-    curr_time = time.time()
-    session_uid = get_current_session_uid()
-    session_learning_times = st.session_state["session_learning_times"][session_uid]
-    last_session_trigger_time = session_learning_times["trigger_time_list"][-1]
-    last_session_trigger_time_index = len(session_learning_times["trigger_time_list"])
-    trigger_interval = get_app_config()["motivational_trigger_interval_secs"]
-    if curr_time - last_session_trigger_time > trigger_interval:
-        if last_session_trigger_time_index % 2 == 0:
-            st.toast("🌟 Stay hydrated and keep a healthy posture.")
-        else:
-            st.toast("🚀 Keep up the good work!")
-        session_learning_times["trigger_time_list"].append(curr_time)
+    result = post_session_activity(
+        st.session_state.get("userId"),
+        st.session_state.get("selected_goal_id"),
+        st.session_state.get("selected_session_id"),
+        "heartbeat",
+    )
+    trigger = (result or {}).get("trigger", {})
+    if trigger.get("show") and trigger.get("message"):
+        st.toast(trigger["message"])
 
 def _handle_session_completion(goal, selected_sid, session_info):
     """Handle session completion: update profile, mark learned, navigate away."""
-    session_uid = get_current_session_uid()
     with st.spinner("Updating learner profile..."):
-        result = update_learner_profile_with_feedback(goal, "", session_information=session_info)
+        result = complete_session(
+            st.session_state.get("userId"),
+            st.session_state.get("selected_goal_id"),
+            selected_sid,
+        )
     if not result:
         st.session_state["if_updating_learner_profile"] = False
         return
-    session_info["if_learned"] = True
-    if session_uid in st.session_state.get("session_learning_times", {}):
-        st.session_state["session_learning_times"][session_uid]["end_time"] = time.time()
+    updated_goal = result.get("goal")
+    if isinstance(updated_goal, dict):
+        _replace_current_goal(updated_goal)
     st.session_state["if_updating_learner_profile"] = False
     try:
         save_persistent_state()
@@ -169,6 +208,7 @@ def render_session_details(goal):
     col1, col2, col3, col4 = st.columns([1, 2, 1, 1])
     with col1:
         if st.button("Back", icon=":material/arrow_back:", key="back-learning-center"):
+            _end_current_session_activity()
             st.session_state["selected_page"] = "Learning Path"
             st.session_state["current_page"][session_uid] = 0
 
@@ -180,7 +220,13 @@ def render_session_details(goal):
 
     with col3:
         if st.button("Regenerate", icon=":material/refresh:", key="regenerate-content-top"):
+            _end_current_session_activity()
             st.session_state["document_caches"].pop(session_uid)
+            delete_learning_content(
+                st.session_state.get("userId"),
+                st.session_state.get("selected_goal_id"),
+                st.session_state.get("selected_session_id"),
+            )
             try:
                 save_persistent_state()
             except Exception:
@@ -225,18 +271,26 @@ def render_session_details(goal):
 
 def render_content_preparation(goal):
     selected_sid = st.session_state["selected_session_id"]
+    selected_gid = st.session_state["selected_goal_id"]
+    user_id = st.session_state.get("userId")
     learning_session = goal["learning_path"][selected_sid]
     session_uid = get_current_session_uid()
     if use_mock_data:
         st.warning("Using mock data for knowledge document.")
         file_path = "./assets/data_example/knowledge_document.json"
         learning_content = load_knowledge_point_content(file_path)
-        st.session_state["document_caches"][session_uid] = learning_content
+        _cache_learning_content(session_uid, learning_content)
         try:
             save_persistent_state()
         except Exception:
             pass
         return learning_content
+
+    if user_id is not None:
+        cached_learning_content = get_learning_content(user_id, selected_gid, selected_sid)
+        if cached_learning_content:
+            _cache_learning_content(session_uid, cached_learning_content)
+            return cached_learning_content
 
     with st.spinner("Generating personalized learning content..."):
         learning_content = generate_learning_content(
@@ -247,6 +301,9 @@ def render_content_preparation(goal):
             allow_parallel=True,
             with_quiz=True,
             goal_context=goal.get("goal_context"),
+            user_id=user_id,
+            goal_id=selected_gid,
+            session_index=selected_sid,
             llm_type="gpt4o",
         )
 
@@ -255,7 +312,7 @@ def render_content_preparation(goal):
         return
 
     learning_content.setdefault("sources_used", [])
-    st.session_state["document_caches"][session_uid] = learning_content
+    _cache_learning_content(session_uid, learning_content)
     try:
         save_persistent_state()
     except Exception:
@@ -263,33 +320,84 @@ def render_content_preparation(goal):
     st.rerun()
     return learning_content
 
-def render_document_content_by_section(document, sources_used=None):
+def render_document_content_by_section(document, sources_used=None, view_model=None):
     selected_gid = st.session_state["selected_goal_id"]
     session_id = st.session_state["selected_session_id"]
     if "current_page" not in st.session_state or not isinstance(st.session_state["current_page"], dict):
         st.session_state["current_page"] = {}
 
-    titles = re.findall(r'^(#+)\s*(.*)', document, re.MULTILINE)
-
-    section_starts = []
-    start_idx = 0
-    for title in titles:
-        if title[0] == "#":
-            continue
-        elif title[0] == "##":
-            start_idx = document.find(title[1], start_idx)
-            section_starts.append(start_idx-3)
     section_documents = []
+    sidebar_items = []
     references_section = None
-    for i in range(len(section_starts)):
-        start_idx = section_starts[i]
-        end_idx = section_starts[i + 1] if i + 1 < len(section_starts) else len(document)
-        section_text = document[start_idx:end_idx-1].strip()
-        # Extract References section so it can be shown persistently
-        if section_text.startswith("## References"):
-            references_section = section_text
-        else:
-            section_documents.append(section_text)
+    if isinstance(view_model, dict) and view_model.get("sections"):
+        for idx, section in enumerate(view_model.get("sections", [])):
+            if not isinstance(section, dict):
+                continue
+            section_documents.append(section.get("markdown", ""))
+            sidebar_items.append({
+                "title": section.get("title", f"Section {idx + 1}"),
+                "anchor": section.get("anchor", ""),
+                "level": int(section.get("level", 2) or 2),
+                "page_index": idx,
+            })
+        references = view_model.get("references", [])
+        if references:
+            references_section = "\n".join(
+                f"{item.get('index', idx + 1)}. {item.get('label', '')}"
+                for idx, item in enumerate(references)
+                if isinstance(item, dict)
+            )
+    else:
+        titles = re.findall(r'^(#+)\s*(.*)', document, re.MULTILINE)
+
+        section_starts = []
+        start_idx = 0
+        for title in titles:
+            if title[0] == "#":
+                continue
+            elif title[0] == "##":
+                start_idx = document.find(title[1], start_idx)
+                section_starts.append(start_idx-3)
+        for i in range(len(section_starts)):
+            start_idx = section_starts[i]
+            end_idx = section_starts[i + 1] if i + 1 < len(section_starts) else len(document)
+            section_text = document[start_idx:end_idx-1].strip()
+            if section_text.startswith("## References"):
+                references_section = section_text
+            else:
+                section_documents.append(section_text)
+        curr_l2 = 0
+        curr_l3 = 0
+        page_idx_counter = -1
+        for m in re.finditer(r'^(#+)\s*(.+)$', document, re.MULTILINE):
+            level_marks, title_txt = m.group(1), m.group(2).strip()
+            level_len = len(level_marks)
+            if level_len == 1:
+                continue
+            if level_len == 2 and title_txt == "References":
+                continue
+            if level_len == 2:
+                page_idx_counter += 1
+                curr_l2 += 1
+                curr_l3 = 0
+                sidebar_items.append({
+                    "title": f"{curr_l2}. {title_txt}",
+                    "anchor": title_txt.lower().replace(' ', '-').replace('，', '').replace('。', ''),
+                    "level": 2,
+                    "page_index": page_idx_counter,
+                })
+            elif level_len == 3 and page_idx_counter >= 0:
+                curr_l3 += 1
+                sidebar_items.append({
+                    "title": f"{curr_l2}.{curr_l3}. {title_txt}",
+                    "anchor": title_txt.lower().replace(' ', '-').replace('，', '').replace('。', ''),
+                    "level": 3,
+                    "page_index": page_idx_counter,
+                })
+
+    if not section_documents:
+        st.warning("No document sections are available.")
+        return
 
     page_key = f"{selected_gid}-{session_id}"
     params = {}
@@ -341,33 +449,18 @@ def render_document_content_by_section(document, sources_used=None):
 
     if references_section:
         with st.expander("References", expanded=False, icon=":material/menu_book:"):
-            # Skip the "## References" header line and render the body
-            ref_body = "\n".join(references_section.split("\n")[1:]).strip()
+            ref_body = "\n".join(references_section.split("\n")[1:]).strip() if references_section.startswith("## ") else references_section
             st.markdown(ref_body)
 
     st.sidebar.header("Document Structure")
-    curr_l2 = 0
-    curr_l3 = 0
-    page_idx_counter = -1
-    for m in re.finditer(r'^(#+)\s*(.+)$', document, re.MULTILINE):
-        level_marks, title_txt = m.group(1), m.group(2).strip()
-        level_len = len(level_marks)
-        if level_len == 1:
-            continue
-        if level_len == 2 and title_txt == "References":
-            continue
-        if level_len == 2:
-            page_idx_counter += 1
-            curr_l2 += 1
-            curr_l3 = 0
-            if st.sidebar.button(f"{curr_l2}. {title_txt}", key=f"toc_l2_{page_idx_counter}", type="primary" if page_idx_counter == current_page else "secondary"):
-                st.session_state.setdefault("current_page", {})[page_key] = page_idx_counter
+    for idx, item in enumerate(sidebar_items):
+        if item["level"] == 2:
+            if st.sidebar.button(item["title"], key=f"toc_l2_{idx}", type="primary" if item["page_index"] == current_page else "secondary"):
+                st.session_state.setdefault("current_page", {})[page_key] = item["page_index"]
                 st.rerun()
             st.sidebar.markdown("")
-
-        elif level_len == 3 and page_idx_counter >= 0:
-            curr_l3 += 1
-            st.sidebar.markdown(f"&nbsp;&nbsp;&nbsp;[{curr_l2}.{curr_l3}. {title_txt}](#{title_txt.lower().replace(' ', '-').replace('，','').replace('。','')})", unsafe_allow_html=True)
+        elif item["level"] == 3:
+            st.sidebar.markdown(f"&nbsp;&nbsp;&nbsp;[{item['title']}](#{item['anchor']})", unsafe_allow_html=True)
 
     col_prev, col_center, col_next= st.columns([1, 4, 1])
     if current_page > 0:
@@ -689,41 +782,37 @@ def render_content_feedback_form(goal):
             "engagement": engagement,
             "additional_comments": additional_comments
         }
-        submitted = st.form_submit_button("Submit Feedback", on_click=update_learner_profile_with_feedback, kwargs={"feedback_data": feedback_data, "goal": goal})
+        submitted = st.form_submit_button("Submit Feedback")
         if submitted:
-            st.success("Thank you for your feedback!")
+            result = update_learner_profile_with_feedback(goal, feedback_data)
+            if result:
+                st.success("Thank you for your feedback!")
 
 def update_learner_profile_with_feedback(goal, feedback_data, session_information=""):
-    from utils.state import propagate_profile_fields_to_other_goals
     user_id = st.session_state.get("userId")
     goal_id = st.session_state.get("selected_goal_id")
     is_cognitive_update = session_information != ""
     if is_cognitive_update:
-        # Session completion → update only cognitive status
-        session_information = copy.deepcopy(session_information)
-        session_information["if_learned"] = True
-        new_learner_profile = update_cognitive_status(
-            goal["learner_profile"], session_information,
-            user_id=user_id, goal_id=goal_id,
+        response = complete_session(
+            user_id=user_id,
+            goal_id=goal_id,
+            session_index=st.session_state.get("selected_session_id"),
         )
     else:
-        # Content feedback → update only learning preferences
-        new_learner_profile = update_learning_preferences(
-            goal["learner_profile"], feedback_data,
-            user_id=user_id, goal_id=goal_id,
+        response = submit_content_feedback(
+            user_id=user_id,
+            goal_id=goal_id,
+            feedback=feedback_data,
         )
-    if new_learner_profile is None:
+    if response is None:
         st.error("Failed to update learner profile. Please try again.")
         return False
-    else:
-        goal["learner_profile"] = new_learner_profile
-        # Push changes to all other goals immediately
-        if is_cognitive_update:
-            propagate_profile_fields_to_other_goals(goal_id, sync_mastered_skills=True)
-        else:
-            propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
-        st.toast("🎉 Your profile has been updated!")
-        return True
+    updated_goal = response.get("goal")
+    if isinstance(updated_goal, dict):
+        _replace_current_goal(updated_goal)
+        goal.update(updated_goal)
+    st.toast("🎉 Your profile has been updated!")
+    return True
 
 def load_knowledge_point_content(file_path):
     try:

@@ -1,4 +1,3 @@
-import math
 import streamlit as st
 from utils.request_api import (
     create_learner_profile,
@@ -10,9 +9,7 @@ from utils.request_api import (
     delete_user_data,
 )
 from components.skill_info import render_skill_info
-from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
-from streamlit_extras.tags import tagger_component 
 from utils.state import (
     delete_persistent_state,
     get_selected_goal,

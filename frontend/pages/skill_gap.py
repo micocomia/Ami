@@ -9,7 +9,7 @@ from components.gap_identification import (
     render_skill_gap_summary,
     has_any_gap,
 )
-from utils.state import add_new_goal, get_new_goal_uid, save_persistent_state
+from utils.state import add_new_goal, save_persistent_state
 from utils.request_api import create_learner_profile, validate_profile_fairness
 
 
@@ -74,8 +74,6 @@ def render_skill_gap():
                                     goal["learning_goal"],
                                     st.session_state["learner_information"],
                                     skill_gaps,
-                                    user_id=st.session_state.get("userId"),
-                                    goal_id=get_new_goal_uid()
                                 )
                             except Exception as e:
                                 st.error("Backend call failed while creating learner profile.")
@@ -96,15 +94,6 @@ def render_skill_gap():
                                 goal["profile_fairness"] = fairness_result
                             except Exception:
                                 goal["profile_fairness"] = None
-
-                            # Sync the newly created profile with shared fields from existing goals
-                            from utils.request_api import sync_profile
-                            user_id = st.session_state.get("userId")
-                            new_gid = get_new_goal_uid()
-                            if user_id and learner_profile:
-                                merged = sync_profile(user_id, new_gid)
-                                if merged:
-                                    goal["learner_profile"] = merged
 
                     new_goal_id = add_new_goal(**goal)
                     st.session_state["selected_goal_id"] = new_goal_id

@@ -128,6 +128,13 @@ def _normalize_skill_gaps(skill_gaps):
 API_NAMES = {
     "auth_register": "auth/register",
     "auth_login": "auth/login",
+    "goals": "goals",
+    "goal_runtime_state": "goal-runtime-state",
+    "learning_content_cache": "learning-content",
+    "session_activity": "session-activity",
+    "complete_session": "complete-session",
+    "submit_content_feedback": "submit-content-feedback",
+    "dashboard_metrics": "dashboard-metrics",
     "chat_with_tutor": "chat-with-tutor",
     "refine_goal": "refine-learning-goal",
     "identify_skill_gap": "identify-skill-gap-with-info",
@@ -499,6 +506,9 @@ def generate_learning_content(
     allow_parallel=True,
     with_quiz=True,
     goal_context=None,
+    user_id=None,
+    goal_id=None,
+    session_index=None,
     llm_type=None,
     method_name=None,
 ):
@@ -516,12 +526,140 @@ def generate_learning_content(
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
+    if user_id is not None:
+        data["user_id"] = str(user_id)
+    if goal_id is not None:
+        data["goal_id"] = int(goal_id)
+    if session_index is not None:
+        data["session_index"] = int(session_index)
     response = make_post_request(API_NAMES["generate_learning_content"], data, "./assets/data_example/learning_document.json")
     if not response:
         return None
     if isinstance(response, dict) and isinstance(response.get("learning_content"), dict):
         return response["learning_content"]
     return response if isinstance(response, dict) else None
+
+
+def list_goals(user_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("goals", [])
+    except Exception:
+        pass
+    return []
+
+
+def create_goal(user_id, goal_payload):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}"
+    try:
+        resp = httpx.post(url, json=_coerce_jsonable(goal_payload), timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def update_goal(user_id, goal_id, patch_payload):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}/{goal_id}"
+    try:
+        resp = httpx.patch(url, json=_coerce_jsonable(patch_payload), timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def delete_goal(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}/{goal_id}"
+    try:
+        resp = httpx.delete(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_goal_runtime_state(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goal_runtime_state']}/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_learning_content(user_id, goal_id, session_index):
+    url = f"{_get_backend_endpoint()}{API_NAMES['learning_content_cache']}/{user_id}/{goal_id}/{session_index}"
+    try:
+        resp = httpx.get(url, timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def delete_learning_content(user_id, goal_id, session_index):
+    url = f"{_get_backend_endpoint()}{API_NAMES['learning_content_cache']}/{user_id}/{goal_id}/{session_index}"
+    try:
+        resp = httpx.delete(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def post_session_activity(user_id, goal_id, session_index, event_type, event_time=None):
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "event_type": str(event_type),
+    }
+    if event_time is not None:
+        data["event_time"] = str(event_time)
+    response = make_post_request(API_NAMES["session_activity"], data)
+    return response if response else None
+
+
+def complete_session(user_id, goal_id, session_index, session_end_time=None, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if session_end_time is not None:
+        data["session_end_time"] = str(session_end_time)
+    response = make_post_request(API_NAMES["complete_session"], data, timeout=120)
+    return response if response else None
+
+
+def submit_content_feedback(user_id, goal_id, feedback, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "feedback": _coerce_jsonable(feedback),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    response = make_post_request(API_NAMES["submit_content_feedback"], data, timeout=120)
+    return response if response else None
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
     """Submit quiz answers for mastery evaluation."""
@@ -585,40 +723,15 @@ def get_quiz_mix(user_id, goal_id, session_index):
     }
 
 
-def get_user_state(backend_ep, user_id):
-    """GET /user-state/{user_id} → (status_code, response_json)"""
-    if use_mock_data:
-        return 404, {"detail": "mock mode — no persisted state"}
-    url = f"{backend_ep}user-state/{user_id}"
+def get_dashboard_metrics(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['dashboard_metrics']}/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
-        return resp.status_code, resp.json()
-    except Exception as e:
-        return None, {"detail": str(e)}
-
-
-def save_user_state(backend_ep, user_id, state):
-    """PUT /user-state/{user_id} → (status_code, response_json)"""
-    if use_mock_data:
-        return 200, {"ok": True}
-    url = f"{backend_ep}user-state/{user_id}"
-    try:
-        resp = httpx.put(url, json={"state": state}, timeout=30)
-        return resp.status_code, resp.json()
-    except Exception as e:
-        return None, {"detail": str(e)}
-
-
-def delete_user_state(backend_ep, user_id):
-    """DELETE /user-state/{user_id} → (status_code, response_json)"""
-    if use_mock_data:
-        return 200, {"ok": True}
-    url = f"{backend_ep}user-state/{user_id}"
-    try:
-        resp = httpx.delete(url, timeout=30)
-        return resp.status_code, resp.json()
-    except Exception as e:
-        return None, {"detail": str(e)}
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
 
 def delete_user_data(backend_ep, user_id):

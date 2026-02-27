@@ -44,6 +44,7 @@ from api_schemas import *
 from config import load_config
 from utils import store
 from utils import auth_store, auth_jwt
+from utils.content_view import build_learning_content_view_model
 
 
 app_config = load_config(config_name="main")
@@ -83,7 +84,7 @@ _DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @app.on_event("startup")
@@ -94,6 +95,194 @@ def _load_stores():
         search_rag_manager.verified_content_manager.sync_verified_content(
             app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
         )
+
+
+def _parse_jsonish(value: Any, default: Any = None):
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:
+            try:
+                return ast.literal_eval(text)
+            except Exception:
+                return default
+    return value
+
+
+def _compute_mastery_rate(profile: dict) -> float:
+    if not isinstance(profile, dict):
+        return 0.0
+    cognitive = profile.get("cognitive_status", {})
+    mastered = cognitive.get("mastered_skills", [])
+    in_progress = cognitive.get("in_progress_skills", [])
+    total = len(mastered) + len(in_progress)
+    return round(len(mastered) / total, 4) if total > 0 else 0.0
+
+
+def _refresh_goal_profile(user_id: str, goal_id: int) -> dict:
+    merged = store.merge_shared_profile_fields(user_id, goal_id)
+    return merged or store.get_profile(user_id, goal_id) or {}
+
+
+def _goal_or_404(user_id: str, goal_id: int) -> dict:
+    goal = store.get_goal(user_id, goal_id)
+    if goal is None or goal.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return goal
+
+
+def _goal_aggregate_or_404(user_id: str, goal_id: int) -> dict:
+    goal = store.get_goal_aggregate(user_id, goal_id)
+    if goal is None or goal.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return goal
+
+
+def _parse_iso_ts(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            return datetime.fromisoformat(value).timestamp()
+        return float(value)
+    except Exception:
+        return None
+
+
+def _iso_from_ts(value: float) -> str:
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _normalize_session_activity_record(activity: Optional[dict], idle_timeout_secs: int) -> dict:
+    record = copy.deepcopy(activity) if isinstance(activity, dict) else {}
+    record.setdefault("user_id", None)
+    record.setdefault("goal_id", None)
+    record.setdefault("session_index", None)
+    record.setdefault("trigger_events", [])
+    record.setdefault("heartbeats", [])
+    record.setdefault("last_activity_at", None)
+
+    intervals = record.get("intervals")
+    if not isinstance(intervals, list):
+        intervals = []
+
+    # Backward compatibility for old single-span records.
+    legacy_start = record.get("start_time")
+    legacy_end = record.get("end_time")
+    if not intervals and legacy_start is not None:
+        intervals = [{"start_time": legacy_start, "end_time": legacy_end}]
+
+    normalized_intervals = []
+    for interval in intervals:
+        if not isinstance(interval, dict):
+            continue
+        start = interval.get("start_time")
+        if start is None:
+            continue
+        normalized_intervals.append({
+            "start_time": start,
+            "end_time": interval.get("end_time"),
+        })
+
+    record["intervals"] = normalized_intervals
+    if record["last_activity_at"] is None and record["heartbeats"]:
+        record["last_activity_at"] = record["heartbeats"][-1]
+    if record["last_activity_at"] is None and normalized_intervals:
+        record["last_activity_at"] = normalized_intervals[-1].get("end_time") or normalized_intervals[-1].get("start_time")
+
+    if normalized_intervals:
+        record["start_time"] = normalized_intervals[0].get("start_time")
+        record["end_time"] = normalized_intervals[-1].get("end_time")
+    else:
+        record["start_time"] = None
+        record["end_time"] = None
+
+    return record
+
+
+def _close_open_interval(record: dict, requested_end_time: Optional[str], idle_timeout_secs: int) -> dict:
+    intervals = record.setdefault("intervals", [])
+    if not intervals:
+        return record
+    current = intervals[-1]
+    if current.get("end_time") is not None:
+        return record
+
+    requested_end_ts = _parse_iso_ts(requested_end_time) if requested_end_time else None
+    last_activity_ts = _parse_iso_ts(record.get("last_activity_at"))
+    end_ts = requested_end_ts if requested_end_ts is not None else last_activity_ts
+    if requested_end_ts is not None and last_activity_ts is not None and requested_end_ts - last_activity_ts > idle_timeout_secs:
+        end_ts = last_activity_ts
+    if end_ts is None:
+        end_ts = _parse_iso_ts(current.get("start_time"))
+    current["end_time"] = _iso_from_ts(end_ts)
+    record["end_time"] = current["end_time"]
+    return record
+
+
+def _sum_activity_duration_secs(activity: Optional[dict], idle_timeout_secs: int) -> float:
+    record = _normalize_session_activity_record(activity, idle_timeout_secs)
+    total = 0.0
+    for interval in record.get("intervals", []):
+        start_ts = _parse_iso_ts(interval.get("start_time"))
+        end_ts = _parse_iso_ts(interval.get("end_time"))
+        if start_ts is None or end_ts is None:
+            continue
+        total += max(end_ts - start_ts, 0.0)
+    return total
+
+
+def _build_goal_runtime_state(user_id: str, goal_id: int) -> dict:
+    goal = _goal_or_404(user_id, goal_id)
+    sessions = []
+    learning_path = goal.get("learning_path", [])
+    adaptation_suggested = False
+    adaptation_message = None
+    for idx, session in enumerate(learning_path):
+        if not isinstance(session, dict):
+            continue
+        navigation_mode = session.get("navigation_mode", "linear")
+        if navigation_mode == "free" or idx == 0:
+            is_locked = False
+        else:
+            prev = learning_path[idx - 1] if idx - 1 < len(learning_path) else {}
+            is_locked = not bool(prev.get("is_mastered", False))
+        is_mastered = bool(session.get("is_mastered", False))
+        if not is_mastered and session.get("mastery_score") is not None:
+            threshold = session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"])
+            if float(session.get("mastery_score", 0) or 0) < threshold * 0.8:
+                adaptation_suggested = True
+        can_complete = True
+        completion_block_reason = None
+        if navigation_mode == "linear" and not is_mastered:
+            can_complete = False
+            completion_block_reason = "session_not_mastered"
+        sessions.append({
+            "session_index": idx,
+            "session_id": session.get("id", ""),
+            "is_locked": is_locked,
+            "can_open": not is_locked,
+            "can_complete": can_complete,
+            "completion_block_reason": completion_block_reason,
+            "if_learned": bool(session.get("if_learned", False)),
+            "is_mastered": is_mastered,
+            "mastery_score": session.get("mastery_score"),
+            "mastery_threshold": session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"]),
+            "navigation_mode": navigation_mode,
+        })
+    if adaptation_suggested:
+        adaptation_message = "Recent quiz performance suggests future sessions may need adjustment."
+    return {
+        "goal_id": goal_id,
+        "adaptation": {
+            "suggested": adaptation_suggested,
+            "message": adaptation_message,
+        },
+        "sessions": sessions,
+    }
 
 class BehaviorEvent(BaseModel):
     user_id: str
@@ -254,26 +443,6 @@ async def get_events(user_id: str):
     return {"user_id": user_id, "events": store.get_events(user_id)}
 
 
-@app.get("/user-state/{user_id}")
-async def get_user_state(user_id: str):
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-    return {"state": state}
-
-
-@app.put("/user-state/{user_id}")
-async def put_user_state(user_id: str, body: UserStateRequest):
-    store.put_user_state(user_id, body.state)
-    return {"ok": True}
-
-
-@app.delete("/user-state/{user_id}")
-async def delete_user_state(user_id: str):
-    store.delete_user_state(user_id)
-    return {"ok": True}
-
-
 @app.delete("/user-data/{user_id}")
 async def delete_user_data(user_id: str):
     """Delete all non-auth data for a user (profiles, events, state, snapshots).
@@ -282,34 +451,259 @@ async def delete_user_data(user_id: str):
     return {"ok": True}
 
 
+@app.get("/goals/{user_id}")
+async def list_goals(user_id: str):
+    return {"goals": store.list_goal_aggregates(user_id)}
+
+
+@app.post("/goals/{user_id}")
+async def create_goal(user_id: str, request: GoalCreateRequest):
+    payload = request.model_dump()
+    learner_profile = payload.pop("learner_profile", None)
+    goal = store.create_goal(user_id, payload)
+    if isinstance(learner_profile, dict) and learner_profile:
+        store.upsert_profile(user_id, goal["id"], learner_profile)
+    return store.get_goal_aggregate(user_id, goal["id"])
+
+
+@app.patch("/goals/{user_id}/{goal_id}")
+async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
+    payload = {k: v for k, v in request.model_dump().items() if v is not None}
+    goal = store.patch_goal(user_id, goal_id, payload)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return store.get_goal_aggregate(user_id, goal_id)
+
+
+@app.delete("/goals/{user_id}/{goal_id}")
+async def soft_delete_goal(user_id: str, goal_id: int):
+    goal = store.delete_goal(user_id, goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"ok": True}
+
+
+@app.get("/goal-runtime-state/{user_id}")
+async def goal_runtime_state(user_id: str, goal_id: int):
+    return _build_goal_runtime_state(user_id, goal_id)
+
+
+@app.get("/learning-content/{user_id}/{goal_id}/{session_index}")
+async def get_learning_content(user_id: str, goal_id: int, session_index: int):
+    record = store.get_learning_content(user_id, goal_id, session_index)
+    if not record:
+        raise HTTPException(status_code=404, detail="Learning content not found")
+    return record.get("learning_content", {})
+
+
+@app.delete("/learning-content/{user_id}/{goal_id}/{session_index}")
+async def delete_learning_content(user_id: str, goal_id: int, session_index: int):
+    store.delete_learning_content(user_id, goal_id, session_index)
+    return {"ok": True}
+
+
+@app.post("/session-activity")
+async def session_activity(request: SessionActivityRequest):
+    if request.event_type not in {"start", "heartbeat", "end"}:
+        raise HTTPException(status_code=400, detail="Unsupported event_type")
+
+    event_time = request.event_time or datetime.now(timezone.utc).isoformat()
+    interval = APP_CONFIG["motivational_trigger_interval_secs"]
+    activity = _normalize_session_activity_record(
+        store.get_session_activity(request.user_id, request.goal_id, request.session_index) or {
+        "user_id": request.user_id,
+        "goal_id": request.goal_id,
+        "session_index": request.session_index,
+        "start_time": None,
+        "end_time": None,
+        "intervals": [],
+        "heartbeats": [],
+        "trigger_events": [],
+        "last_activity_at": None,
+    },
+        interval,
+    )
+
+    trigger = {"show": False, "kind": None, "message": None}
+
+    if request.event_type == "start":
+        last_activity_ts = _parse_iso_ts(activity.get("last_activity_at"))
+        current_ts = _parse_iso_ts(event_time)
+        intervals = activity.setdefault("intervals", [])
+        has_open_interval = bool(intervals and intervals[-1].get("end_time") is None)
+        if has_open_interval and last_activity_ts is not None and current_ts is not None and (current_ts - last_activity_ts) > interval:
+            _close_open_interval(activity, activity.get("last_activity_at"), interval)
+            has_open_interval = False
+        if not has_open_interval:
+            intervals.append({"start_time": event_time, "end_time": None})
+        activity["start_time"] = activity.get("start_time") or event_time
+        activity["last_activity_at"] = event_time
+        activity.setdefault("heartbeats", []).append(event_time)
+    elif request.event_type == "heartbeat":
+        heartbeats = activity.setdefault("heartbeats", [])
+        activity["last_activity_at"] = event_time
+        should_append = True
+        if heartbeats:
+            try:
+                last = datetime.fromisoformat(heartbeats[-1]).timestamp()
+                curr = datetime.fromisoformat(event_time).timestamp()
+                should_append = (curr - last) >= interval
+            except Exception:
+                should_append = True
+        if should_append:
+            heartbeats.append(event_time)
+            trigger_count = len(activity.setdefault("trigger_events", []))
+            kind = "posture" if trigger_count % 2 == 0 else "encouragement"
+            message = (
+                "Stay hydrated and keep a healthy posture."
+                if kind == "posture" else
+                "Keep up the good work!"
+            )
+            activity["trigger_events"].append({"kind": kind, "time": event_time})
+            trigger = {"show": True, "kind": kind, "message": message}
+    else:
+        _close_open_interval(activity, event_time, interval)
+
+    if activity.get("intervals"):
+        activity["start_time"] = activity["intervals"][0].get("start_time")
+        activity["end_time"] = activity["intervals"][-1].get("end_time")
+    store.upsert_session_activity(request.user_id, request.goal_id, request.session_index, activity)
+    return {"ok": True, "trigger": trigger}
+
+
+@app.post("/complete-session")
+async def complete_session(request: CompleteSessionRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    goal = _goal_or_404(request.user_id, request.goal_id)
+    learning_path = goal.get("learning_path", [])
+    if request.session_index < 0 or request.session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = learning_path[request.session_index]
+    session["if_learned"] = True
+    learning_path[request.session_index] = session
+    store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
+
+    profile = store.get_profile(request.user_id, request.goal_id) or {}
+    try:
+        profile = update_cognitive_status_with_llm(llm, profile, session)
+    except Exception:
+        profile = update_learner_profile_with_llm(
+            llm,
+            profile,
+            "Session completed. Update cognitive status only. Do NOT change learning_preferences or behavioral_patterns.",
+            "",
+            session,
+        )
+    store.upsert_profile(request.user_id, request.goal_id, profile)
+    merged = _refresh_goal_profile(request.user_id, request.goal_id)
+    store.append_mastery_history(request.user_id, request.goal_id, _compute_mastery_rate(merged))
+    await session_activity(SessionActivityRequest(
+        user_id=request.user_id,
+        goal_id=request.goal_id,
+        session_index=request.session_index,
+        event_type="end",
+        event_time=request.session_end_time,
+    ))
+    return {
+        "ok": True,
+        "goal": _goal_aggregate_or_404(request.user_id, request.goal_id),
+        "learner_profile": merged,
+        "updated_session": session,
+        "goal_runtime_state": _build_goal_runtime_state(request.user_id, request.goal_id),
+        "profile_sync_applied": True,
+    }
+
+
+@app.post("/submit-content-feedback")
+async def submit_content_feedback(request: SubmitContentFeedbackRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    feedback = _parse_jsonish(request.feedback, request.feedback)
+    profile = store.get_profile(request.user_id, request.goal_id) or {}
+    store.save_profile_snapshot(request.user_id, request.goal_id, profile)
+    profile = update_learning_preferences_with_llm(llm, profile, feedback, "")
+    store.upsert_profile(request.user_id, request.goal_id, profile)
+    merged = _refresh_goal_profile(request.user_id, request.goal_id)
+    return {
+        "ok": True,
+        "goal": _goal_aggregate_or_404(request.user_id, request.goal_id),
+        "learner_profile": merged,
+        "goal_runtime_state": _build_goal_runtime_state(request.user_id, request.goal_id),
+        "profile_sync_applied": True,
+    }
+
+
+@app.get("/dashboard-metrics/{user_id}")
+async def dashboard_metrics(user_id: str, goal_id: int):
+    goal = _goal_aggregate_or_404(user_id, goal_id)
+    profile = goal.get("learner_profile", {})
+    metrics = await get_behavioral_metrics(user_id, goal_id=goal_id)
+    skill_levels = APP_CONFIG["skill_levels"]
+    level_map = {name: idx for idx, name in enumerate(skill_levels)}
+    mastered = profile.get("cognitive_status", {}).get("mastered_skills", [])
+    in_progress = profile.get("cognitive_status", {}).get("in_progress_skills", [])
+    skills = [
+        {
+            "name": skill.get("name", ""),
+            "required_level": skill.get("proficiency_level", "unlearned"),
+            "current_level": skill.get("proficiency_level", "unlearned"),
+        }
+        for skill in mastered
+    ] + [
+        {
+            "name": skill.get("name", ""),
+            "required_level": skill.get("required_proficiency_level", "unlearned"),
+            "current_level": skill.get("current_proficiency_level", "unlearned"),
+        }
+        for skill in in_progress
+    ]
+    session_series = []
+    idle_timeout = APP_CONFIG["motivational_trigger_interval_secs"]
+    for idx, session in enumerate(goal.get("learning_path", [])):
+        activity = store.get_session_activity(user_id, goal_id, idx) or {}
+        time_spent_min = _sum_activity_duration_secs(activity, idle_timeout) / 60.0
+        session_series.append({"session_id": session.get("id", f"session-{idx}"), "time_spent_min": time_spent_min})
+    history = store.get_mastery_history(user_id, goal_id)
+    mastery_series = [{"sample_index": idx, "mastery_rate": item.get("mastery_rate", 0.0)} for idx, item in enumerate(history)]
+    return {
+        "goal_id": goal_id,
+        "overall_progress": profile.get("cognitive_status", {}).get("overall_progress", 0.0),
+        "skill_radar": {
+            "labels": [skill["name"] for skill in skills],
+            "current_levels": [level_map.get(skill["current_level"], 0) for skill in skills],
+            "required_levels": [level_map.get(skill["required_level"], 0) for skill in skills],
+            "skill_levels": skill_levels,
+        },
+        "session_time_series": session_series,
+        "mastery_time_series": mastery_series,
+        "behavioral_metrics": metrics,
+    }
+
+
 @app.get("/behavioral-metrics/{user_id}")
 async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
+    goals = store.get_all_goals_for_user(user_id)
+    if not goals:
+        raise HTTPException(status_code=404, detail="No goals found for this user_id")
 
-    session_times = state.get("session_learning_times", {})
-    mastery_history = state.get("learned_skills_history", {})
-    goals = state.get("goals", [])
-
-    # Filter sessions for the requested goal (keys are "{goal_id}-{session_id}")
-    prefix = f"{goal_id}-" if goal_id is not None else None
     completed = []
     total_triggers = 0
-    for key, times in session_times.items():
-        if not isinstance(times, dict):
+    idle_timeout = APP_CONFIG["motivational_trigger_interval_secs"]
+    for goal in goals:
+        gid = goal.get("id")
+        if goal_id is not None and gid != goal_id:
             continue
-        if prefix and not str(key).startswith(prefix):
-            continue
-        start = times.get("start_time")
-        end = times.get("end_time")
-        if start is not None and end is not None:
-            completed.append(max(end - start, 0.0))
-        triggers = times.get("trigger_time_list", [])
-        if len(triggers) > 1:
-            total_triggers += len(triggers) - 1
+        for idx, _session in enumerate(goal.get("learning_path", [])):
+            times = store.get_session_activity(user_id, gid, idx)
+            if not isinstance(times, dict):
+                continue
+            duration = _sum_activity_duration_secs(times, idle_timeout)
+            if duration > 0:
+                completed.append(duration)
+            triggers = times.get("trigger_events", [])
+            if isinstance(triggers, list):
+                total_triggers += len(triggers)
 
-    # Session completion from learning_path
     total_in_path = 0
     sessions_learned = 0
     if goal_id is not None:
@@ -320,12 +714,8 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
                 sessions_learned = sum(1 for s in path if isinstance(s, dict) and s.get("if_learned"))
                 break
 
-    # Mastery history (keys may be int or str depending on serialization)
-    history = []
-    if isinstance(mastery_history, dict) and goal_id is not None:
-        history = mastery_history.get(str(goal_id), mastery_history.get(goal_id, []))
-    if not isinstance(history, list):
-        history = []
+    history = store.get_mastery_history(user_id, goal_id) if goal_id is not None else []
+    history_rates = [float(item.get("mastery_rate", 0.0)) for item in history if isinstance(item, dict)]
 
     total_duration = sum(completed)
     avg_duration = total_duration / len(completed) if completed else 0.0
@@ -339,8 +729,8 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
         "avg_session_duration_sec": round(avg_duration, 1),
         "total_learning_time_sec": round(total_duration, 1),
         "motivational_triggers_count": total_triggers,
-        "mastery_history": history,
-        "latest_mastery_rate": history[-1] if history else None,
+        "mastery_history": history_rates,
+        "latest_mastery_rate": history_rates[-1] if history_rates else None,
     }
 
 
@@ -350,18 +740,7 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
     from utils.solo_evaluator import evaluate_free_text_response, evaluate_short_answer_response
 
-    state = store.get_user_state(request.user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == request.goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(request.user_id, request.goal_id)
 
     learning_path = goal.get("learning_path", [])
     if request.session_index < 0 or request.session_index >= len(learning_path):
@@ -370,10 +749,8 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     session = learning_path[request.session_index]
 
     # Retrieve cached quiz data
-    session_uid = f"{request.goal_id}-{request.session_index}"
-    doc_caches = state.get("document_caches", {})
-    cached = doc_caches.get(session_uid, {})
-    quiz_data = cached.get("quizzes")
+    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index) or {}
+    quiz_data = (cached.get("learning_content") or {}).get("quizzes")
     if not quiz_data:
         raise HTTPException(status_code=404, detail="No quiz data found for this session")
 
@@ -447,11 +824,14 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
 
     is_mastered = score_pct >= threshold
 
-    # Update session in state
+    # Update session in goal store
     session["mastery_score"] = round(score_pct, 1)
     session["is_mastered"] = is_mastered
     session["mastery_threshold"] = threshold
-    store.put_user_state(request.user_id, state)
+    learning_path[request.session_index] = session
+    store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
+    profile = store.get_profile(request.user_id, request.goal_id) or {}
+    store.append_mastery_history(request.user_id, request.goal_id, _compute_mastery_rate(profile))
 
     # Flag adaptation suggestion if score is significantly below threshold
     plan_adaptation_suggested = (not is_mastered) and (score_pct < threshold * 0.8)
@@ -477,18 +857,7 @@ async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
     """Return the question type counts for a session based on its proficiency level."""
     from utils.quiz_scorer import get_quiz_mix_for_session
 
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(user_id, goal_id)
 
     learning_path = goal.get("learning_path", [])
     if session_index < 0 or session_index >= len(learning_path):
@@ -502,18 +871,7 @@ async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
 @app.get("/session-mastery-status/{user_id}")
 async def session_mastery_status(user_id: str, goal_id: int):
     """Return mastery status for all sessions in a goal."""
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(user_id, goal_id)
 
     result = []
     for session in goal.get("learning_path", []):
@@ -552,19 +910,7 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
         if not isinstance(new_profile, dict):
             new_profile = {}
 
-        # Load current state and previous profile
-        state = store.get_user_state(request.user_id)
-        if state is None:
-            raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-        goals = state.get("goals", [])
-        goal = None
-        for g in goals:
-            if isinstance(g, dict) and g.get("id") == request.goal_id:
-                goal = g
-                break
-        if goal is None:
-            raise HTTPException(status_code=404, detail="Goal not found")
+        goal = _goal_or_404(request.user_id, request.goal_id)
 
         current_plan = {"learning_path": goal.get("learning_path", [])}
         # old_profile: use snapshot (pre-update) if available; fall back to current store
@@ -662,6 +1008,7 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
             "feedback_summary": sim_feedback.get("feedback", {}),
         }
 
+        store.patch_goal(request.user_id, request.goal_id, {"learning_path": result_plan.get("learning_path", [])})
         store.delete_profile_snapshot(request.user_id, request.goal_id)
         return {**result_plan, "agent_metadata": agent_metadata}
 
@@ -1266,6 +1613,19 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
             method_name=request.method_name,
             search_rag_manager=search_rag_manager,
         )
+        learning_content["view_model"] = build_learning_content_view_model(
+            learning_content.get("document", ""),
+            learning_content.get("sources_used", []),
+            content_format=learning_content.get("content_format", "standard"),
+            audio_mode=learning_content.get("audio_mode"),
+        )
+        if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
+            store.upsert_learning_content(
+                request.user_id,
+                request.goal_id,
+                request.session_index,
+                learning_content,
+            )
         return learning_content
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

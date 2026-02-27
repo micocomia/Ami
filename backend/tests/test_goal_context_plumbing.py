@@ -259,7 +259,8 @@ def test_generate_learning_content_endpoint_forwards_goal_context():
         response = client.post("/generate-learning-content", json=payload)
 
     assert response.status_code == 200
-    assert response.json() == {"document": "ok"}
+    assert response.json()["document"] == "ok"
+    assert "view_model" in response.json()
     assert mock_create.call_args.kwargs["goal_context"] == payload["goal_context"]
 
 

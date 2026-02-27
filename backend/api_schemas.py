@@ -87,6 +87,38 @@ class LearningContentGenerationRequest(BaseRequest):
     allow_parallel: bool = True
     with_quiz: bool = True
     goal_context: Optional[Any] = None
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+    session_index: Optional[int] = None
+
+
+class GoalCreateRequest(BaseModel):
+    learning_goal: str
+    skill_gaps: Any = []
+    goal_assessment: Optional[Any] = None
+    goal_context: Optional[Any] = None
+    retrieved_sources: Any = []
+    bias_audit: Optional[Any] = None
+    profile_fairness: Optional[Any] = None
+    learning_path: Any = []
+    plan_agent_metadata: Optional[Any] = None
+    learner_profile: Optional[Any] = None
+    is_completed: bool = False
+    is_deleted: bool = False
+
+
+class GoalUpdateRequest(BaseModel):
+    learning_goal: Optional[str] = None
+    skill_gaps: Optional[Any] = None
+    goal_assessment: Optional[Any] = None
+    goal_context: Optional[Any] = None
+    retrieved_sources: Optional[Any] = None
+    bias_audit: Optional[Any] = None
+    profile_fairness: Optional[Any] = None
+    learning_path: Optional[Any] = None
+    plan_agent_metadata: Optional[Any] = None
+    is_completed: Optional[bool] = None
+    is_deleted: Optional[bool] = None
 
 
 class KnowledgePointDraftingRequest(BaseModel):
@@ -104,6 +136,27 @@ class LearningContentFeedbackRequest(BaseRequest):
 
     learner_profile: str
     learning_content: str
+
+
+class SessionActivityRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+    event_type: str
+    event_time: Optional[str] = None
+
+
+class CompleteSessionRequest(BaseRequest):
+    user_id: str
+    goal_id: int
+    session_index: int
+    session_end_time: Optional[str] = None
+
+
+class SubmitContentFeedbackRequest(BaseRequest):
+    user_id: str
+    goal_id: int
+    feedback: Any
 
 class BiasAuditRequest(BaseRequest):
 
