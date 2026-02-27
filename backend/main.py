@@ -386,6 +386,28 @@ def _update_fslsm_from_evidence(
     )
 
 
+def _reset_adaptation_on_profile_sign_flip(
+    user_id: str,
+    goal_id: int,
+    old_profile: Dict[str, Any],
+    new_profile: Dict[str, Any],
+) -> None:
+    with _get_adaptation_goal_lock(user_id, goal_id):
+        goal = store.get_goal(user_id, goal_id)
+        if not isinstance(goal, dict):
+            return
+        adaptation_state = _normalize_adaptation_state(goal)
+        flipped_dims = fslsm_adaptation.clear_opposite_evidence_on_sign_flip(
+            old_profile if isinstance(old_profile, dict) else {},
+            new_profile if isinstance(new_profile, dict) else {},
+            adaptation_state,
+        )
+        if not flipped_dims:
+            return
+        adaptation_state["updated_at"] = _now_iso()
+        store.patch_goal(user_id, goal_id, {"adaptation_state": adaptation_state})
+
+
 def _build_adaptation_signal(
     goal: Dict[str, Any],
     profile: Dict[str, Any],
@@ -789,9 +811,16 @@ async def submit_content_feedback(request: SubmitContentFeedbackRequest):
     llm = get_llm(request.model_provider, request.model_name)
     feedback = _parse_jsonish(request.feedback, request.feedback)
     profile = store.get_profile(request.user_id, request.goal_id) or {}
-    store.save_profile_snapshot(request.user_id, request.goal_id, profile)
+    profile_before_update = copy.deepcopy(profile) if isinstance(profile, dict) else {}
+    store.save_profile_snapshot(request.user_id, request.goal_id, profile_before_update)
     _record_snapshot_timestamp(request.user_id, request.goal_id)
     profile = update_learning_preferences_with_llm(llm, profile, feedback, "")
+    _reset_adaptation_on_profile_sign_flip(
+        request.user_id,
+        request.goal_id,
+        profile_before_update,
+        profile if isinstance(profile, dict) else {},
+    )
     store.upsert_profile(request.user_id, request.goal_id, profile)
     merged = _refresh_goal_profile(request.user_id, request.goal_id)
     return {
@@ -1711,18 +1740,29 @@ async def update_learner_profile(request: LearnerProfileUpdateRequest):
                 session_information = ast.literal_eval(session_information)
             except Exception:
                 pass
+        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
+        old_profile_for_reset = copy.deepcopy(input_profile)
         # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
-        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
-            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
+        if request.user_id is not None and request.goal_id is not None:
+            stored_profile = store.get_profile(request.user_id, request.goal_id)
+            if isinstance(stored_profile, dict):
+                old_profile_for_reset = copy.deepcopy(stored_profile)
+            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
             _record_snapshot_timestamp(request.user_id, request.goal_id)
         learner_profile = update_learner_profile_with_llm(
             llm,
-            learner_profile,
+            input_profile,
             learner_interactions,
             learner_information,
             session_information,
         )
         if request.user_id is not None and request.goal_id is not None:
+            _reset_adaptation_on_profile_sign_flip(
+                request.user_id,
+                request.goal_id,
+                old_profile_for_reset,
+                learner_profile if isinstance(learner_profile, dict) else {},
+            )
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
         return {"learner_profile": learner_profile}
     except Exception as e:
@@ -1792,17 +1832,28 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
                 learner_information = ast.literal_eval(learner_information)
             except Exception:
                 learner_information = {"raw": learner_information}
+        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
+        old_profile_for_reset = copy.deepcopy(input_profile)
         # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
-        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
-            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
+        if request.user_id is not None and request.goal_id is not None:
+            stored_profile = store.get_profile(request.user_id, request.goal_id)
+            if isinstance(stored_profile, dict):
+                old_profile_for_reset = copy.deepcopy(stored_profile)
+            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
             _record_snapshot_timestamp(request.user_id, request.goal_id)
         learner_profile = update_learning_preferences_with_llm(
             llm,
-            learner_profile,
+            input_profile,
             learner_interactions,
             learner_information,
         )
         if request.user_id is not None and request.goal_id is not None:
+            _reset_adaptation_on_profile_sign_flip(
+                request.user_id,
+                request.goal_id,
+                old_profile_for_reset,
+                learner_profile if isinstance(learner_profile, dict) else {},
+            )
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
         return {"learner_profile": learner_profile}
     except Exception as e:

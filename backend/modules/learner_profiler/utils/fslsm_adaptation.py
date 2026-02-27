@@ -84,6 +84,53 @@ def extract_fslsm_dims(profile: Dict[str, Any]) -> Dict[str, float]:
     return result
 
 
+def _sign(value: float, epsilon: float = 1e-6) -> int:
+    if value > epsilon:
+        return 1
+    if value < -epsilon:
+        return -1
+    return 0
+
+
+def clear_opposite_evidence_on_sign_flip(
+    old_profile: Dict[str, Any],
+    new_profile: Dict[str, Any],
+    adaptation_state: Dict[str, Any],
+    *,
+    epsilon: float = 1e-6,
+) -> List[str]:
+    """Clear stale directional evidence when a dimension flips sign.
+
+    Only the key matching the old sign is removed; the new-sign key is preserved.
+    Daily movement budget for flipped dimensions is reset.
+    """
+    if not isinstance(adaptation_state, dict):
+        return []
+    evidence_windows = adaptation_state.get("evidence_windows")
+    if not isinstance(evidence_windows, dict):
+        evidence_windows = {}
+        adaptation_state["evidence_windows"] = evidence_windows
+    daily_budget = adaptation_state.get("daily_movement_budget")
+    if not isinstance(daily_budget, dict):
+        daily_budget = {}
+        adaptation_state["daily_movement_budget"] = daily_budget
+
+    old_dims = extract_fslsm_dims(old_profile if isinstance(old_profile, dict) else {})
+    new_dims = extract_fslsm_dims(new_profile if isinstance(new_profile, dict) else {})
+
+    flipped_dims: List[str] = []
+    for dim_key in FSLSM_DIM_KEYS:
+        old_sign = _sign(float(old_dims.get(dim_key, 0.0) or 0.0), epsilon=epsilon)
+        new_sign = _sign(float(new_dims.get(dim_key, 0.0) or 0.0), epsilon=epsilon)
+        if old_sign == 0 or new_sign == 0 or old_sign == new_sign:
+            continue
+        stale_key = f"{dim_key}:negative" if old_sign < 0 else f"{dim_key}:positive"
+        evidence_windows.pop(stale_key, None)
+        daily_budget.pop(dim_key, None)
+        flipped_dims.append(dim_key)
+    return flipped_dims
+
+
 def path_version_hash(goal: Dict[str, Any]) -> str:
     payload = goal.get("learning_path", []) if isinstance(goal, dict) else []
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
