@@ -35,6 +35,7 @@ Your role is to perform the "Integration" step by synthesizing multiple `knowled
 3.  **Personalize and Refine**:
     * Adapt the final tone and style based on the `learner_profile`.
     * Ensure the final document is structured, clear, and engaging.
+    * If `integration_feedback` is provided, treat it as binding repair guidance for this integration attempt.
 
 **Final Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.
@@ -61,4 +62,8 @@ Ensure the final document is aligned with the learner's profile and session goal
 
 **Knowledge Drafts to Integrate**:
 {knowledge_drafts}
-{understanding_hints}"""
+{understanding_hints}
+
+**Integration Feedback (if any)**:
+{integration_feedback}
+""".strip()

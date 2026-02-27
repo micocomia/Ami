@@ -1,4 +1,13 @@
-_output_format = '{"relevance": [true, false, true]}'
+_output_format = """{
+  "relevance": [
+    {
+      "keep": true,
+      "display_title": "Binary Search Walkthrough",
+      "short_description": "Step-by-step explanation of binary search decisions on sorted arrays.",
+      "confidence": 0.84
+    }
+  ]
+}"""
 
 media_relevance_evaluator_system_prompt = f"""
 You are the **Media Relevance Evaluator** agent in the Ami Adaptive Mentoring Intelligence system.
@@ -13,7 +22,18 @@ Resources may be of three types: [VIDEO] (YouTube or Wikimedia Commons video), [
 - A resource should be true only when its title/description clearly references at least one key topic or a tightly related concept.
 
 **Output Format:**
-Return a JSON object with a single key "relevance" containing a boolean array — one value per resource, in the same order as the input list.
+Return a JSON object with key `relevance`, where each item corresponds to one resource in input order.
+Each item must include:
+- `keep` (boolean),
+- `display_title` (concise learner-facing title),
+- `short_description` (single sentence, 8-24 words),
+- `confidence` (optional float 0-1).
+
+Grounding rules for `display_title` and `short_description`:
+- Derive only from the resource title/snippet/description and provided session topics.
+- Do not invent facts beyond that metadata.
+- If metadata is sparse, keep wording conservative and generic.
+
 Do NOT include any other text or markdown tags around the JSON.
 
 Example output for 3 resources:

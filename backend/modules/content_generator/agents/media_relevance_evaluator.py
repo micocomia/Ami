@@ -9,7 +9,7 @@ from modules.content_generator.prompts.media_relevance_evaluator import (
     media_relevance_evaluator_system_prompt,
     media_relevance_evaluator_task_prompt,
 )
-from modules.content_generator.schemas import MediaRelevanceResult
+from modules.content_generator.schemas import MediaRelevanceBatchResult
 
 
 def _tokens(text: str) -> set[str]:
@@ -26,6 +26,61 @@ def _tokens(text: str) -> set[str]:
         if t.endswith("s") and len(t) > 3:
             normalized.add(t[:-1])
     return {t for t in normalized if t not in stop}
+
+
+def _normalize_space(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _clean_display_title(raw_title: str) -> str:
+    title = _normalize_space(raw_title)
+    if not title:
+        return "Learning Resource"
+    title = re.sub(r"\s*[\|\-]\s*(youtube|official|full lecture|watch now)\s*$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"^\[[^\]]+\]\s*", "", title).strip()
+    words = title.split()
+    if len(words) > 10:
+        title = " ".join(words[:10]).rstrip(".,;:") + "..."
+    return title[:90].strip() or "Learning Resource"
+
+
+def _build_fallback_short_description(resource: dict, session_title: str, knowledge_point_names: List[str]) -> str:
+    source = _normalize_space(resource.get("snippet") or resource.get("description") or "")
+    if source:
+        words = source.split()
+        clipped = " ".join(words[:24]).strip().rstrip(".,;:")
+        if len(clipped.split()) < 8:
+            clipped = f"{clipped} for {session_title}".strip()
+        return clipped + "."
+    topic = ", ".join([x for x in knowledge_point_names if x][:2]).strip()
+    if topic:
+        return f"Supports {topic} with focused examples tied to this session."
+    return f"Supports key ideas from {session_title or 'this learning session'}."
+
+
+def _grounding_tokens(resource: dict, session_title: str, knowledge_point_names: List[str]) -> set[str]:
+    source_text = " ".join(
+        [
+            str(resource.get("title", "")),
+            str(resource.get("snippet", "")),
+            str(resource.get("description", "")),
+            str(session_title or ""),
+            " ".join(knowledge_point_names or []),
+        ]
+    )
+    return _tokens(source_text)
+
+
+def _is_grounded_phrase(text: str, allowed_tokens: set[str]) -> bool:
+    if not text:
+        return False
+    if not allowed_tokens:
+        return True
+    phrase_tokens = _tokens(text)
+    if not phrase_tokens:
+        return True
+    extras = [t for t in phrase_tokens if t not in allowed_tokens]
+    return len(extras) <= 8
 
 
 def _is_on_topic(resource: dict, target_tokens: set[str]) -> bool:
@@ -57,7 +112,7 @@ class MediaRelevanceEvaluator(BaseAgent):
 
     def evaluate(self, payload: dict) -> dict:
         raw_output = self.invoke(payload, task_prompt=media_relevance_evaluator_task_prompt)
-        validated = MediaRelevanceResult.model_validate(raw_output)
+        validated = MediaRelevanceBatchResult.model_validate(raw_output)
         return validated.model_dump()
 
 
@@ -68,60 +123,84 @@ def filter_media_resources_with_llm(
     knowledge_point_names: List[str],
     lightweight_llm: Any = None,
 ) -> List[dict]:
-    """Use MediaRelevanceEvaluator to filter candidate resources for session relevance.
-    Strict mode: fail-closed with deterministic topicality gate."""
+    """Filter media resources and enrich learner-facing labels.
+
+    Fail-closed behavior:
+    - topical deterministic prefilter always applies
+    - if LLM evaluation fails, keep deterministic results with heuristic labels.
+    """
     if not resources:
         return resources
+
     prefiltered = _deterministic_topic_filter(resources, session_title, knowledge_point_names)
     if not prefiltered:
         return []
 
-    def _resource_line(i, r):
-        label = f"[{r['type'].upper()}] \"{r['title']}\""
-        desc = r.get("snippet") or r.get("description") or ""
-        return f"{i + 1}. {label}" + (f" — {desc[:200]}" if desc else "")
-
-    resource_lines = "\n".join(_resource_line(i, r) for i, r in enumerate(prefiltered))
     payload = {
         "session_title": session_title,
         "key_topics": ", ".join(knowledge_point_names) if knowledge_point_names else session_title,
-        "resources": resource_lines,
+        "resources": [
+            {
+                "index": i,
+                "type": str(r.get("type", "")),
+                "title": str(r.get("title", "")),
+                "snippet": str(r.get("snippet", "")),
+                "description": str(r.get("description", "")),
+                "url": str(r.get("url", "")),
+            }
+            for i, r in enumerate(prefiltered)
+        ],
     }
-    if lightweight_llm is not None:
+
+    evaluator_model = lightweight_llm
+    if evaluator_model is None:
         try:
-            evaluator = MediaRelevanceEvaluator(lightweight_llm)
+            evaluator_model = LLMFactory.create(
+                model="gpt-4o-mini",
+                model_provider="openai",
+                temperature=0,
+            )
+        except Exception:
+            evaluator_model = llm
+
+    if evaluator_model is not None:
+        try:
+            evaluator = MediaRelevanceEvaluator(evaluator_model)
             result = evaluator.evaluate(payload)
             judgments = result.get("relevance", [])
             if len(judgments) == len(prefiltered):
-                kept = [r for r, keep in zip(prefiltered, judgments) if keep]
-                return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
-        except Exception:
-            pass
-    try:
-        # Use a lightweight model for this binary relevance filter to keep latency/cost low.
-        lightweight_llm = LLMFactory.create(
-            model="gpt-4o-mini",
-            model_provider="openai",
-            temperature=0,
-        )
-        evaluator = MediaRelevanceEvaluator(lightweight_llm)
-        result = evaluator.evaluate(payload)
-        judgments = result.get("relevance", [])
-        if len(judgments) == len(prefiltered):
-            kept = [r for r, keep in zip(prefiltered, judgments) if keep]
-            return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
-    except Exception:
-        try:
-            # Compatibility fallback: use the caller-provided model if mini is unavailable.
-            if llm is not None:
-                evaluator = MediaRelevanceEvaluator(llm)
-                result = evaluator.evaluate(payload)
-                judgments = result.get("relevance", [])
-                if len(judgments) == len(prefiltered):
-                    kept = [r for r, keep in zip(prefiltered, judgments) if keep]
-                    return _deterministic_topic_filter(kept, session_title, knowledge_point_names)
+                enriched: List[dict] = []
+                for resource, judgment in zip(prefiltered, judgments):
+                    keep = bool(judgment.get("keep", True))
+                    if not keep:
+                        continue
+
+                    allowed_tokens = _grounding_tokens(resource, session_title, knowledge_point_names)
+                    fallback_title = _clean_display_title(resource.get("title", ""))
+                    fallback_desc = _build_fallback_short_description(resource, session_title, knowledge_point_names)
+
+                    display_title = _normalize_space(judgment.get("display_title", ""))
+                    if not display_title or not _is_grounded_phrase(display_title, allowed_tokens):
+                        display_title = fallback_title
+
+                    short_description = _normalize_space(judgment.get("short_description", ""))
+                    if not short_description or not _is_grounded_phrase(short_description, allowed_tokens):
+                        short_description = fallback_desc
+
+                    item = dict(resource)
+                    item["display_title"] = display_title
+                    item["short_description"] = short_description
+                    if judgment.get("confidence") is not None:
+                        item["relevance_confidence"] = judgment.get("confidence")
+                    enriched.append(item)
+                return _deterministic_topic_filter(enriched, session_title, knowledge_point_names)
         except Exception:
             pass
 
-    # Fail-closed fallback: keep only deterministic topic matches.
-    return prefiltered
+    fallback_enriched: List[dict] = []
+    for resource in prefiltered:
+        item = dict(resource)
+        item["display_title"] = _clean_display_title(resource.get("title", ""))
+        item["short_description"] = _build_fallback_short_description(resource, session_title, knowledge_point_names)
+        fallback_enriched.append(item)
+    return fallback_enriched

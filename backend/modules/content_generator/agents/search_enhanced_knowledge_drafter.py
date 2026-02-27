@@ -594,6 +594,8 @@ def draft_knowledge_point_with_llm(
     session_adaptation_contract: Optional[Mapping[str, Any]] = None,
     lightweight_llm: Any = None,
     max_revision_passes: int = 1,
+    run_quality_gate: bool = True,
+    evaluator_feedback: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     goal_context: Optional[Mapping[str, Any]] = None,
@@ -612,8 +614,18 @@ def draft_knowledge_point_with_llm(
         "visual_formatting_hints": visual_formatting_hints,
         "processing_perception_hints": processing_perception_hints,
         "session_adaptation_contract": format_session_adaptation_contract(session_adaptation_contract),
-        "evaluator_feedback": "",
+        "evaluator_feedback": str(evaluator_feedback or "").strip(),
     }
+
+    if not run_quality_gate:
+        result = drafter.draft(payload)
+        try:
+            from .diagram_renderer import render_diagrams_in_markdown
+            if result.get("content"):
+                result["content"] = render_diagrams_in_markdown(result["content"])
+        except Exception:
+            pass
+        return result
 
     evaluator_model = lightweight_llm or llm
     evaluation_history: List[dict[str, Any]] = []
@@ -670,6 +682,8 @@ def draft_knowledge_points_with_llm(
     session_adaptation_contract: Optional[Mapping[str, Any]] = None,
     lightweight_llm: Any = None,
     max_revision_passes: int = 1,
+    run_quality_gate: bool = True,
+    evaluator_feedback: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     goal_context: Optional[Mapping[str, Any]] = None,
@@ -698,6 +712,8 @@ def draft_knowledge_points_with_llm(
             session_adaptation_contract=session_adaptation_contract,
             lightweight_llm=lightweight_llm,
             max_revision_passes=max_revision_passes,
+            run_quality_gate=run_quality_gate,
+            evaluator_feedback=evaluator_feedback,
             search_rag_manager=search_rag_manager,
         )
 

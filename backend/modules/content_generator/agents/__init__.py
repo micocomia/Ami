@@ -12,6 +12,7 @@ from .learning_document_integrator import (
 	LearningDocumentIntegrator,
 	IntegratedDocPayload,
 	integrate_learning_document_with_llm,
+	map_integrated_sections_to_draft_ids,
 	prepare_markdown_document,
 )
 from .learning_content_creator import (
@@ -37,7 +38,12 @@ from .content_feedback_simulator import (
 from .knowledge_draft_evaluator import (
 	KnowledgeDraftEvaluator,
 	deterministic_knowledge_draft_audit,
+	evaluate_knowledge_draft_batch_with_llm,
 	evaluate_knowledge_draft_with_llm,
+)
+from .integrated_document_evaluator import (
+	IntegratedDocumentEvaluator,
+	evaluate_integrated_document_with_llm,
 )
 
 __all__ = [
@@ -52,6 +58,7 @@ __all__ = [
 	"LearningDocumentIntegrator",
 	"IntegratedDocPayload",
 	"integrate_learning_document_with_llm",
+	"map_integrated_sections_to_draft_ids",
 	"prepare_markdown_document",
 	"DocumentQuizGenerator",
 	"DocumentQuizPayload",
@@ -72,5 +79,8 @@ __all__ = [
 	# Knowledge draft evaluator
 	"KnowledgeDraftEvaluator",
 	"deterministic_knowledge_draft_audit",
+	"evaluate_knowledge_draft_batch_with_llm",
 	"evaluate_knowledge_draft_with_llm",
+	"IntegratedDocumentEvaluator",
+	"evaluate_integrated_document_with_llm",
 ]

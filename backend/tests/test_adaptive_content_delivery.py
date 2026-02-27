@@ -550,10 +550,29 @@ class TestPrepareMarkdownDocumentWithMedia:
             "target_section_index": 0,
         }]
         doc = prepare_markdown_document(self._make_doc_structure(), kps, drafts, media_resources=media)
-        assert "### Variables" in doc
+        assert "## Variables" in doc
         assert "#### 🎬 Python Tutorial" in doc
         assert "youtube.com" in doc
         assert "Supplementary Learning Resources" not in doc
+
+    def test_video_prefers_display_title_and_short_description(self):
+        prepare_markdown_document = self._import()
+        kps = [{"name": "Python Basics", "type": "foundational"}]
+        drafts = [{"title": "Variables", "content": "Intro content."}]
+        media = [{
+            "type": "video",
+            "title": "Long Source Video Title - YouTube",
+            "display_title": "Variables Explained",
+            "short_description": "Concise walkthrough of variable declaration and reassignment behavior.",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_id": "dQw4w9WgXcQ",
+            "thumbnail_url": "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+            "target_section_index": 0,
+        }]
+        doc = prepare_markdown_document(self._make_doc_structure(), kps, drafts, media_resources=media)
+        assert "#### 🎬 Variables Explained" in doc
+        assert "Concise walkthrough of variable declaration" in doc
+        assert "Long Source Video Title - YouTube" not in doc
 
     def test_image_injected_inline(self):
         prepare_markdown_document = self._import()

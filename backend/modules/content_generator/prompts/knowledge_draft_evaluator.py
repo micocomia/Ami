@@ -12,6 +12,19 @@ knowledge_draft_evaluator_output_format = """
 }
 """.strip()
 
+knowledge_draft_batch_evaluator_output_format = """
+{
+    "evaluations": [
+        {
+            "draft_id": "draft-0",
+            "is_acceptable": true,
+            "issues": [],
+            "improvement_directives": ""
+        }
+    ]
+}
+""".strip()
+
 
 knowledge_draft_evaluator_system_prompt = f"""
 You are the **Knowledge Draft Evaluator** agent in the Ami: Adaptive Mentoring Intelligence system.
@@ -34,6 +47,9 @@ Your role is to quality-check a single drafted knowledge section before it is in
    * When false, fill `issues` with concise problem statements and `improvement_directives` with actionable revision instructions for the drafter.
    * When true, leave `issues` empty and `improvement_directives` blank.
 6. **Follow Format**: Your entire output must be valid JSON matching the specified schema.
+7. **Batch Support**:
+   * If input contains `drafts`, evaluate each draft independently and return `evaluations` with one item per `draft_id`.
+   * Keep each issue concise and actionable.
 
 **Final Output Format**:
 {knowledge_draft_evaluator_output_format}
@@ -65,4 +81,24 @@ Evaluate this drafted knowledge section for quality and learner fit.
 4. SOLO appropriateness for the learner
 
 Return only the JSON verdict.
+""".strip()
+
+
+knowledge_draft_batch_evaluator_task_prompt = """
+Evaluate each draft independently and return one verdict per `draft_id`.
+
+**Learner Profile**:
+{learner_profile}
+
+**Selected Learning Session**:
+{learning_session}
+
+**Session Adaptation Contract**:
+{session_adaptation_contract}
+
+**Drafts to Evaluate**:
+{drafts}
+
+Return only valid JSON using this schema:
+{batch_output_format}
 """.strip()

@@ -71,20 +71,53 @@ def _anchorize(title: str) -> str:
     return re.sub(r"-+", "-", anchor)
 
 
+def _extract_h2_sections(document: str) -> list[dict[str, Any]]:
+    text = str(document or "")
+    lines = text.splitlines(keepends=True)
+    in_code_fence = False
+    fence_token = ""
+    headings: list[tuple[int, str]] = []
+    offset = 0
+
+    for line in lines:
+        stripped = line.lstrip()
+        fence_match = re.match(r"^(```|~~~)", stripped)
+        if fence_match:
+            token = fence_match.group(1)
+            if not in_code_fence:
+                in_code_fence = True
+                fence_token = token
+            elif token == fence_token:
+                in_code_fence = False
+                fence_token = ""
+        if not in_code_fence:
+            heading_match = re.match(r"^##\s+(.+?)\s*$", line)
+            if heading_match:
+                headings.append((offset, heading_match.group(1).strip()))
+        offset += len(line)
+
+    sections: list[dict[str, Any]] = []
+    for idx, (start, title) in enumerate(headings):
+        end = headings[idx + 1][0] if idx + 1 < len(headings) else len(text)
+        markdown = text[start:end].strip()
+        if markdown.startswith("## References"):
+            continue
+        sections.append(
+            {
+                "title": title,
+                "section_index": len(sections),
+                "markdown": markdown,
+            }
+        )
+    return sections
+
+
 def build_learning_content_view_model(document: str, sources_used: list[Any] | None, *, content_format: str = "standard", audio_mode: str | None = None) -> dict[str, Any]:
     if not isinstance(document, str):
         document = str(document or "")
     sources_used = sources_used or []
 
-    titles = re.findall(r'^(#+)\s*(.*)', document, re.MULTILINE)
-    section_starts = []
-    start_idx = 0
-    for marks, title in titles:
-        if marks == "#":
-            continue
-        if marks == "##":
-            start_idx = document.find(title, start_idx)
-            section_starts.append((start_idx - 3, title.strip()))
+    raw_sections = _extract_h2_sections(document)
 
     sections = []
     references = []
@@ -98,19 +131,17 @@ def build_learning_content_view_model(document: str, sources_used: list[Any] | N
             "url": source_ref.get("url") if isinstance(source_ref, dict) else None,
         })
 
-    for i, (start, title) in enumerate(section_starts):
-        end_idx = section_starts[i + 1][0] if i + 1 < len(section_starts) else len(document)
-        section_text = document[start:end_idx - 1].strip()
-        if section_text.startswith("## References"):
-            continue
+    for section_meta in raw_sections:
+        title = section_meta["title"]
+        section_text = section_meta["markdown"]
         anchor = _anchorize(title)
         citations = [int(num) for num in re.findall(r'(?<!\[)\[(\d+)\](?!\()', section_text)]
         section = {
-            "id": f"section-{i}",
+            "id": f"section-{section_meta['section_index']}",
             "title": title,
             "level": 2,
             "anchor": anchor,
-            "section_index": len(sections),
+            "section_index": section_meta["section_index"],
             "markdown": section_text,
             "html": None,
             "citations": citations,

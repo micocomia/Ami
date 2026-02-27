@@ -32,6 +32,7 @@ Your role is to draft rich, detailed markdown content for a *single* knowledge p
       `###` = a subpoint within the current `##` section.
     * Start the draft body with a `##` heading.
     * Every `##` heading MUST be immediately followed by substantive explanatory teaching content in prose. Do NOT emit a heading-only `##` line.
+    * Never start a `##` section with only a media/narrative support block (`###`/`####` Short Story, Poem, Video, Audio, Image, Diagram, or Resource). Start with instructional explanation first.
     * A `##` section must never consist only of a video, image, diagram, audio embed, table, code block, or bullet list. Each `##` section needs explanatory text that teaches the learner.
     * When you continue elaborating on the same main point, use `###` subheadings instead of starting another `##`.
     * Use another `##` only when you are intentionally starting a distinct new main point. For example, if a draft covers two major ideas, structure it like `## Decision Making` ... `### Key mechanism` ... `### Worked scenario` ... then `## Common Failure Modes` ... `### Why mistakes happen` ... `### How to correct them`.

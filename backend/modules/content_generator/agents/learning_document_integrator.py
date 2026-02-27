@@ -23,6 +23,7 @@ class IntegratedDocPayload(BaseModel):
     knowledge_drafts: Any
     session_adaptation_contract: Any = ""
     understanding_hints: str = ""
+    integration_feedback: str = ""
 
     @field_validator(
         "learner_profile",
@@ -31,6 +32,7 @@ class IntegratedDocPayload(BaseModel):
         "knowledge_points",
         "knowledge_drafts",
         "session_adaptation_contract",
+        "integration_feedback",
     )
     @classmethod
     def coerce_jsonish(cls, v: Any) -> Any:
@@ -69,6 +71,7 @@ def integrate_learning_document_with_llm(
     inline_assets_plan: Optional[List[dict]] = None,
     session_adaptation_contract: Optional[Mapping[str, Any]] = None,
     understanding_hints: str = "",
+    integration_feedback: str = "",
 ):
     logger.info(f'Integrating learning document with {len(knowledge_points)} knowledge points and {len(knowledge_drafts)} drafts...')
     if session_adaptation_contract is None:
@@ -81,6 +84,7 @@ def integrate_learning_document_with_llm(
         'knowledge_drafts': knowledge_drafts,
         'session_adaptation_contract': format_session_adaptation_contract(session_adaptation_contract),
         'understanding_hints': understanding_hints,
+        'integration_feedback': integration_feedback,
     }
     learning_document_integrator = LearningDocumentIntegrator(llm)
     document_structure = learning_document_integrator.integrate(input_dict)
@@ -213,8 +217,9 @@ def build_inline_assets_plan(
 
 def _render_inline_asset(resource: dict) -> str:
     r_type = resource.get("asset_type") or resource.get("type", "")
-    r_title = resource.get("title", "Resource")
+    r_title = resource.get("display_title") or resource.get("title", "Resource")
     if r_type == "video":
+        short_description = str(resource.get("short_description", "") or "").strip()
         video_id = resource.get("video_id", "")
         url = resource.get("url", f"https://www.youtube.com/watch?v={video_id}")
         thumb_url = resource.get("thumbnail_url", "")
@@ -224,6 +229,8 @@ def _render_inline_asset(resource: dict) -> str:
         else:
             watch_label = "Watch on Wikimedia Commons" if resource.get("source") == "wikimedia_commons" else "Watch on YouTube"
             block += f"[{watch_label}]({url})\n"
+        if short_description:
+            block += f"*{short_description}*\n"
         return block
     if r_type in ("image", "diagram"):
         url = resource.get("url", "")
@@ -286,6 +293,47 @@ def _inject_assets_into_body(body: str, inline_by_section: Dict[int, List[dict]]
     if not matches:
         return body
 
+    asset_heading_markers = (
+        "short story",
+        "poem",
+        "video",
+        "media support",
+        "visual walkthrough",
+        "audio",
+        "image",
+        "diagram",
+        "resource",
+        "watch",
+        "listen",
+    )
+
+    def _instructional_word_count(section_text: str) -> int:
+        text_wo_h2 = re.sub(r"^##\s+.+$", " ", section_text, flags=re.MULTILINE).strip()
+        sub_matches = list(re.finditer(r"^(###|####)\s+(.+)$", text_wo_h2, flags=re.MULTILINE))
+        retained_parts: List[str] = []
+        if sub_matches:
+            first = sub_matches[0]
+            retained_parts.append(text_wo_h2[: first.start()])
+            for sub_idx, sub_match in enumerate(sub_matches):
+                title = sub_match.group(2).strip().lower()
+                start = sub_match.end()
+                end = sub_matches[sub_idx + 1].start() if sub_idx + 1 < len(sub_matches) else len(text_wo_h2)
+                block = text_wo_h2[start:end]
+                if any(marker in title for marker in asset_heading_markers):
+                    continue
+                retained_parts.append(block)
+            retained = "\n".join(retained_parts)
+        else:
+            retained = text_wo_h2
+
+        retained = re.sub(r"```.*?```", " ", retained, flags=re.DOTALL)
+        retained = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", retained)
+        retained = re.sub(r"<audio[^>]*>.*?</audio>", " ", retained, flags=re.DOTALL)
+        retained = re.sub(r"<video[^>]*>.*?</video>", " ", retained, flags=re.DOTALL)
+        retained = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", retained)
+        words = re.findall(r"[A-Za-z]{3,}", retained)
+        return len(words)
+
     sections: List[str] = []
     for idx, match in enumerate(matches):
         start = match.start()
@@ -293,6 +341,12 @@ def _inject_assets_into_body(body: str, inline_by_section: Dict[int, List[dict]]
         section_text = body[start:end].rstrip()
         asset_blocks = "".join(_render_inline_asset(asset) for asset in inline_by_section.get(idx, []))
         if asset_blocks:
+            if _instructional_word_count(section_text) < 12:
+                section_text = (
+                    f"{section_text}\n\n"
+                    "This section first explains the core idea and when to apply it. "
+                    "Use the resource below to reinforce that explanation with examples."
+                ).rstrip()
             section_text = f"{section_text}\n{asset_blocks}".rstrip()
         sections.append(section_text)
 
@@ -303,8 +357,104 @@ def _inject_assets_into_body(body: str, inline_by_section: Dict[int, List[dict]]
     if extras:
         extra_block = "".join(_render_inline_asset(asset) for asset in extras)
         if extra_block:
-            sections.append(f"## Additional Learning Resources\n{extra_block}".rstrip())
+            sections.append(
+                (
+                    "## Additional Learning Resources\n\n"
+                    "Use these supporting resources to reinforce the session's key concepts and compare alternative explanations.\n"
+                    f"{extra_block}"
+                ).rstrip()
+            )
     return "\n\n".join(sections).strip()
+
+
+def _extract_h2_sections_with_offsets(markdown: str) -> List[dict]:
+    text = str(markdown or "")
+    lines = text.splitlines(keepends=True)
+    in_code_fence = False
+    fence_token = ""
+    headings: List[tuple[int, str]] = []
+    offset = 0
+
+    for line in lines:
+        stripped = line.lstrip()
+        fence_match = re.match(r"^(```|~~~)", stripped)
+        if fence_match:
+            token = fence_match.group(1)
+            if not in_code_fence:
+                in_code_fence = True
+                fence_token = token
+            elif token == fence_token:
+                in_code_fence = False
+                fence_token = ""
+        if not in_code_fence:
+            heading_match = re.match(r"^##\s+(.+?)\s*$", line)
+            if heading_match:
+                headings.append((offset, heading_match.group(1).strip()))
+        offset += len(line)
+
+    sections: List[dict] = []
+    for idx, (start, title) in enumerate(headings):
+        end = headings[idx + 1][0] if idx + 1 < len(headings) else len(text)
+        sections.append(
+            {
+                "section_index": idx,
+                "title": title,
+                "start": start,
+                "end": end,
+                "markdown": text[start:end].strip(),
+            }
+        )
+    return sections
+
+
+def _section_tokens(text: str) -> set[str]:
+    return {tok for tok in re.findall(r"[a-z0-9]+", str(text or "").lower()) if len(tok) > 2}
+
+
+def map_integrated_sections_to_draft_ids(document_markdown: str, draft_records: List[dict]) -> Dict[int, List[str]]:
+    """Map integrated section indices to source draft IDs.
+
+    Uses token overlap for resilience to duplicate headings and integrator rewrites,
+    with deterministic positional fallback.
+    """
+    sections = _extract_h2_sections_with_offsets(document_markdown)
+    if not sections:
+        return {}
+
+    normalized_records = [r for r in draft_records if isinstance(r, dict)]
+    ordered_draft_ids = [str(r.get("draft_id", f"draft-{i}")) for i, r in enumerate(normalized_records)]
+    if not ordered_draft_ids:
+        return {section["section_index"]: [] for section in sections}
+
+    draft_tokens: Dict[str, set[str]] = {}
+    for idx, record in enumerate(normalized_records):
+        draft_id = ordered_draft_ids[idx]
+        draft = record.get("draft", {}) if isinstance(record.get("draft"), dict) else {}
+        draft_text = " ".join(
+            [
+                str(draft.get("title", "")),
+                str(draft.get("content", "")),
+                str((record.get("knowledge_point") or {}).get("name", "")),
+            ]
+        )
+        draft_tokens[draft_id] = _section_tokens(draft_text)
+
+    mapping: Dict[int, List[str]] = {}
+    for section in sections:
+        section_index = int(section.get("section_index", 0))
+        section_tok = _section_tokens(section.get("markdown", ""))
+        best_id = None
+        best_score = -1
+        for draft_id in ordered_draft_ids:
+            score = len(section_tok.intersection(draft_tokens.get(draft_id, set())))
+            if score > best_score:
+                best_score = score
+                best_id = draft_id
+        if best_id is None:
+            fallback_idx = min(section_index, len(ordered_draft_ids) - 1)
+            best_id = ordered_draft_ids[fallback_idx]
+        mapping[section_index] = [best_id]
+    return mapping
 
 
 def prepare_markdown_document(
