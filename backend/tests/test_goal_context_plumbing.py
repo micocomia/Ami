@@ -238,6 +238,55 @@ def test_drafter_falls_back_when_filtered_retrieval_empty(mock_invoke):
     rag.invoke_hybrid.assert_called()
 
 
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.evaluate_knowledge_draft_with_llm")
+@patch("modules.content_generator.agents.search_enhanced_knowledge_drafter.SearchEnhancedKnowledgeDrafter.draft")
+def test_draft_knowledge_point_retries_once_after_quality_gate_failure(mock_draft, mock_evaluate):
+    from modules.content_generator.agents.search_enhanced_knowledge_drafter import draft_knowledge_point_with_llm
+
+    mock_draft.side_effect = [
+        {"title": "Draft", "content": "## Branching"},
+        {
+            "title": "Draft",
+            "content": (
+                "## Branching\n\n"
+                "Branching lets a program choose between paths based on a condition. "
+                "This section explains why that matters before showing any support material.\n\n"
+                "### Worked Scenario\n\n"
+                "A user login flow can branch into success, retry, or lockout behavior."
+            ),
+        },
+    ]
+    mock_evaluate.return_value = {
+        "feedback": {
+            "coherence": "Clear.",
+            "content_completeness": "Substantive.",
+            "personalization": "Aligned.",
+            "solo_alignment": "Appropriate.",
+        },
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+    }
+
+    result = draft_knowledge_point_with_llm(
+        MagicMock(name="primary"),
+        learner_profile={},
+        learning_path={},
+        learning_session={"title": "Intro"},
+        knowledge_points=[{"name": "Branching", "type": "foundational"}],
+        knowledge_point={"name": "Branching", "type": "foundational"},
+        use_search=False,
+        lightweight_llm=MagicMock(name="lightweight"),
+    )
+
+    assert mock_draft.call_count == 2
+    second_payload = mock_draft.call_args_list[1].args[-1]
+    assert "Add teaching content under the ## heading 'Branching'" in second_payload["evaluator_feedback"]
+    mock_evaluate.assert_called_once()
+    assert result["draft_quality_evaluation"]["is_acceptable"] is True
+    assert result["draft_quality_evaluation_history"][0]["is_acceptable"] is False
+
+
 def test_generate_learning_content_endpoint_forwards_goal_context():
     from main import app
 
