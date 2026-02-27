@@ -33,6 +33,8 @@ Grounding rules for `display_title` and `short_description`:
 - Derive only from the resource title/snippet/description and provided session topics.
 - Do not invent facts beyond that metadata.
 - If metadata is sparse, keep wording conservative and generic.
+- Keep `display_title` concise (max 90 chars).
+- Keep `short_description` to one sentence with 8-24 words.
 
 Do NOT include any other text or markdown tags around the JSON.
 

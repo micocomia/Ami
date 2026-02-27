@@ -539,7 +539,7 @@ class TestPrepareMarkdownDocumentWithMedia:
 
     def test_video_injected_inline(self):
         prepare_markdown_document = self._import()
-        kps = [{"name": "Python Basics", "type": "foundational"}]
+        kps = [{"name": "Python Basics", "role": "foundational", "solo_level": "beginner"}]
         drafts = [{"title": "Variables", "content": "Intro content."}]
         media = [{
             "type": "video",
@@ -557,7 +557,7 @@ class TestPrepareMarkdownDocumentWithMedia:
 
     def test_video_prefers_display_title_and_short_description(self):
         prepare_markdown_document = self._import()
-        kps = [{"name": "Python Basics", "type": "foundational"}]
+        kps = [{"name": "Python Basics", "role": "foundational", "solo_level": "beginner"}]
         drafts = [{"title": "Variables", "content": "Intro content."}]
         media = [{
             "type": "video",
@@ -576,7 +576,7 @@ class TestPrepareMarkdownDocumentWithMedia:
 
     def test_image_injected_inline(self):
         prepare_markdown_document = self._import()
-        kps = [{"name": "Python Basics", "type": "foundational"}]
+        kps = [{"name": "Python Basics", "role": "foundational", "solo_level": "beginner"}]
         drafts = [{"title": "Variables", "content": "Intro content."}]
         media = [{
             "type": "image",
@@ -592,7 +592,7 @@ class TestPrepareMarkdownDocumentWithMedia:
 
     def test_mixed_media_and_narrative_inline(self):
         prepare_markdown_document = self._import()
-        kps = [{"name": "Python Basics", "type": "foundational"}]
+        kps = [{"name": "Python Basics", "role": "foundational", "solo_level": "beginner"}]
         drafts = [{"title": "Variables", "content": "Intro content."}]
         media = [
             {
@@ -641,8 +641,8 @@ class TestPrepareMarkdownDocumentWithMedia:
                 "summary": "A summary.",
             },
             [
-                {"name": "Theory", "type": "foundational"},
-                {"name": "Example", "type": "practical"},
+                {"name": "Theory", "role": "foundational", "solo_level": "beginner"},
+                {"name": "Example", "role": "practical", "solo_level": "intermediate"},
             ],
             [
                 {"title": "Theory", "content": "Foundational body."},
@@ -664,7 +664,7 @@ class TestPrepareMarkdownDocumentWithMedia:
                 "content": "Integrated body without explicit section headings.",
                 "summary": "A summary.",
             },
-            [{"name": "Python Basics", "type": "foundational"}],
+            [{"name": "Python Basics", "role": "foundational", "solo_level": "beginner"}],
             [{"title": "Variables", "content": "Intro content."}],
             media_resources=None,
         )
@@ -681,8 +681,8 @@ class TestPrepareMarkdownDocumentWithMedia:
                 "summary": "A summary.",
             },
             [
-                {"name": "Theory", "type": "foundational"},
-                {"name": "Example", "type": "practical"},
+                {"name": "Theory", "role": "foundational", "solo_level": "beginner"},
+                {"name": "Example", "role": "practical", "solo_level": "intermediate"},
             ],
             [
                 {"title": "Applied Example", "content": "Start with the case."},
@@ -705,8 +705,8 @@ class TestInlineAssetPlanner:
     def test_keyword_section_match(self):
         build_inline_assets_plan = self._import()
         kps = [
-            {"name": "Python Variables", "type": "foundational"},
-            {"name": "Loops", "type": "practical"},
+            {"name": "Python Variables", "role": "foundational", "solo_level": "beginner"},
+            {"name": "Loops", "role": "practical", "solo_level": "intermediate"},
         ]
         drafts = [
             {"title": "Variables", "content": "Topic A"},
@@ -721,8 +721,8 @@ class TestInlineAssetPlanner:
     def test_density_rollover(self):
         build_inline_assets_plan = self._import()
         kps = [
-            {"name": "A", "type": "foundational"},
-            {"name": "B", "type": "practical"},
+            {"name": "A", "role": "foundational", "solo_level": "beginner"},
+            {"name": "B", "role": "practical", "solo_level": "intermediate"},
         ]
         drafts = [{"title": "A1", "content": ""}, {"title": "B1", "content": ""}]
         media = [
@@ -760,8 +760,8 @@ class TestContentFormatRouting:
         from modules.content_generator.agents.learning_content_creator import (
             create_learning_content_with_llm,
         )
-        mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
-        mock_draft.return_value = [{"title": "Draft A", "content": "Content A"}]
+        mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+        mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nContent A with instructional prose."}]
         mock_integrate.return_value = "## Document\n\nContent here."
         mock_quiz.return_value = {}
         mock_media.return_value = []
@@ -773,11 +773,29 @@ class TestContentFormatRouting:
         mock_search_rag.search_runner = MagicMock()
 
         profile = self._make_profile(fslsm_input)
-        return create_learning_content_with_llm(
-            mock_llm, profile, {}, {},
-            with_quiz=with_quiz,
-            search_rag_manager=mock_search_rag,
-        )
+        with patch(
+            "modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm",
+            return_value={
+                "evaluations": [
+                    {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+                ]
+            },
+        ), patch(
+            "modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm",
+            return_value={
+                "is_acceptable": True,
+                "issues": [],
+                "improvement_directives": "",
+                "repair_scope": "integrator_only",
+                "affected_section_indices": [],
+                "severity": "low",
+            },
+        ):
+            return create_learning_content_with_llm(
+                mock_llm, profile, {}, {},
+                with_quiz=with_quiz,
+                search_rag_manager=mock_search_rag,
+            )
 
     @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_tts_audio")
     @patch("modules.content_generator.orchestrators.content_generation_pipeline.convert_to_podcast_with_llm")

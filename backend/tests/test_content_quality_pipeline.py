@@ -21,7 +21,7 @@ def test_orchestrator_retries_integrator_with_feedback(
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = [{"name": "Branching", "type": "foundational"}]
+    mock_explore.return_value = [{"name": "Branching", "role": "foundational", "solo_level": "beginner"}]
     mock_draft.return_value = [
         {
             "title": "Branching Basics",
@@ -220,3 +220,53 @@ def test_deterministic_audit_rejects_narrative_only_section():
     result = deterministic_knowledge_draft_audit(draft)
     assert result["is_acceptable"] is False
     assert any("instructional explanation" in issue.lower() for issue in result["issues"])
+
+
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+def test_orchestrator_uses_shell_when_no_acceptable_drafts(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = [{"name": "Branching", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [{"title": "Branching", "content": "## Branching"}]
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": False, "issues": ["Too skeletal"], "improvement_directives": "Expand section."}
+        ]
+    }
+    mock_integrate.return_value = "## Branching\n\nThis section is generated in best-effort mode."
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {"fslsm_input": 0.0, "fslsm_processing": 0.0, "fslsm_perception": 0.0}
+        }
+    }
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session A"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert "best-effort mode" in result["document"].lower()

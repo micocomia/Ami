@@ -218,7 +218,8 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
 
         session_title = str(session.get("title", "")).strip()
         kp_name = str(knowledge_point.get("name", "")).strip()
-        kp_type = str(knowledge_point.get("type", "")).strip()
+        kp_role = str(knowledge_point.get("role", "")).strip()
+        kp_solo_level = str(knowledge_point.get("solo_level", "")).strip()
 
         goal_candidates = [
             str(profile.get("learning_goal", "")).strip(),
@@ -233,7 +234,9 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
         course_codes = self._extract_course_codes(session_title, kp_name, learning_goal)
         course_hint = " ".join(course_codes).strip()
 
-        base = " ".join(x for x in [session_title, kp_name, kp_type, learning_goal, course_hint] if x).strip()
+        base = " ".join(
+            x for x in [session_title, kp_name, kp_role, kp_solo_level, learning_goal, course_hint] if x
+        ).strip()
         queries = []
         for q in [
             base,

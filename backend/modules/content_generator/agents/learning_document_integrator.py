@@ -273,7 +273,11 @@ def _sequential_section_body(knowledge_drafts) -> str:
             continue
         title = str(draft.get("title") or f"Section {idx + 1}").strip()
         content = str(draft.get("content") or "").strip()
-        body_parts.append(f"## {title}\n\n{content}")
+        if re.search(r"^\s*##\s+.+$", content, flags=re.MULTILINE):
+            # Draft already carries canonical section structure.
+            body_parts.append(content)
+        else:
+            body_parts.append(f"## {title}\n\n{content}")
     return "\n\n".join(body_parts).strip()
 
 
@@ -444,13 +448,13 @@ def map_integrated_sections_to_draft_ids(document_markdown: str, draft_records: 
         section_index = int(section.get("section_index", 0))
         section_tok = _section_tokens(section.get("markdown", ""))
         best_id = None
-        best_score = -1
+        best_score = 0
         for draft_id in ordered_draft_ids:
             score = len(section_tok.intersection(draft_tokens.get(draft_id, set())))
             if score > best_score:
                 best_score = score
                 best_id = draft_id
-        if best_id is None:
+        if best_id is None or best_score == 0:
             fallback_idx = min(section_index, len(ordered_draft_ids) - 1)
             best_id = ordered_draft_ids[fallback_idx]
         mapping[section_index] = [best_id]
@@ -468,7 +472,7 @@ def prepare_markdown_document(
     """Render a markdown learning document from the integrated structure and drafts.
 
     Expects document_structure with keys: title, overview, summary.
-    knowledge_points: list with items containing 'type' in {'foundational','practical','strategic'}.
+    knowledge_points: list with items containing `role` and `solo_level`.
     knowledge_drafts: list aligned with knowledge_points, each with 'title' and 'content'.
     """
     import ast as _ast

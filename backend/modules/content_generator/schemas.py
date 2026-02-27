@@ -6,15 +6,23 @@ from typing import Any, List, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-class KnowledgeType(str, Enum):
+class KnowledgeRole(str, Enum):
     foundational = "foundational"
     practical = "practical"
     strategic = "strategic"
 
 
+class KnowledgeSoloLevel(str, Enum):
+    beginner = "beginner"
+    intermediate = "intermediate"
+    advanced = "advanced"
+    expert = "expert"
+
+
 class KnowledgePoint(BaseModel):
     name: str
-    type: KnowledgeType
+    role: KnowledgeRole
+    solo_level: KnowledgeSoloLevel
 
 
 class KnowledgePoints(BaseModel):
@@ -214,6 +222,10 @@ class OrchestrationQualityTrace(BaseModel):
     draft_records: List[DraftQualityRecord] = Field(default_factory=list)
     integration_records: List[IntegratedQualityRecord] = Field(default_factory=list)
     draft_evaluator_status: str = "ok"
+    quality_checkpoint_passed: bool = False
+    draft_stage_degraded: bool = False
+    accepted_draft_ratio: float = 0.0
+    explorer_terminal_failure: bool = False
     fallback_mode: Optional[str] = None
     final_failure_reason: str = ""
     severity: Literal["low", "medium", "high"] = "low"

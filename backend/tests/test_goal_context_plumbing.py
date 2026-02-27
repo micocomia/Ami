@@ -70,7 +70,11 @@ def test_schedule_learning_path_agentic_accepts_goal_context():
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_create_learning_content_forwards_goal_context(
+    mock_integrated_eval,
+    mock_draft_eval,
     mock_explore,
     mock_draft,
     mock_integrate,
@@ -78,10 +82,23 @@ def test_create_learning_content_forwards_goal_context(
 ):
     from modules.content_generator.agents.learning_content_creator import create_learning_content_with_llm
 
-    mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
-    mock_draft.return_value = [{"title": "Draft A", "content": "Body"}]
-    mock_integrate.return_value = "## Document"
+    mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody instructional prose."}]
+    mock_integrate.return_value = "## Document\n\nBody instructional prose."
     mock_quiz.return_value = {}
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
 
     goal_context = {"course_code": "6.0001", "lecture_number": 1}
     profile = {"learning_preferences": {"fslsm_dimensions": {"fslsm_input": 0.0}}}
@@ -105,7 +122,11 @@ def test_create_learning_content_forwards_goal_context(
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_create_learning_content_works_without_goal_context(
+    mock_integrated_eval,
+    mock_draft_eval,
     mock_explore,
     mock_draft,
     mock_integrate,
@@ -113,10 +134,23 @@ def test_create_learning_content_works_without_goal_context(
 ):
     from modules.content_generator.agents.learning_content_creator import create_learning_content_with_llm
 
-    mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
-    mock_draft.return_value = [{"title": "Draft A", "content": "Body"}]
-    mock_integrate.return_value = "## Document"
+    mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody instructional prose."}]
+    mock_integrate.return_value = "## Document\n\nBody instructional prose."
     mock_quiz.return_value = {}
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
 
     profile = {"learning_preferences": {"fslsm_dimensions": {"fslsm_input": 0.0}}}
     llm = MagicMock()
@@ -150,7 +184,7 @@ def test_drafter_skips_retrieval_when_goal_context_empty(mock_invoke):
             "learning_path": {},
             "learning_session": {"title": "Intro"},
             "knowledge_points": [{"name": "Variables"}],
-            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "knowledge_point": {"name": "Variables", "role": "foundational", "solo_level": "beginner"},
             "goal_context": {},
         }
     )
@@ -176,7 +210,7 @@ def test_drafter_retrieves_when_goal_context_present(mock_invoke):
             "learning_path": {},
             "learning_session": {"title": "Intro"},
             "knowledge_points": [{"name": "Variables"}],
-            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "knowledge_point": {"name": "Variables", "role": "foundational", "solo_level": "beginner"},
             "goal_context": {"course_code": "DTI5902"},
         }
     )
@@ -202,7 +236,7 @@ def test_drafter_skips_retrieval_when_goal_context_has_no_retrieval_fields(mock_
             "learning_path": {},
             "learning_session": {"title": "Intro"},
             "knowledge_points": [{"name": "Variables"}],
-            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "knowledge_point": {"name": "Variables", "role": "foundational", "solo_level": "beginner"},
             "goal_context": {"is_vague": False},
         }
     )
@@ -229,7 +263,7 @@ def test_drafter_falls_back_when_filtered_retrieval_empty(mock_invoke):
             "learning_path": {},
             "learning_session": {"title": "Intro"},
             "knowledge_points": [{"name": "Variables"}],
-            "knowledge_point": {"name": "Variables", "type": "foundational"},
+            "knowledge_point": {"name": "Variables", "role": "foundational", "solo_level": "beginner"},
             "goal_context": {"course_code": "DTI5902"},
         }
     )
@@ -273,8 +307,8 @@ def test_draft_knowledge_point_retries_once_after_quality_gate_failure(mock_draf
         learner_profile={},
         learning_path={},
         learning_session={"title": "Intro"},
-        knowledge_points=[{"name": "Branching", "type": "foundational"}],
-        knowledge_point={"name": "Branching", "type": "foundational"},
+        knowledge_points=[{"name": "Branching", "role": "foundational", "solo_level": "beginner"}],
+        knowledge_point={"name": "Branching", "role": "foundational", "solo_level": "beginner"},
         use_search=False,
         lightweight_llm=MagicMock(name="lightweight"),
     )
@@ -348,8 +382,8 @@ def test_draft_knowledge_point_endpoint_still_available():
         "learner_profile": "{}",
         "learning_path": "{}",
         "learning_session": "{}",
-        "knowledge_points": "[]",
-        "knowledge_point": "{}",
+        "knowledge_points": '[{"name":"Variables","role":"foundational","solo_level":"beginner"}]',
+        "knowledge_point": '{"name":"Variables","role":"foundational","solo_level":"beginner"}',
         "use_search": False,
     }
     with patch("main.get_llm", return_value=MagicMock()), \
@@ -358,3 +392,20 @@ def test_draft_knowledge_point_endpoint_still_available():
         response = client.post("/draft-knowledge-point", json=payload)
     assert response.status_code == 200
     assert response.json()["knowledge_draft"]["title"] == "Draft"
+
+
+def test_draft_knowledge_point_endpoint_rejects_invalid_shape():
+    from main import app
+
+    payload = {
+        "learner_profile": "{}",
+        "learning_path": "{}",
+        "learning_session": "{}",
+        "knowledge_points": '[{"name":"Variables","type":"foundational"}]',
+        "knowledge_point": '{"name":"Variables","type":"foundational"}',
+        "use_search": False,
+    }
+    with patch("main.get_llm", return_value=MagicMock()):
+        client = TestClient(app)
+        response = client.post("/draft-knowledge-point", json=payload)
+    assert response.status_code == 422

@@ -17,7 +17,7 @@ Your role is to evaluate the fully integrated learning document and classify the
 Evaluation criteria:
 1. Coherence across sections and transitions.
 2. Presence of substantive instructional content (no empty/skeletal sections).
-3. Fit to learner profile and session adaptation contract (FSLSM + SOLO expectations).
+3. Fit to learner profile and session adaptation contract (FSLSM + SOLO expectations), including `knowledge_point.role` and `knowledge_point.solo_level`.
 4. Internal consistency and factual caution (avoid unsupported claims).
 
 Repair scope rules:

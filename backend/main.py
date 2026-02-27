@@ -1565,8 +1565,15 @@ async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
     learner_profile = request.learner_profile
     learning_path = request.learning_path
     learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    knowledge_point = request.knowledge_point
+    knowledge_points_raw = _parse_jsonish(request.knowledge_points, [])
+    knowledge_point_raw = _parse_jsonish(request.knowledge_point, {})
+    try:
+        validated_knowledge_points = KnowledgePoints.model_validate({"knowledge_points": knowledge_points_raw})
+        validated_knowledge_point = KnowledgePoint.model_validate(knowledge_point_raw)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid knowledge point payload: {exc}")
+    knowledge_points = validated_knowledge_points.model_dump().get("knowledge_points", [])
+    knowledge_point = validated_knowledge_point.model_dump()
     use_search = request.use_search
     goal_context = request.goal_context
     fslsm_input = get_fslsm_input(learner_profile)

@@ -35,7 +35,11 @@ def test_get_lightweight_llm_falls_back_to_primary_on_error():
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_orchestrator_passes_lightweight_to_support_steps(
+    mock_integrated_eval,
+    mock_draft_eval,
     mock_explore,
     mock_draft,
     mock_find_media,
@@ -48,13 +52,26 @@ def test_orchestrator_passes_lightweight_to_support_steps(
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
-    mock_draft.return_value = [{"title": "Draft A", "content": "Body"}]
+    mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody content with instructional prose."}]
     mock_find_media.return_value = [{"type": "audio", "title": "A", "audio_url": "u"}]
     mock_filter_media.return_value = []
     mock_narratives.return_value = []
-    mock_integrate.return_value = "## Document\n\nBody"
+    mock_integrate.return_value = "## Document\n\nBody with instructional prose."
     mock_quiz.return_value = {}
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
 
     primary = MagicMock(name="primary")
     lightweight = MagicMock(name="lightweight")
@@ -95,7 +112,11 @@ def test_orchestrator_passes_lightweight_to_support_steps(
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.get_lightweight_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
+    mock_integrated_eval,
+    mock_draft_eval,
     mock_get_lightweight,
     mock_explore,
     mock_draft,
@@ -109,13 +130,26 @@ def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = [{"name": "Topic A", "type": "foundational"}]
-    mock_draft.return_value = [{"title": "Draft A", "content": "Body"}]
+    mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody content with instructional prose."}]
     mock_find_media.return_value = [{"type": "audio", "title": "A", "audio_url": "u"}]
     mock_filter_media.return_value = []
     mock_narratives.return_value = []
-    mock_integrate.return_value = "## Document\n\nBody"
+    mock_integrate.return_value = "## Document\n\nBody with instructional prose."
     mock_quiz.return_value = {}
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
 
     primary = MagicMock(name="primary")
     mock_get_lightweight.return_value = primary
@@ -155,7 +189,11 @@ def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_orchestrator_unwraps_explorer_dict_shape(
+    mock_integrated_eval,
+    mock_draft_eval,
     mock_explore,
     mock_draft,
     mock_find_media,
@@ -168,13 +206,26 @@ def test_orchestrator_unwraps_explorer_dict_shape(
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = {"knowledge_points": [{"name": "Variables", "type": "foundational"}]}
-    mock_draft.return_value = [{"title": "Variables", "content": "Body"}]
+    mock_explore.return_value = {"knowledge_points": [{"name": "Variables", "role": "foundational", "solo_level": "beginner"}]}
+    mock_draft.return_value = [{"title": "Variables", "content": "## Variables\n\nBody content with instructional prose."}]
     mock_find_media.return_value = []
     mock_filter_media.return_value = []
     mock_narratives.return_value = []
     mock_integrate.return_value = "## Doc\n\nBody"
     mock_quiz.return_value = {}
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    mock_integrated_eval.return_value = {
+        "is_acceptable": True,
+        "issues": [],
+        "improvement_directives": "",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "low",
+    }
 
     search_rag_manager = MagicMock()
     search_rag_manager.search_runner = MagicMock()
@@ -197,4 +248,4 @@ def test_orchestrator_unwraps_explorer_dict_shape(
     # Fifth positional argument in draft_knowledge_points_with_llm is knowledge_points
     call_args = mock_draft.call_args.args
     assert isinstance(call_args[4], list)
-    assert call_args[4] == [{"name": "Variables", "type": "foundational"}]
+    assert call_args[4] == [{"name": "Variables", "role": "foundational", "solo_level": "beginner"}]

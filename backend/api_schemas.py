@@ -126,8 +126,8 @@ class KnowledgePointDraftingRequest(BaseModel):
     learner_profile: str
     learning_path: str
     learning_session: str
-    knowledge_points: str
-    knowledge_point: str
+    knowledge_points: Any
+    knowledge_point: Any
     use_search: bool
     goal_context: Optional[Any] = None
 

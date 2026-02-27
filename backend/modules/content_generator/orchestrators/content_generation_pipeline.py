@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any, Callable, Mapping, Optional
@@ -170,13 +171,87 @@ def _required_core_draft_ids(records: list[dict[str, Any]]) -> set[str]:
     foundational = {
         str(r.get("draft_id"))
         for r in records
-        if str((r.get("knowledge_point") or {}).get("type", "")).strip().lower() == "foundational"
+        if str((r.get("knowledge_point") or {}).get("role", "")).strip().lower() == "foundational"
     }
     if foundational:
         return foundational
     if records:
         return {str(records[0].get("draft_id"))}
     return set()
+
+
+def _fallback_knowledge_points(learning_session: Mapping[str, Any] | Any) -> list[dict[str, str]]:
+    session_title = ""
+    if isinstance(learning_session, Mapping):
+        session_title = str(learning_session.get("title", "")).strip()
+    name = session_title or "Session Core Concepts"
+    return [
+        {
+            "name": name,
+            "role": "foundational",
+            "solo_level": "beginner",
+        }
+    ]
+
+
+def _best_effort_shell_draft(knowledge_point: Mapping[str, Any] | None) -> dict[str, str]:
+    kp = knowledge_point if isinstance(knowledge_point, Mapping) else {}
+    title = str(kp.get("name", "")).strip() or "Session Overview"
+    content = (
+        f"## {title}\n\n"
+        "This section is generated in best-effort mode because one or more upstream quality checks failed. "
+        "Use it as a high-level orientation, then validate details with the cited resources."
+    )
+    return {"title": title, "content": content}
+
+
+def _deterministic_integrated_section_audit(document: str) -> dict[str, Any]:
+    content = str(document or "")
+    section_matches = list(re.finditer(r"^##\s+(.+)$", content, flags=re.MULTILINE))
+    if not section_matches:
+        return {
+            "is_acceptable": False,
+            "issues": ["Integrated document has no top-level ## sections."],
+        }
+
+    issues: list[str] = []
+    placeholder_markers = {"tbd", "todo", "coming soon", "placeholder", "n/a", "lorem ipsum"}
+
+    def _prose_word_count(text: str) -> int:
+        cleaned = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+        cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", cleaned)
+        cleaned = re.sub(r"<audio[^>]*>.*?</audio>", " ", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"<video[^>]*>.*?</video>", " ", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", cleaned)
+        cleaned = re.sub(r"^\s*[-*+]\s+.*$", " ", cleaned, flags=re.MULTILINE)
+        words = re.findall(r"[A-Za-z]{3,}", cleaned)
+        return len(words)
+
+    for idx, match in enumerate(section_matches):
+        title = match.group(1).strip()
+        start = match.end()
+        end = section_matches[idx + 1].start() if idx + 1 < len(section_matches) else len(content)
+        body = content[start:end].strip()
+        if not body:
+            issues.append(f"Section '{title}' is empty.")
+            continue
+
+        normalized = re.sub(r"\s+", " ", body).strip().lower()
+        if normalized in placeholder_markers:
+            issues.append(f"Section '{title}' contains placeholder text only.")
+            continue
+
+        has_asset_markup = bool(
+            re.search(r"!\[[^\]]*\]\([^)]+\)", body)
+            or re.search(r"<audio[^>]*>.*?</audio>", body, flags=re.DOTALL)
+            or re.search(r"<video[^>]*>.*?</video>", body, flags=re.DOTALL)
+            or re.search(r"^\s*\|.*\|\s*$", body, flags=re.MULTILINE)
+            or re.search(r"```", body)
+        )
+        if has_asset_markup and _prose_word_count(body) < 10:
+            issues.append(f"Section '{title}' is asset-heavy and lacks instructional prose.")
+
+    return {"is_acceptable": not issues, "issues": issues}
 
 
 def _resolve_draft_ids_from_sections(
@@ -344,6 +419,10 @@ def generate_learning_content_with_llm(
         "draft_records": [],
         "integration_records": [],
         "draft_evaluator_status": "ok",
+        "quality_checkpoint_passed": False,
+        "draft_stage_degraded": False,
+        "accepted_draft_ratio": 0.0,
+        "explorer_terminal_failure": False,
         "stage_timings_ms": {},
         "fallback_mode": None,
         "final_failure_reason": "",
@@ -356,14 +435,29 @@ def generate_learning_content_with_llm(
     session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
 
     with _time_stage(trace, "explore_knowledge_points"):
-        raw_knowledge_points = explore_knowledge_points_with_llm(
-            llm,
-            learner_profile,
-            learning_path,
-            learning_session,
-            session_adaptation_contract=session_adaptation_contract,
-        )
+        try:
+            raw_knowledge_points = explore_knowledge_points_with_llm(
+                llm,
+                learner_profile,
+                learning_path,
+                learning_session,
+                session_adaptation_contract=session_adaptation_contract,
+            )
+        except Exception as exc:
+            logger.warning("Knowledge explorer terminal failure: %s", exc)
+            trace["explorer_terminal_failure"] = True
+            trace["fallback_mode"] = "best_effort"
+            trace["severity"] = "high"
+            trace["final_failure_reason"] = f"Explorer terminal failure: {exc}"
+            raw_knowledge_points = {"knowledge_points": _fallback_knowledge_points(learning_session)}
     knowledge_points = _extract_knowledge_points(raw_knowledge_points)
+    if not knowledge_points:
+        trace["explorer_terminal_failure"] = True
+        trace["fallback_mode"] = "best_effort"
+        trace["severity"] = "high"
+        if not trace.get("final_failure_reason"):
+            trace["final_failure_reason"] = "Knowledge explorer returned no valid knowledge points."
+        knowledge_points = _fallback_knowledge_points(learning_session)
 
     fslsm_input = get_fslsm_input(learner_profile)
     fslsm_processing = get_fslsm_dim(learner_profile, "fslsm_processing")
@@ -484,8 +578,10 @@ def generate_learning_content_with_llm(
     acceptable_ids = {str(r.get("draft_id")) for r in acceptable_drafts}
     has_required_core = required_core_ids.issubset(acceptable_ids)
     acceptable_ratio = (len(acceptable_drafts) / len(draft_records)) if draft_records else 0.0
+    trace["accepted_draft_ratio"] = round(acceptable_ratio, 4)
+    trace["draft_stage_degraded"] = any(not _draft_is_acceptable(r) for r in draft_records)
 
-    draft_quality_terminal_failure = any(not _draft_is_acceptable(r) for r in draft_records)
+    draft_quality_terminal_failure = trace["draft_stage_degraded"]
     if draft_quality_terminal_failure and (acceptable_ratio < _MIN_ACCEPTABLE_DRAFT_RATIO or not has_required_core):
         trace["fallback_mode"] = "best_effort"
         trace["severity"] = "high"
@@ -493,9 +589,31 @@ def generate_learning_content_with_llm(
             f"Draft quality threshold not met (acceptable_ratio={acceptable_ratio:.2f}, required_core_present={has_required_core})."
         )
 
-    selected_draft_records = acceptable_drafts if acceptable_drafts else draft_records
+    selected_draft_records = acceptable_drafts
     selected_knowledge_points = [r.get("knowledge_point", {}) for r in selected_draft_records]
     selected_knowledge_drafts = [r.get("draft", {}) for r in selected_draft_records]
+    if not selected_draft_records:
+        trace["fallback_mode"] = "best_effort"
+        trace["severity"] = "high"
+        if not trace.get("final_failure_reason"):
+            trace["final_failure_reason"] = "No acceptable drafts available after strict draft gate."
+        shell_kp = knowledge_points[0] if knowledge_points else {"name": "Session Overview", "role": "foundational", "solo_level": "beginner"}
+        selected_knowledge_points = [shell_kp]
+        selected_knowledge_drafts = [_best_effort_shell_draft(shell_kp)]
+        selected_draft_records = [
+            {
+                "draft_id": "draft-shell-0",
+                "knowledge_point_id": "kp-shell-0",
+                "knowledge_point": shell_kp,
+                "draft": selected_knowledge_drafts[0],
+                "deterministic_pass": True,
+                "llm_pass": True,
+                "issues": ["Best-effort synthetic fallback draft."],
+                "directives": "",
+                "attempt_count": 1,
+                "status": "fallback_shell",
+            }
+        ]
 
     sources_used = collect_sources_used(selected_knowledge_drafts)
 
@@ -608,17 +726,28 @@ def generate_learning_content_with_llm(
     with _time_stage(trace, "final_quality_checkpoint"):
         while quality_rounds < _MAX_QUALITY_ROUNDS:
             quality_rounds += 1
-            try:
-                final_integration_eval = evaluate_integrated_document_with_llm(
-                    _lightweight_llm,
-                    learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
-                    learning_session=learning_session if isinstance(learning_session, Mapping) else {},
-                    knowledge_points=selected_knowledge_points,
-                    session_adaptation_contract=session_adaptation_contract,
-                    document=learning_document,
-                )
-            except Exception:
-                final_integration_eval = _integrated_eval_fallback()
+            deterministic_doc_eval = _deterministic_integrated_section_audit(learning_document)
+            if not deterministic_doc_eval.get("is_acceptable", False):
+                final_integration_eval = {
+                    "is_acceptable": False,
+                    "issues": list(deterministic_doc_eval.get("issues", [])),
+                    "improvement_directives": "Fix empty or asset-only sections and ensure each ## has instructional prose.",
+                    "repair_scope": "integrator_only",
+                    "affected_section_indices": [],
+                    "severity": "high",
+                }
+            else:
+                try:
+                    final_integration_eval = evaluate_integrated_document_with_llm(
+                        _lightweight_llm,
+                        learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                        learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                        knowledge_points=selected_knowledge_points,
+                        session_adaptation_contract=session_adaptation_contract,
+                        document=learning_document,
+                    )
+                except Exception:
+                    final_integration_eval = _integrated_eval_fallback()
 
             integration_records.append(
                 {
@@ -714,15 +843,14 @@ def generate_learning_content_with_llm(
             break
 
     quality_checkpoint_passed = bool(final_integration_eval.get("is_acceptable", False))
+    trace["quality_checkpoint_passed"] = quality_checkpoint_passed
     if not quality_checkpoint_passed:
         trace["fallback_mode"] = "best_effort"
         if not trace.get("final_failure_reason"):
             issues = final_integration_eval.get("issues", [])
             trace["final_failure_reason"] = "; ".join(issues) if issues else "Final quality checkpoint not passed."
         trace["severity"] = str(final_integration_eval.get("severity", trace.get("severity", "high")) or "high")
-    else:
-        # Final checkpoint passed; clear any provisional fallback state set during earlier rounds.
-        trace["fallback_mode"] = None
+    elif trace.get("fallback_mode") is None:
         trace["final_failure_reason"] = ""
         trace["severity"] = "low"
 
@@ -817,6 +945,7 @@ def generate_learning_content_with_llm(
         trace_model.fallback_mode,
         trace_model.severity,
     )
+    logger.info("Content generation stage timings trace=%s timings_ms=%s", trace_model.trace_id, trace_model.stage_timings_ms)
     logger.info("Content generation quality details: %s", json.dumps(trace_model.model_dump(), default=str))
 
     if evaluator is not None:

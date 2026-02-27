@@ -32,6 +32,10 @@ def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def _word_count(text: str) -> int:
+    return len([w for w in _normalize_space(text).split(" ") if w])
+
+
 def _clean_display_title(raw_title: str) -> str:
     title = _normalize_space(raw_title)
     if not title:
@@ -80,7 +84,15 @@ def _is_grounded_phrase(text: str, allowed_tokens: set[str]) -> bool:
     if not phrase_tokens:
         return True
     extras = [t for t in phrase_tokens if t not in allowed_tokens]
-    return len(extras) <= 8
+    return len(extras) <= 12
+
+
+def _has_topic_overlap(text: str, session_title: str, knowledge_point_names: List[str]) -> bool:
+    target_tokens = _tokens(f"{session_title} {' '.join(knowledge_point_names or [])}")
+    if not target_tokens:
+        return True
+    phrase_tokens = _tokens(text)
+    return len(target_tokens.intersection(phrase_tokens)) >= 1
 
 
 def _is_on_topic(resource: dict, target_tokens: set[str]) -> bool:
@@ -180,11 +192,29 @@ def filter_media_resources_with_llm(
                     fallback_desc = _build_fallback_short_description(resource, session_title, knowledge_point_names)
 
                     display_title = _normalize_space(judgment.get("display_title", ""))
-                    if not display_title or not _is_grounded_phrase(display_title, allowed_tokens):
+                    if len(display_title) > 90:
+                        display_title = _clean_display_title(display_title)
+                    if (
+                        not display_title
+                        or not _has_topic_overlap(display_title, session_title, knowledge_point_names)
+                        or not _is_grounded_phrase(display_title, allowed_tokens)
+                    ):
                         display_title = fallback_title
 
                     short_description = _normalize_space(judgment.get("short_description", ""))
-                    if not short_description or not _is_grounded_phrase(short_description, allowed_tokens):
+                    short_desc_words = _word_count(short_description)
+                    if (
+                        not short_description
+                        or short_desc_words < 8
+                        or short_desc_words > 24
+                        or not _has_topic_overlap(short_description, session_title, knowledge_point_names)
+                    ):
+                        short_description = fallback_desc
+                    elif not _is_grounded_phrase(short_description, allowed_tokens):
+                        # Accept concise topical paraphrases from evaluator unless they are too unconstrained.
+                        if _word_count(short_description) > 24:
+                            short_description = fallback_desc
+                    if not short_description:
                         short_description = fallback_desc
 
                     item = dict(resource)

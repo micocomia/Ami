@@ -109,7 +109,7 @@ def run_rag_draft_single_kp(base_url: str, profile_body: dict, path_body: dict, 
     """Call /draft-knowledge-point for one RAG eval KP using real pipeline state."""
     sessions = path_body.get("learning_path", [])
     first_session = sessions[0] if sessions else {}
-    kp_list = [{"name": kp_name, "type": "foundational"}]
+    kp_list = [{"name": kp_name, "role": "foundational", "solo_level": "beginner"}]
     return timed_post(
         httpx.Client(timeout=120.0),
         f"{base_url}/draft-knowledge-point",
