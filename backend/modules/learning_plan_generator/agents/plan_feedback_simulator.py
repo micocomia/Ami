@@ -379,6 +379,22 @@ class LearningPlanFeedbackSimulator(BaseAgent):
             jsonalize_output=True,
         )
 
+    @staticmethod
+    def _normalize_feedback_output(raw_output: Any) -> dict:
+        if not isinstance(raw_output, Mapping):
+            return raw_output
+        normalized = dict(raw_output)
+        directives = normalized.get("improvement_directives", "")
+        if isinstance(directives, list):
+            normalized["improvement_directives"] = "\n".join(
+                str(item).strip() for item in directives if str(item).strip()
+            )
+        elif directives is None:
+            normalized["improvement_directives"] = ""
+        elif not isinstance(directives, str):
+            normalized["improvement_directives"] = str(directives).strip()
+        return normalized
+
     def feedback_path(self, payload: LearningPathFeedbackPayload | Mapping[str, Any] | str) -> dict:
         if not isinstance(payload, LearningPathFeedbackPayload):
             payload = LearningPathFeedbackPayload.model_validate(payload)
@@ -391,6 +407,7 @@ class LearningPlanFeedbackSimulator(BaseAgent):
         invoke_payload["solo_audit"] = solo_audit
 
         raw_output = self.invoke(invoke_payload, task_prompt=plan_feedback_simulator_task_prompt)
+        raw_output = self._normalize_feedback_output(raw_output)
         validated_output = LearnerPlanFeedback.model_validate(raw_output)
         reconciled_output = reconcile_feedback_with_solo_audit(validated_output, solo_audit)
         return reconciled_output.model_dump()

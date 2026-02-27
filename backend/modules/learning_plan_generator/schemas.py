@@ -78,6 +78,16 @@ class LearnerPlanFeedback(BaseModel):
     issues: List[str] = Field(default_factory=list)
     improvement_directives: str = Field(default="")
 
+    @field_validator("improvement_directives", mode="before")
+    @classmethod
+    def coerce_improvement_directives(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            parts = [str(item).strip() for item in value if str(item).strip()]
+            return "\n".join(parts)
+        return str(value).strip()
+
 
 # ---------------------------------------------------------------------------
 # Ground-truth profile schemas (used by GroundTruthProfileCreator)

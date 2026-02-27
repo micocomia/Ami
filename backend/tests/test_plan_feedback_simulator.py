@@ -149,6 +149,33 @@ class TestDeterministicSOLOAudit:
 
 
 class TestFeedbackReconciliation:
+    def test_feedback_path_coerces_list_improvement_directives(self, monkeypatch):
+        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
+            return _base_feedback(
+                is_acceptable=False,
+                issues=["Needs better verbal scaffolding."],
+                directives=[
+                    "Integrate verbal learning supports into earlier sessions.",
+                    "Add clearer contextual examples for relevance.",
+                ],
+                progression_feedback="The learner would likely find the path somewhat abrupt.",
+                progression_suggestion="Add more verbal scaffolds.",
+            )
+
+        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
+
+        simulator = LearningPlanFeedbackSimulator(MagicMock())
+        output = simulator.feedback_path(
+            {
+                "learner_profile": {"cognitive_status": {"mastered_skills": [], "in_progress_skills": []}},
+                "learning_path": _valid_scaffold_path(),
+            }
+        )
+
+        assert isinstance(output["improvement_directives"], str)
+        assert "Integrate verbal learning supports" in output["improvement_directives"]
+        assert "Add clearer contextual examples" in output["improvement_directives"]
+
     def test_feedback_path_corrects_contradictory_progression_when_no_violations(self, monkeypatch):
         captured = {}
 

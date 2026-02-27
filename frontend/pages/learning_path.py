@@ -107,7 +107,7 @@ def _get_runtime_state(goal_id):
 
 def render_learning_path():
     if not st.session_state.get("if_complete_onboarding"):
-        st.switch_page("pages/onboarding.py")
+        st.switch_page("main.py")
 
     goal = _get_selected_goal()
     if not isinstance(goal, dict):
@@ -116,7 +116,7 @@ def render_learning_path():
     runtime_state = _get_runtime_state(goal.get("id"))
     save_persistent_state()
     if not goal["learning_goal"] or not st.session_state["learner_information"]:
-        st.switch_page("pages/onboarding.py")
+        st.switch_page("main.py")
     else:
         if not goal["skill_gaps"]:
             st.switch_page("pages/skill_gap.py")

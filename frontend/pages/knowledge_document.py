@@ -145,7 +145,7 @@ def render_learning_content():
 
             if st.button("Regenerate", icon=":material/refresh:"):
                 _end_current_session_activity()
-                st.session_state["document_caches"].pop(session_uid)
+                st.session_state["document_caches"].pop(session_uid, None)
                 delete_learning_content(
                     st.session_state.get("userId"),
                     st.session_state.get("selected_goal_id"),
@@ -221,7 +221,7 @@ def render_session_details(goal):
     with col3:
         if st.button("Regenerate", icon=":material/refresh:", key="regenerate-content-top"):
             _end_current_session_activity()
-            st.session_state["document_caches"].pop(session_uid)
+            st.session_state["document_caches"].pop(session_uid, None)
             delete_learning_content(
                 st.session_state.get("userId"),
                 st.session_state.get("selected_goal_id"),

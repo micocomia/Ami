@@ -18,17 +18,17 @@ def render_skill_gap():
     goal = st.session_state.get("to_add_goal")
     if not goal:
         st.warning("No active goal found in session. Redirecting to onboarding...")
-        st.switch_page("pages/onboarding.py")
+        st.switch_page("main.py")
         return
 
     if not goal.get("learning_goal") or not st.session_state.get("learner_information"):
-        st.switch_page("pages/onboarding.py")
+        st.switch_page("main.py")
         return
 
     left, center, right = st.columns([1, 5, 1])
     with center:
         if st.button("< Back to Onboarding", type="secondary"):
-            st.switch_page("pages/onboarding.py")
+            st.switch_page("main.py")
         st.title("Skill Gap")
         st.write("Review and confirm your skill gaps.")
 
@@ -62,7 +62,7 @@ def render_skill_gap():
             if all_mastered and not gaps_exist:
                 with edit_col:
                     if st.button("Edit Goal", type="secondary"):
-                        st.switch_page("pages/onboarding.py")
+                        st.switch_page("main.py")
 
             with continue_button_col:
                 schedule_disabled = not gaps_exist

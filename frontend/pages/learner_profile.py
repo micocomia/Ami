@@ -441,7 +441,7 @@ def show_restart_onboarding_dialog():
             if isinstance(prev_llm_type, str) and prev_llm_type.strip():
                 st.session_state["llm_type"] = prev_llm_type
             try:
-                st.switch_page("pages/onboarding.py")
+                st.switch_page("main.py")
             except Exception:
                 st.rerun()
     with col_cancel:
