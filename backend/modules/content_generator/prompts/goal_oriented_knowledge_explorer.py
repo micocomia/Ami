@@ -35,8 +35,11 @@ Your role is to analyze a single learning session and, based on the learner's pr
 6.  **Processing Alignment**:
     * If the contract says active processing, include at least one knowledge point that naturally supports an immediate checkpoint, mini-exercise, or decision task.
     * If the contract says reflective processing, include at least one knowledge point that benefits from synthesis, comparison, or reflection.
-7.  **Be Concise**: Identify only the most critical knowledge points, avoiding redundancy.
-8.  **Self-Validation Before Return**:
+7.  **Avoid Generic Scaffolding Labels**:
+    * Do NOT output generic filler points such as `Introduction`, `Overview`, `Conclusion`, `Summary`, or `Recap` unless the session objective explicitly requires those as teachable content.
+    * Prefer progression-oriented names that describe what is learned next (e.g., concept, mechanism, application, troubleshooting).
+8.  **Be Concise**: Identify only the most critical knowledge points, avoiding redundancy.
+9.  **Self-Validation Before Return**:
     * Verify every knowledge point has a non-empty `name`.
     * Verify every `role` is exactly one of `foundational`, `practical`, `strategic`.
     * Verify every `solo_level` is exactly one of `beginner`, `intermediate`, `advanced`, `expert`.
@@ -72,4 +75,5 @@ Explore the essential knowledge points for the given learning session, tailored 
 - `role` must be one of `foundational|practical|strategic`.
 - `solo_level` must be one of `beginner|intermediate|advanced|expert`.
 - Never return `type` or legacy/synonym labels.
+- Avoid generic filler names like `Introduction`, `Conclusion`, or `Summary` unless explicitly required by the session objective.
 """.strip()

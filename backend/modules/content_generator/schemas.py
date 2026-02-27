@@ -92,6 +92,7 @@ class DraftQualityRecord(BaseModel):
 class DocumentStructure(BaseModel):
     title: str
     overview: str
+    content: str = ""
     summary: str
 
 

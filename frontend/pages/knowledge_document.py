@@ -16,6 +16,7 @@ from utils.format import inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
 from config import use_mock_data, use_search, backend_endpoint, backend_public_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
+from utils.document_parser import parse_document_for_section_view
 
 
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
@@ -348,52 +349,10 @@ def render_document_content_by_section(document, sources_used=None, view_model=N
                 if isinstance(item, dict)
             )
     else:
-        titles = re.findall(r'^(#+)\s*(.*)', document, re.MULTILINE)
-
-        section_starts = []
-        start_idx = 0
-        for title in titles:
-            if title[0] == "#":
-                continue
-            elif title[0] == "##":
-                start_idx = document.find(title[1], start_idx)
-                section_starts.append(start_idx-3)
-        for i in range(len(section_starts)):
-            start_idx = section_starts[i]
-            end_idx = section_starts[i + 1] if i + 1 < len(section_starts) else len(document)
-            section_text = document[start_idx:end_idx-1].strip()
-            if section_text.startswith("## References"):
-                references_section = section_text
-            else:
-                section_documents.append(section_text)
-        curr_l2 = 0
-        curr_l3 = 0
-        page_idx_counter = -1
-        for m in re.finditer(r'^(#+)\s*(.+)$', document, re.MULTILINE):
-            level_marks, title_txt = m.group(1), m.group(2).strip()
-            level_len = len(level_marks)
-            if level_len == 1:
-                continue
-            if level_len == 2 and title_txt == "References":
-                continue
-            if level_len == 2:
-                page_idx_counter += 1
-                curr_l2 += 1
-                curr_l3 = 0
-                sidebar_items.append({
-                    "title": f"{curr_l2}. {title_txt}",
-                    "anchor": title_txt.lower().replace(' ', '-').replace('，', '').replace('。', ''),
-                    "level": 2,
-                    "page_index": page_idx_counter,
-                })
-            elif level_len == 3 and page_idx_counter >= 0:
-                curr_l3 += 1
-                sidebar_items.append({
-                    "title": f"{curr_l2}.{curr_l3}. {title_txt}",
-                    "anchor": title_txt.lower().replace(' ', '-').replace('，', '').replace('。', ''),
-                    "level": 3,
-                    "page_index": page_idx_counter,
-                })
+        parsed = parse_document_for_section_view(document)
+        section_documents = list(parsed.get("section_documents", []))
+        sidebar_items = list(parsed.get("sidebar_items", []))
+        references_section = parsed.get("references_section")
 
     if not section_documents:
         st.warning("No document sections are available.")

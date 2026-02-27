@@ -69,3 +69,89 @@ def test_explorer_raises_after_failed_repair_retry(mock_invoke):
                 "session_adaptation_contract": "{}",
             }
         )
+
+
+@patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.GoalOrientedKnowledgeExplorer.invoke")
+def test_explorer_filters_generic_points_and_deduplicates(mock_invoke):
+    from modules.content_generator.agents.goal_oriented_knowledge_explorer import (
+        GoalOrientedKnowledgeExplorer,
+    )
+
+    mock_invoke.return_value = {
+        "knowledge_points": [
+            {"name": "Introduction", "role": "foundational", "solo_level": "beginner"},
+            {"name": "String Slicing", "role": "foundational", "solo_level": "beginner"},
+            {"name": " string   slicing ", "role": "foundational", "solo_level": "beginner"},
+            {"name": "Summary", "role": "practical", "solo_level": "intermediate"},
+        ]
+    }
+
+    explorer = GoalOrientedKnowledgeExplorer(MagicMock())
+    output = explorer.explore(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Python Strings"},
+            "session_adaptation_contract": "{}",
+        }
+    )
+    names = [item["name"] for item in output["knowledge_points"]]
+    assert names == ["String Slicing"]
+
+
+@patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.GoalOrientedKnowledgeExplorer.invoke")
+def test_explorer_applies_application_first_tie_break_order(mock_invoke):
+    from modules.content_generator.agents.goal_oriented_knowledge_explorer import (
+        GoalOrientedKnowledgeExplorer,
+    )
+
+    mock_invoke.return_value = {
+        "knowledge_points": [
+            {"name": "Core Rule", "role": "foundational", "solo_level": "beginner"},
+            {"name": "Quick Use Case", "role": "practical", "solo_level": "beginner"},
+            {"name": "Edge Case", "role": "foundational", "solo_level": "intermediate"},
+        ]
+    }
+
+    explorer = GoalOrientedKnowledgeExplorer(MagicMock())
+    output = explorer.explore(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Python Strings"},
+            "session_adaptation_contract": {
+                "perception": {"mode": "application_first"},
+            },
+        }
+    )
+    roles = [item["role"] for item in output["knowledge_points"]]
+    assert roles == ["practical", "foundational", "foundational"]
+
+
+@patch("modules.content_generator.agents.goal_oriented_knowledge_explorer.GoalOrientedKnowledgeExplorer.invoke")
+def test_explorer_applies_theory_first_tie_break_order(mock_invoke):
+    from modules.content_generator.agents.goal_oriented_knowledge_explorer import (
+        GoalOrientedKnowledgeExplorer,
+    )
+
+    mock_invoke.return_value = {
+        "knowledge_points": [
+            {"name": "Immediate Example", "role": "practical", "solo_level": "beginner"},
+            {"name": "Core Principle", "role": "foundational", "solo_level": "beginner"},
+            {"name": "Practice Drill", "role": "practical", "solo_level": "intermediate"},
+        ]
+    }
+
+    explorer = GoalOrientedKnowledgeExplorer(MagicMock())
+    output = explorer.explore(
+        {
+            "learner_profile": {},
+            "learning_path": {},
+            "learning_session": {"title": "Python Strings"},
+            "session_adaptation_contract": {
+                "perception": {"mode": "theory_first"},
+            },
+        }
+    )
+    roles = [item["role"] for item in output["knowledge_points"]]
+    assert roles == ["foundational", "practical", "practical"]

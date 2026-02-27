@@ -9,6 +9,7 @@ Run from backend directory:
 import sys
 import os
 import asyncio
+import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -695,6 +696,55 @@ class TestPrepareMarkdownDocumentWithMedia:
         assert doc.index("## Applied Example") < doc.index("## Core Theory")
         assert "## Foundational Concepts" not in doc
         assert "## Practical Applications" not in doc
+
+    def test_fallback_normalization_enforces_one_h2_per_draft(self):
+        prepare_markdown_document = self._import()
+        doc = prepare_markdown_document(
+            {
+                "title": "My Doc",
+                "overview": "Overview.",
+                "content": (
+                    "## Applied Example\n\n"
+                    "Use the concept in context.\n\n"
+                    "## Extra Scaffold\n\n"
+                    "This extra heading should force fallback.\n\n"
+                    "## Core Theory\n\n"
+                    "Explain principle."
+                ),
+                "summary": "Summary.",
+            },
+            [
+                {"name": "Applied Example", "role": "practical", "solo_level": "beginner"},
+                {"name": "Core Theory", "role": "foundational", "solo_level": "intermediate"},
+            ],
+            [
+                {
+                    "title": "Applied Example",
+                    "content": (
+                        "## Applied Example\n\n"
+                        "Start from a concrete case.\n\n"
+                        "## Nested Concept\n\n"
+                        "Support details."
+                    ),
+                },
+                {
+                    "title": "Core Theory",
+                    "content": (
+                        "## Core Theory\n\n"
+                        "Explain the governing rule.\n\n"
+                        "## Deeper Principle\n\n"
+                        "Additional reasoning."
+                    ),
+                },
+            ],
+            media_resources=None,
+        )
+        assert len(re.findall(r"^##\s+", doc, flags=re.MULTILINE)) >= 3  # includes Summary
+        assert len(re.findall(r"^##\s+Applied Example\s*$", doc, flags=re.MULTILINE)) == 1
+        assert len(re.findall(r"^##\s+Core Theory\s*$", doc, flags=re.MULTILINE)) == 1
+        assert "## Extra Scaffold" not in doc
+        assert "### Nested Concept" in doc
+        assert "### Deeper Principle" in doc
 
 
 class TestInlineAssetPlanner:

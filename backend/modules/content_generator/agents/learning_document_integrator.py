@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationError, field_validator
 
 from base import BaseAgent
 from ..prompts.learning_document_integrator import integrated_document_generator_system_prompt, integrated_document_generator_task_prompt
@@ -53,8 +54,34 @@ class LearningDocumentIntegrator(BaseAgent):
     def integrate(self, payload: IntegratedDocPayload | Mapping[str, Any] | str):
         if not isinstance(payload, IntegratedDocPayload):
             payload = IntegratedDocPayload.model_validate(payload)
-        raw_output = self.invoke(payload.model_dump(), task_prompt=integrated_document_generator_task_prompt)
-        validated_output = DocumentStructure.model_validate(raw_output)
+        first_payload = payload.model_dump()
+        raw_output = self.invoke(first_payload, task_prompt=integrated_document_generator_task_prompt)
+        try:
+            validated_output = DocumentStructure.model_validate(raw_output)
+        except ValidationError as exc:
+            errors_json = json.dumps(exc.errors(), ensure_ascii=True)
+            logger.warning("Integrator schema mismatch, issuing one repair retry: %s", errors_json)
+            retry_payload = payload.model_dump()
+            retry_payload["integration_feedback"] = _merge_integration_feedback(
+                retry_payload.get("integration_feedback", ""),
+                "Schema repair required: return valid JSON with non-empty `title`, `overview`, `summary`, "
+                "and a `content` string containing stable `##` sections in the intended teaching order.",
+            )
+            repaired = self.invoke(retry_payload, task_prompt=integrated_document_generator_task_prompt)
+            validated_output = DocumentStructure.model_validate(repaired)
+            return validated_output.model_dump()
+
+        expected_section_count = _expected_section_count_from_drafts(payload.knowledge_drafts)
+        if _needs_structure_repair(validated_output.model_dump(), expected_section_count):
+            retry_payload = payload.model_dump()
+            retry_payload["integration_feedback"] = _merge_integration_feedback(
+                retry_payload.get("integration_feedback", ""),
+                f"Structure repair required: `content` must contain exactly {expected_section_count} top-level `##` sections "
+                "in draft order, with instructional prose under each section and no extra top-level `##` headings.",
+            )
+            repaired = self.invoke(retry_payload, task_prompt=integrated_document_generator_task_prompt)
+            repaired_output = DocumentStructure.model_validate(repaired)
+            return repaired_output.model_dump()
         return validated_output.model_dump()
 
 
@@ -266,27 +293,124 @@ def _render_inline_asset(resource: dict) -> str:
     return ""
 
 
+_ASSET_HEADING_MARKERS = (
+    "short story",
+    "poem",
+    "video",
+    "media support",
+    "visual walkthrough",
+    "audio",
+    "image",
+    "diagram",
+    "resource",
+    "watch",
+    "listen",
+)
+
+
+def _merge_integration_feedback(existing: Any, directive: str) -> str:
+    existing_text = str(existing or "").strip()
+    if not existing_text:
+        return directive
+    return f"{existing_text}\n\n{directive}"
+
+
+def _expected_section_count_from_drafts(knowledge_drafts: Any) -> int:
+    if not isinstance(knowledge_drafts, list):
+        return 0
+    return sum(1 for draft in knowledge_drafts if isinstance(draft, dict))
+
+
+def _demote_top_level_h2(content: str) -> str:
+    lines = str(content or "").splitlines(keepends=True)
+    in_code_fence = False
+    fence_token = ""
+    output_lines: List[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        fence_match = re.match(r"^(```|~~~)", stripped)
+        if fence_match:
+            token = fence_match.group(1)
+            if not in_code_fence:
+                in_code_fence = True
+                fence_token = token
+            elif token == fence_token:
+                in_code_fence = False
+                fence_token = ""
+            output_lines.append(line)
+            continue
+        if not in_code_fence:
+            line = re.sub(r"^(\s*)##\s+", r"\1### ", line, count=1)
+        output_lines.append(line)
+    return "".join(output_lines)
+
+
+def _instructional_word_count(section_text: str) -> int:
+    text_wo_h2 = re.sub(r"^##\s+.+$", " ", str(section_text or ""), flags=re.MULTILINE).strip()
+    sub_matches = list(re.finditer(r"^(###|####)\s+(.+)$", text_wo_h2, flags=re.MULTILINE))
+    retained_parts: List[str] = []
+    if sub_matches:
+        first = sub_matches[0]
+        retained_parts.append(text_wo_h2[: first.start()])
+        for sub_idx, sub_match in enumerate(sub_matches):
+            title = sub_match.group(2).strip().lower()
+            start = sub_match.end()
+            end = sub_matches[sub_idx + 1].start() if sub_idx + 1 < len(sub_matches) else len(text_wo_h2)
+            block = text_wo_h2[start:end]
+            if any(marker in title for marker in _ASSET_HEADING_MARKERS):
+                continue
+            retained_parts.append(block)
+        retained = "\n".join(retained_parts)
+    else:
+        retained = text_wo_h2
+
+    retained = re.sub(r"```.*?```", " ", retained, flags=re.DOTALL)
+    retained = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", retained)
+    retained = re.sub(r"<audio[^>]*>.*?</audio>", " ", retained, flags=re.DOTALL)
+    retained = re.sub(r"<video[^>]*>.*?</video>", " ", retained, flags=re.DOTALL)
+    retained = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", retained)
+    words = re.findall(r"[A-Za-z]{3,}", retained)
+    return len(words)
+
+
+def _integrated_content_has_required_structure(content: str, expected_section_count: int) -> bool:
+    sections = _extract_h2_sections_with_offsets(content)
+    if expected_section_count > 0 and len(sections) != expected_section_count:
+        return False
+    if expected_section_count <= 0:
+        return bool(str(content or "").strip())
+    for section in sections:
+        if _instructional_word_count(section.get("markdown", "")) < 3:
+            return False
+    return True
+
+
+def _needs_structure_repair(document_structure: Mapping[str, Any], expected_section_count: int) -> bool:
+    content = str(document_structure.get("content", "") or "").strip()
+    if expected_section_count <= 0:
+        return False
+    if not content:
+        return True
+    return not _integrated_content_has_required_structure(content, expected_section_count)
+
+
 def _sequential_section_body(knowledge_drafts) -> str:
     body_parts: List[str] = []
     for idx, draft in enumerate(knowledge_drafts or []):
         if not isinstance(draft, dict):
             continue
         title = str(draft.get("title") or f"Section {idx + 1}").strip()
-        content = str(draft.get("content") or "").strip()
-        if re.search(r"^\s*##\s+.+$", content, flags=re.MULTILINE):
-            # Draft already carries canonical section structure.
-            body_parts.append(content)
-        else:
-            body_parts.append(f"## {title}\n\n{content}")
+        content = _demote_top_level_h2(str(draft.get("content") or "")).strip()
+        body_parts.append(f"## {title}\n\n{content}".strip())
     return "\n\n".join(body_parts).strip()
 
 
 def _canonical_body(document_structure, knowledge_points, knowledge_drafts) -> str:
+    del knowledge_points  # kept for backwards compatibility in call sites
+    expected_section_count = _expected_section_count_from_drafts(knowledge_drafts)
     content = str(document_structure.get("content", "") or "").strip() if isinstance(document_structure, dict) else ""
-    if content:
-        if re.search(r"^##\s+", content, re.MULTILINE):
-            return content
-        return _sequential_section_body(knowledge_drafts)
+    if content and _integrated_content_has_required_structure(content, expected_section_count):
+        return content
     return _sequential_section_body(knowledge_drafts)
 
 
@@ -296,47 +420,6 @@ def _inject_assets_into_body(body: str, inline_by_section: Dict[int, List[dict]]
     matches = list(re.finditer(r"^##\s+.+$", body, re.MULTILINE))
     if not matches:
         return body
-
-    asset_heading_markers = (
-        "short story",
-        "poem",
-        "video",
-        "media support",
-        "visual walkthrough",
-        "audio",
-        "image",
-        "diagram",
-        "resource",
-        "watch",
-        "listen",
-    )
-
-    def _instructional_word_count(section_text: str) -> int:
-        text_wo_h2 = re.sub(r"^##\s+.+$", " ", section_text, flags=re.MULTILINE).strip()
-        sub_matches = list(re.finditer(r"^(###|####)\s+(.+)$", text_wo_h2, flags=re.MULTILINE))
-        retained_parts: List[str] = []
-        if sub_matches:
-            first = sub_matches[0]
-            retained_parts.append(text_wo_h2[: first.start()])
-            for sub_idx, sub_match in enumerate(sub_matches):
-                title = sub_match.group(2).strip().lower()
-                start = sub_match.end()
-                end = sub_matches[sub_idx + 1].start() if sub_idx + 1 < len(sub_matches) else len(text_wo_h2)
-                block = text_wo_h2[start:end]
-                if any(marker in title for marker in asset_heading_markers):
-                    continue
-                retained_parts.append(block)
-            retained = "\n".join(retained_parts)
-        else:
-            retained = text_wo_h2
-
-        retained = re.sub(r"```.*?```", " ", retained, flags=re.DOTALL)
-        retained = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", retained)
-        retained = re.sub(r"<audio[^>]*>.*?</audio>", " ", retained, flags=re.DOTALL)
-        retained = re.sub(r"<video[^>]*>.*?</video>", " ", retained, flags=re.DOTALL)
-        retained = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", retained)
-        words = re.findall(r"[A-Za-z]{3,}", retained)
-        return len(words)
 
     sections: List[str] = []
     for idx, match in enumerate(matches):

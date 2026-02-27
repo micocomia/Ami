@@ -205,17 +205,68 @@ def _best_effort_shell_draft(knowledge_point: Mapping[str, Any] | None) -> dict[
     return {"title": title, "content": content}
 
 
-def _deterministic_integrated_section_audit(document: str) -> dict[str, Any]:
+def _extract_integrated_h2_sections(document: str) -> list[dict[str, Any]]:
     content = str(document or "")
-    section_matches = list(re.finditer(r"^##\s+(.+)$", content, flags=re.MULTILINE))
-    if not section_matches:
+    lines = content.splitlines(keepends=True)
+    in_code_fence = False
+    fence_token = ""
+    headings: list[tuple[int, str]] = []
+    offset = 0
+    for line in lines:
+        stripped = line.lstrip()
+        fence_match = re.match(r"^(```|~~~)", stripped)
+        if fence_match:
+            token = fence_match.group(1)
+            if not in_code_fence:
+                in_code_fence = True
+                fence_token = token
+            elif token == fence_token:
+                in_code_fence = False
+                fence_token = ""
+        if not in_code_fence:
+            heading_match = re.match(r"^##\s+(.+?)\s*$", line)
+            if heading_match:
+                headings.append((offset, heading_match.group(1).strip()))
+        offset += len(line)
+
+    sections: list[dict[str, Any]] = []
+    for idx, (start, title) in enumerate(headings):
+        end = headings[idx + 1][0] if idx + 1 < len(headings) else len(content)
+        markdown = content[start:end].strip()
+        body = content[start:end].split("\n", 1)[1].strip() if "\n" in content[start:end] else ""
+        sections.append(
+            {
+                "section_index": idx,
+                "title": title,
+                "markdown": markdown,
+                "body": body,
+            }
+        )
+    return sections
+
+
+def _deterministic_integrated_section_audit(
+    document: str,
+    *,
+    expected_core_sections: int = 0,
+) -> dict[str, Any]:
+    sections = _extract_integrated_h2_sections(document)
+    if not sections:
         return {
             "is_acceptable": False,
             "issues": ["Integrated document has no top-level ## sections."],
+            "improvement_directives": "Generate the integrated document with ordered top-level ## sections and instructional prose under each section.",
+            "repair_scope": "integrator_only",
+            "affected_section_indices": [],
+            "severity": "high",
         }
 
     issues: list[str] = []
+    affected_indices: list[int] = []
+    structural_mismatch = False
     placeholder_markers = {"tbd", "todo", "coming soon", "placeholder", "n/a", "lorem ipsum"}
+    optional_titles = {"summary", "additional learning resources"}
+    scaffolding_titles = {"introduction", "overview", "conclusion", "recap", "summary"}
 
     def _prose_word_count(text: str) -> int:
         cleaned = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
@@ -227,18 +278,37 @@ def _deterministic_integrated_section_audit(document: str) -> dict[str, Any]:
         words = re.findall(r"[A-Za-z]{3,}", cleaned)
         return len(words)
 
-    for idx, match in enumerate(section_matches):
-        title = match.group(1).strip()
-        start = match.end()
-        end = section_matches[idx + 1].start() if idx + 1 < len(section_matches) else len(content)
-        body = content[start:end].strip()
+    core_sections = [
+        section
+        for section in sections
+        if str(section.get("title", "")).strip().lower() not in optional_titles
+    ]
+    if expected_core_sections > 0 and len(core_sections) != expected_core_sections:
+        issues.append(
+            f"Core section count mismatch: expected {expected_core_sections}, found {len(core_sections)}. "
+            "Normalize top-level ## headings to one core section per draft."
+        )
+        structural_mismatch = True
+
+    for section in core_sections:
+        idx = int(section.get("section_index", 0))
+        title = str(section.get("title", "")).strip()
+        normalized_title = title.lower()
+        body = str(section.get("body", "")).strip()
+
+        if normalized_title in scaffolding_titles:
+            issues.append(f"Section '{title}' is generic scaffolding and should teach a session-specific concept.")
+            affected_indices.append(idx)
+
         if not body:
             issues.append(f"Section '{title}' is empty.")
+            affected_indices.append(idx)
             continue
 
-        normalized = re.sub(r"\s+", " ", body).strip().lower()
-        if normalized in placeholder_markers:
+        normalized_body = re.sub(r"\s+", " ", body).strip().lower()
+        if normalized_body in placeholder_markers:
             issues.append(f"Section '{title}' contains placeholder text only.")
+            affected_indices.append(idx)
             continue
 
         has_asset_markup = bool(
@@ -248,10 +318,60 @@ def _deterministic_integrated_section_audit(document: str) -> dict[str, Any]:
             or re.search(r"^\s*\|.*\|\s*$", body, flags=re.MULTILINE)
             or re.search(r"```", body)
         )
-        if has_asset_markup and _prose_word_count(body) < 10:
+        prose_words = _prose_word_count(body)
+        if has_asset_markup and prose_words < 10:
             issues.append(f"Section '{title}' is asset-heavy and lacks instructional prose.")
+            affected_indices.append(idx)
 
-    return {"is_acceptable": not issues, "issues": issues}
+    if not issues:
+        return {
+            "is_acceptable": True,
+            "issues": [],
+            "improvement_directives": "",
+            "repair_scope": "integrator_only",
+            "affected_section_indices": [],
+            "severity": "low",
+        }
+
+    unique_affected = sorted({idx for idx in affected_indices if isinstance(idx, int)})
+    if structural_mismatch:
+        return {
+            "is_acceptable": False,
+            "issues": issues,
+            "improvement_directives": (
+                "Reintegrate with strict heading normalization: keep exactly one core top-level ## section per draft "
+                "in draft order, avoid generic scaffolding headings, and keep Summary as a single final section."
+            ),
+            "repair_scope": "integrator_only",
+            "affected_section_indices": [],
+            "severity": "high",
+        }
+
+    localized_limit = max(1, expected_core_sections // 2) if expected_core_sections > 0 else 2
+    if unique_affected and len(unique_affected) <= localized_limit:
+        return {
+            "is_acceptable": False,
+            "issues": issues,
+            "improvement_directives": (
+                f"Redraft only section indices {unique_affected} with clear instructional prose and "
+                "session-specific, non-generic headings."
+            ),
+            "repair_scope": "section_redraft",
+            "affected_section_indices": unique_affected,
+            "severity": "medium" if len(unique_affected) <= 2 else "high",
+        }
+
+    return {
+        "is_acceptable": False,
+        "issues": issues,
+        "improvement_directives": (
+            "Widespread section quality issues detected. Rebuild all draft sections with stronger instructional depth "
+            "and aligned section sequencing."
+        ),
+        "repair_scope": "full_restart_required",
+        "affected_section_indices": unique_affected,
+        "severity": "high",
+    }
 
 
 def _resolve_draft_ids_from_sections(
@@ -679,7 +799,7 @@ def generate_learning_content_with_llm(
                     selected_knowledge_drafts,
                     session_title=session_title,
                     max_narratives=verbal_narrative_allowance,
-                    include_tts=True,
+                    include_tts=False,
                     lightweight_llm=_lightweight_llm,
                 )
             except Exception:
@@ -726,15 +846,24 @@ def generate_learning_content_with_llm(
     with _time_stage(trace, "final_quality_checkpoint"):
         while quality_rounds < _MAX_QUALITY_ROUNDS:
             quality_rounds += 1
-            deterministic_doc_eval = _deterministic_integrated_section_audit(learning_document)
+            deterministic_doc_eval = _deterministic_integrated_section_audit(
+                learning_document,
+                expected_core_sections=len(selected_knowledge_drafts),
+            )
             if not deterministic_doc_eval.get("is_acceptable", False):
                 final_integration_eval = {
                     "is_acceptable": False,
                     "issues": list(deterministic_doc_eval.get("issues", [])),
-                    "improvement_directives": "Fix empty or asset-only sections and ensure each ## has instructional prose.",
-                    "repair_scope": "integrator_only",
-                    "affected_section_indices": [],
-                    "severity": "high",
+                    "improvement_directives": str(
+                        deterministic_doc_eval.get(
+                            "improvement_directives",
+                            "Fix section structure and ensure each core ## section has instructional prose.",
+                        )
+                        or ""
+                    ),
+                    "repair_scope": str(deterministic_doc_eval.get("repair_scope", "integrator_only") or "integrator_only"),
+                    "affected_section_indices": list(deterministic_doc_eval.get("affected_section_indices", [])),
+                    "severity": str(deterministic_doc_eval.get("severity", "high") or "high"),
                 }
             else:
                 try:

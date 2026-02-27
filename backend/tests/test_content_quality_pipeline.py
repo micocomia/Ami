@@ -44,8 +44,8 @@ def test_orchestrator_retries_integrator_with_feedback(
         ]
     }
     mock_integrate.side_effect = [
-        "## Branching Basics\n\nInitial integration.",
-        "## Branching Basics\n\nImproved integration.",
+        "## Branching Basics\n\nInitial integration with complete instructional prose that explains branching decisions clearly.",
+        "## Branching Basics\n\nImproved integration with stronger transitions and clearer progression between ideas.",
     ]
     mock_integrated_eval.side_effect = [
         {
@@ -86,7 +86,7 @@ def test_orchestrator_retries_integrator_with_feedback(
         use_search=False,
     )
 
-    assert "Improved integration." in result["document"]
+    assert "Improved integration" in result["document"]
     assert mock_integrated_eval.call_count == 2
     assert mock_integrate.call_count == 2
     assert mock_integrate.call_args_list[1].kwargs["integration_feedback"] == "Tighten transitions between sections."
@@ -270,3 +270,126 @@ def test_orchestrator_uses_shell_when_no_acceptable_drafts(
     )
 
     assert "best-effort mode" in result["document"].lower()
+
+
+def test_deterministic_integrated_audit_rejects_excess_h2_sections():
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        _deterministic_integrated_section_audit,
+    )
+
+    document = """# Session
+
+## Foundations
+Intro teaching content with concrete examples and explanation details.
+
+## Applications
+Applied teaching content with guided steps and reasoning.
+
+## Extra Scaffold
+This should not be an extra core section.
+"""
+    result = _deterministic_integrated_section_audit(document, expected_core_sections=2)
+    assert result["is_acceptable"] is False
+    assert result["repair_scope"] == "integrator_only"
+    assert any("Core section count mismatch" in issue for issue in result["issues"])
+
+
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_point_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+def test_orchestrator_section_redraft_targets_affected_indices(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = [
+        {"name": "Foundations", "role": "foundational", "solo_level": "beginner"},
+        {"name": "Applications", "role": "practical", "solo_level": "intermediate"},
+    ]
+    mock_draft.return_value = [
+        {
+            "title": "Foundations",
+            "content": (
+                "## Foundations\n\n"
+                "Detailed instructional prose for the first concept with concrete examples and clear rationale."
+            ),
+        },
+        {
+            "title": "Applications",
+            "content": (
+                "## Applications\n\n"
+                "Detailed instructional prose for the second concept with applied steps and practical outcomes."
+            ),
+        },
+    ]
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            ]
+        },
+    ]
+    mock_integrate.side_effect = [
+        "## Foundations\n\nIntegrated first section.\n\n## Applications\n\nIntegrated second section needing rewrite.",
+        "## Foundations\n\nIntegrated first section.\n\n## Applications\n\nRewritten and improved second section.",
+    ]
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": ["Section 1 needs clearer instructional depth."],
+            "improvement_directives": "Redraft section 1 with stronger examples.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [1],
+            "severity": "medium",
+        },
+        {
+            "is_acceptable": True,
+            "issues": [],
+            "improvement_directives": "",
+            "repair_scope": "integrator_only",
+            "affected_section_indices": [],
+            "severity": "low",
+        },
+    ]
+    mock_redraft_one.return_value = {
+        "title": "Applications",
+        "content": "## Applications\n\nRewritten targeted section with clear instructional explanation.",
+    }
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": 0.0,
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+    _ = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session A"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 1
+    assert mock_redraft_one.call_args.kwargs["knowledge_point"]["name"] == "Applications"

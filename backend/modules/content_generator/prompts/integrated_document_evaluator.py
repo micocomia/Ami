@@ -19,11 +19,20 @@ Evaluation criteria:
 2. Presence of substantive instructional content (no empty/skeletal sections).
 3. Fit to learner profile and session adaptation contract (FSLSM + SOLO expectations), including `knowledge_point.role` and `knowledge_point.solo_level`.
 4. Internal consistency and factual caution (avoid unsupported claims).
+5. Structural integrity:
+   - Core top-level `##` sections should align to the pedagogical order of `knowledge_points`.
+   - Flag excess top-level `##` sections that look like scaffolding noise (unless they are explicit optional wrappers like `Summary` or `Additional Learning Resources`).
+   - Flag generic scaffolding-only section titles such as `Introduction`, `Conclusion`, `Overview`, `Recap` when they do not teach session-specific content.
 
 Repair scope rules:
-- `integrator_only`: issues can be fixed by restructuring, transitions, emphasis, or synthesis without rewriting source drafts.
+- `integrator_only`: structural/order/heading-normalization issues fixable by restructuring, transitions, emphasis, or synthesis without rewriting source drafts.
 - `section_redraft`: one or more specific sections are weak or off-target and should be regenerated; provide `affected_section_indices`.
 - `full_restart_required`: widespread issues indicate upstream draft set is inadequate.
+
+Scope selection guidance:
+- Structural-only mismatch (ordering or section-count noise) => `integrator_only`.
+- Localized weakness in a few sections with clear indices => `section_redraft`.
+- Broad failures across most sections => `full_restart_required`.
 
 Severity rules:
 - `low`: polish issues, overall usable.

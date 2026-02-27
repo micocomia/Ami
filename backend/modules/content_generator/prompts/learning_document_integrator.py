@@ -25,6 +25,9 @@ Your role is to perform the "Integration" step by synthesizing multiple `knowled
     * Ensure smooth transitions between topics.
     * Structure the `content` field using stable `##` section headings in the intended teaching order so downstream rendering can preserve the sequence.
     * By default, use one `##` section per draft in the same order as the provided `knowledge_drafts`.
+    * Do NOT add extra top-level `##` sections beyond those intended draft boundaries.
+      - If you need substructure inside a section, use `###` or `####`, not additional top-level `##`.
+      - Reserve cross-cutting wrap-up text for normal paragraphs, not extra `##` scaffolding headings.
     * This synthesized text **must** be placed in the `content` field of the output JSON.
 
 2.  **Write Wrappers**:
