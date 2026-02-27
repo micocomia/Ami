@@ -543,6 +543,31 @@ class TestSkillGapEvaluator:
         assert "feedback" in result
 
     @patch("modules.skill_gap.agents.skill_gap_evaluator.SkillGapEvaluator.invoke")
+    def test_retrieved_context_is_passed_as_coverage_only_context(self, mock_invoke):
+        """Retrieved course content should be labeled as coverage-only, not learner evidence."""
+        mock_invoke.return_value = {
+            "is_acceptable": True,
+            "issues": [],
+            "feedback": "",
+        }
+        llm = MagicMock()
+        evaluator = SkillGapEvaluator(llm)
+        evaluator.evaluate({
+            "learning_goal": "Learn Python",
+            "learner_information": "No coding experience",
+            "retrieved_context": "Lecture 3 covers loops and functions.",
+            "skill_requirements": {"skill_requirements": [{"name": "Loops", "required_level": "beginner"}]},
+            "skill_gaps": {"skill_gaps": []},
+        })
+
+        prompt_vars = mock_invoke.call_args.args[0]
+        task_prompt = mock_invoke.call_args.kwargs["task_prompt"]
+        assert prompt_vars["coverage_context"] == "Lecture 3 covers loops and functions."
+        assert "retrieved_context" not in prompt_vars
+        assert "coverage only" in task_prompt.lower()
+        assert "not learner evidence" in task_prompt.lower()
+
+    @patch("modules.skill_gap.agents.skill_gap_evaluator.SkillGapEvaluator.invoke")
     def test_normalizes_structured_issues_to_strings(self, mock_invoke):
         """Structured issue dicts are normalized to strings before schema validation."""
         mock_invoke.return_value = {

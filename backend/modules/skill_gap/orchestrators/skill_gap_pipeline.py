@@ -127,7 +127,7 @@ def identify_skill_gap_with_llm(
                 evaluation = SkillGapEvaluator(lightweight_llm).evaluate({
                     "learning_goal": learning_goal,
                     "learner_information": learner_information,
-                    "retrieved_context": retrieved_context_str,
+                    "coverage_context": retrieved_context_str,
                     "skill_requirements": effective_requirements,
                     "skill_gaps": skill_gaps_result,
                 })

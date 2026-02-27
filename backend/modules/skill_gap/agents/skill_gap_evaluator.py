@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping
 from typing import Any, Dict, List, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from base import BaseAgent
 from ..prompts.skill_gap_evaluator import skill_gap_evaluator_system_prompt, skill_gap_evaluator_task_prompt
@@ -18,8 +18,16 @@ class SkillGapEvaluationPayload(BaseModel):
     learning_goal: str = Field(...)
     learner_information: str = Field(default="")
     retrieved_context: str = Field(default="")
+    coverage_context: str = Field(default="")
     skill_requirements: dict = Field(...)
     skill_gaps: dict = Field(...)
+
+    @model_validator(mode="after")
+    def populate_coverage_context(self) -> "SkillGapEvaluationPayload":
+        """Support the old retrieved_context field while preferring the explicit coverage-only name."""
+        if not self.coverage_context and self.retrieved_context:
+            self.coverage_context = self.retrieved_context
+        return self
 
 
 class SkillGapEvaluationResult(BaseModel):
@@ -47,7 +55,8 @@ class SkillGapEvaluator(BaseAgent):
 
         Args:
             input_dict: Must contain 'learning_goal', 'skill_requirements', 'skill_gaps'.
-                        Optionally 'learner_information' and 'retrieved_context'.
+                        Optionally 'learner_information' and either
+                        'coverage_context' or legacy 'retrieved_context'.
 
         Returns:
             A SkillGapEvaluationResult dict with is_acceptable, issues, and feedback.
@@ -56,7 +65,7 @@ class SkillGapEvaluator(BaseAgent):
         prompt_vars = {
             "learning_goal": payload.learning_goal,
             "learner_information": payload.learner_information,
-            "retrieved_context": payload.retrieved_context,
+            "coverage_context": payload.coverage_context,
             "skill_requirements": json.dumps(payload.skill_requirements, indent=2),
             "skill_gaps": json.dumps(payload.skill_gaps, indent=2),
         }

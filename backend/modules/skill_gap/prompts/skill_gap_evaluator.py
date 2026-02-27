@@ -18,6 +18,12 @@ are correct, complete, and well-justified given the learner's goal, background, 
 course content. The learning goal has already been processed and finalized — do NOT assess goal
 quality here. Focus entirely on the quality of the skill gap assessment.
 
+**Critical Boundary**:
+- `learner_information` is the ONLY source of evidence for inferring or recalibrating `current_level`.
+- Retrieved course content is provided only as `coverage_context` so you can verify requirement/skill coverage.
+- NEVER use `coverage_context` as evidence that the learner already knows something.
+- NEVER cite retrieved course content as proof of learner proficiency, experience, or transferability.
+
 **Evaluation Procedure (MANDATORY ORDER)**:
 1. **Classify Evidence First**:
    - Determine whether learner_information contains any **allowed evidence**:
@@ -43,7 +49,7 @@ quality here. Focus entirely on the quality of the skill gap assessment.
        - Example potentially valid transfer: HR management practices goal + engineering manager background with explicit people-management evidence.
 3. **Apply Quality Checks**:
    - **Completeness**: every required skill is assessed.
-   - **Retrieved content coverage**: significant retrieved skills appear in gap entries.
+   - **Retrieved content coverage**: significant retrieved skills from `coverage_context` appear in gap entries.
    - **Field coherence**: `is_gap`, `current_level`, `required_level`, and `reason` are logically consistent.
    - **Reason quality**:
      - In Mode B, reasons must reference allowed evidence.
@@ -59,7 +65,7 @@ quality here. Focus entirely on the quality of the skill gap assessment.
 
 **Decision Rules**:
 - Return `is_acceptable: true` when all gaps are well-justified, complete relative to requirements
-  and retrieved content, and consistent with the learner's background under the evidence mode above.
+  and retrieved content coverage, and consistent with the learner's background under the evidence mode above.
 - In **Mode A (persona-only/no allowed evidence)**:
   - Accept outputs that conservatively use `unlearned` with explicit no-allowed-evidence reasons.
   - Reject ONLY for structural problems (missing required skills, incoherent fields, or missing retrieved-content coverage).
@@ -82,9 +88,12 @@ quality here. Focus entirely on the quality of the skill gap assessment.
   level inference and instruct recalibration using only allowed evidence.
 - Never request upward level calibration (`beginner`/`intermediate`) without explicitly citing allowed
   evidence that supports transfer.
+- `coverage_context` may justify adding or covering skills, but it may NEVER justify increasing
+  `current_level`.
 - Forbidden feedback patterns:
   - "persona suggests foundational knowledge"
   - "hands-on implies beginner/intermediate"
+  - "retrieved course content shows the learner likely knows X"
 - Be strict but fair. Minor wording differences are acceptable. Focus on factual errors and
   missing coverage.
 
@@ -99,14 +108,19 @@ skill_gap_evaluator_task_prompt = """
 Evaluate the quality of the identified skill gaps.
 First classify evidence mode from learner_information (Mode A persona-only/no allowed evidence vs Mode B allowed evidence), then apply the mandated decision rules.
 
+Important:
+- Use `learner_information` only for any judgment about `current_level`.
+- Use `coverage_context` only to check whether important course skills/topics are covered.
+- Do not treat `coverage_context` as learner evidence.
+
 **Learning Goal**:
 {learning_goal}
 
 **Learner Information**:
 {learner_information}
 
-**Retrieved Course Content** (if provided, gaps should cover skills from this content):
-{retrieved_context}
+**Coverage Context From Retrieved Course Content** (coverage only, not learner evidence):
+{coverage_context}
 
 **Skill Requirements**:
 {skill_requirements}
