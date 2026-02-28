@@ -36,6 +36,7 @@ from fastapi.responses import JSONResponse
 from modules.skill_gap import *
 from modules.learner_profiler import *
 from modules.learner_profiler.utils import fslsm_adaptation
+from modules.learner_profiler.utils.profile_edit_inputs import extract_slider_override_dims
 from modules.learning_plan_generator import *
 from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
     schedule_learning_path_agentic,
@@ -2058,15 +2059,32 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
         if request.user_id is not None and request.goal_id is not None:
             stored_profile = store.get_profile(request.user_id, request.goal_id)
             if isinstance(stored_profile, dict):
+                input_profile = copy.deepcopy(stored_profile)
                 old_profile_for_reset = copy.deepcopy(stored_profile)
             store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
             _record_snapshot_timestamp(request.user_id, request.goal_id)
-        learner_profile = update_learning_preferences_with_llm(
-            llm,
-            input_profile,
+        slider_override_dims = extract_slider_override_dims(
             learner_interactions,
-            learner_information,
+            fallback_dims=(
+                input_profile.get("learning_preferences", {}).get("fslsm_dimensions", {})
+                if isinstance(input_profile, dict)
+                else {}
+            ),
         )
+        if slider_override_dims:
+            learner_profile = copy.deepcopy(input_profile if isinstance(input_profile, dict) else {})
+            prefs = learner_profile.setdefault("learning_preferences", {})
+            if not isinstance(prefs, dict):
+                prefs = {}
+                learner_profile["learning_preferences"] = prefs
+            prefs["fslsm_dimensions"] = slider_override_dims
+        else:
+            learner_profile = update_learning_preferences_with_llm(
+                llm,
+                input_profile,
+                learner_interactions,
+                learner_information,
+            )
         if request.user_id is not None and request.goal_id is not None:
             _reset_adaptation_on_profile_sign_flip(
                 request.user_id,
@@ -2076,6 +2094,63 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
             )
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
         return {"learner_profile": learner_profile}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/update-learner-information")
+async def update_learner_information(request: LearnerInformationUpdateRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    edited_learner_information = request.edited_learner_information
+    resume_text = request.resume_text
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = ast.literal_eval(learner_profile)
+            except Exception:
+                learner_profile = {"raw": learner_profile}
+        if isinstance(edited_learner_information, str):
+            edited_learner_information = edited_learner_information.strip()
+        if isinstance(resume_text, str):
+            resume_text = resume_text.strip()
+
+        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
+        old_profile_for_reset = copy.deepcopy(input_profile)
+
+        if request.user_id is not None and request.goal_id is not None:
+            stored_profile = store.get_profile(request.user_id, request.goal_id)
+            if isinstance(stored_profile, dict):
+                input_profile = copy.deepcopy(stored_profile)
+                old_profile_for_reset = copy.deepcopy(stored_profile)
+            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
+            _record_snapshot_timestamp(request.user_id, request.goal_id)
+
+        updated_profile = update_learner_information_with_llm(
+            llm,
+            input_profile,
+            edited_learner_information=edited_learner_information or "",
+            resume_text=resume_text or "",
+        )
+        if not isinstance(updated_profile, dict):
+            updated_profile = copy.deepcopy(input_profile if isinstance(input_profile, dict) else {})
+
+        if request.user_id is not None and request.goal_id is not None:
+            _reset_adaptation_on_profile_sign_flip(
+                request.user_id,
+                request.goal_id,
+                old_profile_for_reset,
+                updated_profile if isinstance(updated_profile, dict) else {},
+            )
+            store.upsert_profile(request.user_id, request.goal_id, updated_profile)
+            store.propagate_learner_information_to_all_goals(
+                request.user_id,
+                updated_profile.get("learner_information", ""),
+            )
+            persisted = store.get_profile(request.user_id, request.goal_id) or updated_profile
+            return {"learner_profile": persisted}
+
+        return {"learner_profile": updated_profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

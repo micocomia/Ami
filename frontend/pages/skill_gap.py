@@ -30,7 +30,6 @@ def render_skill_gap():
         if st.button("< Back to Onboarding", type="secondary"):
             st.switch_page("pages/onboarding.py")
         st.title("Skill Gap")
-        st.write("Review and confirm your skill gaps.")
 
         skill_gaps = goal.get("skill_gaps") or []
         if not skill_gaps:
@@ -44,12 +43,18 @@ def render_skill_gap():
         else:
             # Show goal assessment banners (auto-refined, vague, all-mastered)
             render_goal_assessment_banners(goal)
-            render_retrieval_sources_banner(goal)
-            render_bias_audit_banners(goal)
 
             num_skills = len(skill_gaps)
             num_gaps = sum(1 for skill in skill_gaps if skill["is_gap"])
-            render_skill_gap_summary(num_skills, num_gaps)
+            ai_disclaimer = ((goal.get("bias_audit") or {}).get("ethical_disclaimer") or "").strip()
+            render_skill_gap_summary(
+                num_skills,
+                num_gaps,
+                ai_disclaimer=ai_disclaimer,
+                goal_assessment=goal.get("goal_assessment"),
+                learning_goal=goal.get("learning_goal", ""),
+            )
+            render_bias_audit_banners(goal)
             render_identified_skill_gap(goal)
 
             # Dynamic gap-check: disable Schedule when no gaps exist
@@ -101,6 +106,8 @@ def render_skill_gap():
                     st.session_state["selected_page"] = "Learning Path"
                     save_persistent_state()
                     st.switch_page("pages/learning_path.py")
+
+            render_retrieval_sources_banner(goal)
 
 
 render_skill_gap()

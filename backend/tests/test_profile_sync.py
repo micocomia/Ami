@@ -46,12 +46,14 @@ def _make_profile(
     in_progress=None,
     learning_preferences=None,
     behavioral_patterns=None,
+    learner_information="",
     overall_progress=0.0,
     learning_goal="Test Goal",
 ):
     """Build a minimal learner profile dict."""
     return {
         "learning_goal": learning_goal,
+        "learner_information": learner_information,
         "cognitive_status": {
             "mastered_skills": mastered or [],
             "in_progress_skills": in_progress or [],
@@ -123,6 +125,14 @@ class TestMergeSharedProfileFields:
         result = store.merge_shared_profile_fields("alice", 1)
         assert result["learning_preferences"] is not None
         assert result["learning_preferences"]["fslsm_dimensions"]["fslsm_processing"] == -0.7
+
+    def test_merge_does_not_overwrite_target_learner_information(self):
+        """Target learner_information should stay stable during shared-field merge."""
+        store.upsert_profile("alice", 0, _make_profile(learner_information="Other goal info"))
+        store.upsert_profile("alice", 1, _make_profile(learner_information="Target goal info"))
+
+        result = store.merge_shared_profile_fields("alice", 1)
+        assert result["learner_information"] == "Target goal info"
 
     def test_merge_behavioral_propagate(self):
         """behavioral_patterns from Goal A appear in Goal B after merge."""

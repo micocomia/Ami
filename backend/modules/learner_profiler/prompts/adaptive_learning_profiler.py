@@ -180,3 +180,28 @@ RULES:
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
 adaptive_learner_profiler_task_prompt_update_preferences = adaptive_learner_profiler_task_prompt_update_preferences.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)
+
+adaptive_learner_profiler_task_prompt_update_information = """
+Task B-Information: Learner Information Update
+
+Update ONLY the learner_information section of the learner's profile based on user edits and optional resume text.
+
+- Learner's Previous Profile: {learner_profile}
+- Current Learner Information: {current_learner_information}
+- Edited Learner Information (text-primary): {edited_learner_information}
+- Resume Text (optional, enrichment only): {resume_text}
+- Primary Learner Information Baseline: {primary_learner_information}
+
+RULES:
+- You MUST preserve learning_goal, goal_display_name, cognitive_status, learning_preferences, and behavioral_patterns EXACTLY as they are in the previous profile.
+- Only update learner_information.
+- Treat edited_learner_information as the primary source of truth when provided.
+- Use resume_text only to enrich missing details or improve clarity; do not override explicit edited text intent.
+- If both edited_learner_information and resume_text are empty, keep learner_information unchanged.
+
+LEARNER_PROFILE_OUTPUT_FORMAT
+"""
+adaptive_learner_profiler_task_prompt_update_information = adaptive_learner_profiler_task_prompt_update_information.replace(
+    "LEARNER_PROFILE_OUTPUT_FORMAT",
+    learner_profile_output_format,
+)

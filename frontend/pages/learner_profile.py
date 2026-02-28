@@ -3,6 +3,7 @@ from utils.request_api import (
     create_learner_profile,
     get_learner_profile,
     update_learning_preferences,
+    update_learner_information,
     auth_delete_user,
     get_app_config,
     get_behavioral_metrics,
@@ -140,13 +141,16 @@ def render_learner_profile_info(goal):
     """, unsafe_allow_html=True)
     learner_profile = goal["learner_profile"]
     with st.container(border=True):
-        # Learner Information
-        st.markdown("#### 👤 Learner Information")
-        st.markdown(f"<div class='section'>{learner_profile['learner_information']}</div>", unsafe_allow_html=True)
+        header_col, button_col = st.columns([4, 1])
+        with header_col:
+            st.markdown("#### 👤 Learner Information")
+        with button_col:
+            if st.button("Edit Profile", type="primary", key=f"open_edit_profile_{goal.get('id', 'current')}"):
+                show_edit_profile_dialog(goal)
+        st.write(learner_profile.get("learner_information", ""))
 
-        # Learning Goal
         st.markdown("#### 🎯 Learning Goal")
-        st.markdown(f"<div class='section'>{learner_profile['learning_goal']}</div>", unsafe_allow_html=True)
+        st.write(learner_profile.get("learning_goal", ""))
 
     render_fairness_banners(goal)
 
@@ -156,8 +160,6 @@ def render_learner_profile_info(goal):
         render_learning_preferences(goal)
     with st.container(border=True):
         render_behavioral_patterns(goal)
-
-    render_additional_info_form(goal)
 
 
 def render_cognitive_status(goal):
@@ -211,6 +213,7 @@ def render_learning_preferences(goal):
         ("Understanding", "Sequential", "Global", understanding),
     ]
 
+    goal_id = goal.get("id", "current")
     for label, left_label, right_label, value in slider_specs:
         st.caption(f"{label}")
         col1, col2, col3 = st.columns([1, 3, 1])
@@ -225,7 +228,7 @@ def render_learning_preferences(goal):
                 step=0.1,
                 disabled=True,
                 label_visibility="collapsed",
-                key=f"fslsm_slider_{label.lower()}",
+                key=f"view_fslsm_slider_{label.lower()}_{goal_id}",
             )
         with col3:
             st.markdown(f"**{right_label}**")
@@ -321,59 +324,118 @@ def render_behavioral_patterns(goal):
         st.info("No mastery data yet. Study sessions to see your mastery trend.")
 
 
-def render_additional_info_form(goal):
-    with st.form(key="additional_info_form"):
-        st.markdown("#### Update Learning Preferences")
-        st.info("Help us improve your learning experience by providing your feedback below.")
-        st.write("How much do you agree with the current profile? *")
-        agreement_star = st.feedback("stars", key="agreement_star")
-        st.write("Do you have any suggestions or corrections? *")
-        suggestions = st.text_area("Provide your suggestions here.", label_visibility="collapsed")
-        pdf_file = st.file_uploader("Upload a PDF with additional information (e.g., resume)", type="pdf")
-        if pdf_file is not None:
-            with st.spinner("Extracting text from PDF..."):
-                additional_info_pdf = extract_text_from_pdf(pdf_file)
-                st.toast("PDF uploaded successfully.")
-        else:
-            additional_info_pdf = ""
-        submit_button = st.form_submit_button("Update Profile", type="primary")
-        if submit_button:
-            if agreement_star is None or not suggestions.strip():
-                st.error("Please provide both a star rating and suggestions before submitting.")
-                return
-            st.session_state["additional_info"] = {
-                "agreement_star": agreement_star,
-                "suggestions": suggestions,
-                "additional_info": additional_info_pdf,
+@st.dialog("Edit Profile")
+def show_edit_profile_dialog(goal):
+    learner_profile = goal.get("learner_profile", {})
+    goal_id = st.session_state.get("selected_goal_id")
+    user_id = st.session_state.get("userId")
+    prefs = learner_profile.get("learning_preferences", {})
+    dims = prefs.get("fslsm_dimensions") or {}
+
+    def _get_dim(name: str, default: float = 0.0) -> float:
+        value = dims.get(f"fslsm_{name}", dims.get(name, default))
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    mode = st.radio(
+        "Choose update mode",
+        ["FSLSM updates", "Enhance learner information ONLY"],
+        key=f"edit_profile_mode_{goal_id}",
+    )
+
+    if mode == "FSLSM updates":
+        st.caption("Adjust your current FSLSM dimensions directly using sliders.")
+        slider_specs = [
+            ("processing", "Processing", "Active", "Reflective"),
+            ("perception", "Perception", "Sensing", "Intuitive"),
+            ("input", "Input", "Visual", "Verbal"),
+            ("understanding", "Understanding", "Sequential", "Global"),
+        ]
+        slider_values = {}
+        for key_name, label, left_label, right_label in slider_specs:
+            st.caption(label)
+            col1, col2, col3 = st.columns([1, 3, 1])
+            with col1:
+                st.markdown(f"**{left_label}**")
+            with col2:
+                slider_values[key_name] = st.slider(
+                    label=label,
+                    min_value=-1.0,
+                    max_value=1.0,
+                    value=float(_get_dim(key_name)),
+                    step=0.1,
+                    label_visibility="collapsed",
+                    key=f"edit_fslsm_slider_{key_name}_{goal_id}",
+                )
+            with col3:
+                st.markdown(f"**{right_label}**")
+        if st.button("Save FSLSM Changes", type="primary", key=f"save_fslsm_edit_{goal_id}"):
+            learner_interactions = {
+                "update_mode": "fslsm_slider_override",
+                "slider_values": slider_values,
             }
+            with st.spinner("Updating learning preferences..."):
+                updated_profile = update_learning_preferences(
+                    learner_profile,
+                    learner_interactions,
+                    user_id=user_id,
+                    goal_id=goal_id,
+                )
+            if updated_profile is None:
+                st.error("Failed to update learning preferences. Please try again.")
+                return
+            goal["learner_profile"] = updated_profile
+            propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
             try:
                 save_persistent_state()
             except Exception:
                 pass
-            with st.spinner("Updating your profile..."):
-                update_learner_profile_with_additional_info(goal)
+            st.toast("Learning preferences updated successfully.")
+            st.rerun()
+        return
 
-def update_learner_profile_with_additional_info(goal):
-    additional_info = st.session_state["additional_info"]
-    user_id = st.session_state.get("userId")
-    goal_id = st.session_state.get("selected_goal_id")
-    # Pass user_id/goal_id so the backend saves immediately and captures a
-    # pre-update snapshot for adapt-learning-path delta comparison.
-    new_learner_profile = update_learning_preferences(goal.get("learner_profile", {}), additional_info, user_id=user_id, goal_id=goal_id)
-    if new_learner_profile is not None:
-        # Profile is already persisted to the backend by update_learning_preferences.
-
-        goal["learner_profile"] = new_learner_profile
-        # Push updated learning_preferences to all other goals immediately
+    current_info = str(learner_profile.get("learner_information", "") or "")
+    edited_info = st.text_area(
+        "Learner Information",
+        value=current_info,
+        height=220,
+        key=f"edit_learner_information_{goal_id}",
+        help="You can edit your current learner information directly.",
+    )
+    pdf_file = st.file_uploader(
+        "Upload resume to enrich learner information (PDF)",
+        type="pdf",
+        key=f"edit_resume_upload_{goal_id}",
+    )
+    if st.button("Save Learner Information", type="primary", key=f"save_learner_info_{goal_id}"):
+        resume_text = ""
+        if pdf_file is not None:
+            with st.spinner("Extracting text from resume..."):
+                resume_text = extract_text_from_pdf(pdf_file)
+        if not edited_info.strip() and not resume_text.strip():
+            st.error("Provide edited learner information text or upload a resume before submitting.")
+            return
+        with st.spinner("Updating learner information..."):
+            updated_profile = update_learner_information(
+                learner_profile,
+                edited_learner_information=edited_info,
+                resume_text=resume_text,
+                user_id=user_id,
+                goal_id=goal_id,
+            )
+        if updated_profile is None:
+            st.error("Failed to update learner information. Please try again.")
+            return
+        goal["learner_profile"] = updated_profile
         propagate_profile_fields_to_other_goals(goal_id, sync_preferences=True)
         try:
             save_persistent_state()
         except Exception:
             pass
-        st.toast("Successfully updated your profile!")
+        st.toast("Learner information updated successfully.")
         st.rerun()
-    else:
-        st.error("Failed to update your profile. Please try again.")
 
 
 @st.dialog("Confirm Restart Onboarding")

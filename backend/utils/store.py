@@ -85,12 +85,13 @@ def _mastery_history_key(user_id: str, goal_id: int) -> str:
 
 def upsert_profile(user_id: str, goal_id: int, profile: Dict[str, Any]):
     with _lock:
-        _profiles[_profile_key(user_id, goal_id)] = profile
+        _profiles[_profile_key(user_id, goal_id)] = copy.deepcopy(profile)
         _flush_json(_PROFILES_PATH, _profiles)
 
 
 def get_profile(user_id: str, goal_id: int) -> Optional[Dict[str, Any]]:
-    return _profiles.get(_profile_key(user_id, goal_id))
+    profile = _profiles.get(_profile_key(user_id, goal_id))
+    return copy.deepcopy(profile) if isinstance(profile, dict) else None
 
 
 def get_all_profiles_for_user(user_id: str) -> Dict[int, Dict[str, Any]]:
@@ -100,9 +101,9 @@ def get_all_profiles_for_user(user_id: str) -> Dict[int, Dict[str, Any]]:
         if key.startswith(prefix):
             gid = key[len(prefix):]
             try:
-                result[int(gid)] = profile
+                result[int(gid)] = copy.deepcopy(profile)
             except ValueError:
-                result[gid] = profile
+                result[gid] = copy.deepcopy(profile)
     return result
 
 
@@ -325,13 +326,10 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
 
     target_prefs = target_profile.get("learning_preferences")
     target_behavioral = target_profile.get("behavioral_patterns")
-    target_learner_info = target_profile.get("learner_information", "")
+    target_learner_info = copy.deepcopy(target_profile.get("learner_information", ""))
     for gid, profile in all_profiles.items():
         if gid == target_goal_id:
             continue
-        other_learner_info = profile.get("learner_information", "")
-        if other_learner_info:
-            target_learner_info = other_learner_info
 
         other_prefs = profile.get("learning_preferences")
         if other_prefs and not target_prefs:
@@ -379,6 +377,25 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
 
     upsert_profile(user_id, target_goal_id, target_profile)
     return target_profile
+
+
+def propagate_learner_information_to_all_goals(user_id: str, learner_information: str) -> int:
+    """Set learner_information identically across all stored profiles for a user."""
+    prefix = f"{user_id}:"
+    updated_count = 0
+    with _lock:
+        for key, profile in list(_profiles.items()):
+            if not key.startswith(prefix):
+                continue
+            if not isinstance(profile, dict):
+                continue
+            updated_profile = copy.deepcopy(profile)
+            updated_profile["learner_information"] = str(learner_information or "")
+            _profiles[key] = updated_profile
+            updated_count += 1
+        if updated_count > 0:
+            _flush_json(_PROFILES_PATH, _profiles)
+    return updated_count
 
 
 def delete_all_user_data(user_id: str):

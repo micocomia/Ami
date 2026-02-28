@@ -18,6 +18,7 @@ from modules.learner_profiler.agents.adaptive_learning_profiler import (
     CognitiveUpdatePayload,
     PreferencesUpdatePayload,
     update_cognitive_status_with_llm,
+    update_learner_information_with_llm,
     update_learning_preferences_with_llm,
 )
 
@@ -165,6 +166,48 @@ class TestPreferencesUpdateAdjustsFSLSM:
             )
 
         assert result["learning_preferences"]["fslsm_dimensions"]["fslsm_input"] < 0
+
+
+class TestLearnerInformationUpdatePreservesEverythingElse:
+    def test_info_update_preserves_non_info_fields(self):
+        updated = copy.deepcopy(SAMPLE_PROFILE)
+        updated["learner_information"] = "Updated learner information"
+        # Simulate an LLM trying to modify protected sections.
+        updated["cognitive_status"]["overall_progress"] = 99
+        updated["learning_preferences"]["fslsm_dimensions"]["fslsm_input"] = 0.9
+        updated["behavioral_patterns"]["system_usage_frequency"] = "hourly"
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_learner_information_with_llm(
+                mock_llm,
+                SAMPLE_PROFILE,
+                edited_learner_information="Updated learner information",
+                resume_text="",
+            )
+
+        assert result["learner_information"] == "Updated learner information"
+        assert result["cognitive_status"] == SAMPLE_PROFILE["cognitive_status"]
+        assert result["learning_preferences"] == SAMPLE_PROFILE["learning_preferences"]
+        assert result["behavioral_patterns"] == SAMPLE_PROFILE["behavioral_patterns"]
+
+    def test_info_update_accepts_partial_llm_output_with_only_learner_information(self):
+        partial = {"learner_information": "Updated from resume + manual edits"}
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=partial):
+            result = update_learner_information_with_llm(
+                mock_llm,
+                SAMPLE_PROFILE,
+                edited_learner_information="Updated from resume + manual edits",
+                resume_text="",
+            )
+
+        assert result["learner_information"] == "Updated from resume + manual edits"
+        assert result["learning_goal"] == SAMPLE_PROFILE["learning_goal"]
+        assert result["cognitive_status"] == SAMPLE_PROFILE["cognitive_status"]
+        assert result["learning_preferences"] == SAMPLE_PROFILE["learning_preferences"]
+        assert result["behavioral_patterns"] == SAMPLE_PROFILE["behavioral_patterns"]
 
 
 class TestPayloadValidation:

@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.request_api import create_learner_profile, identify_skill_gap, audit_skill_gap_bias, get_app_config
+from utils.request_api import identify_skill_gap, audit_skill_gap_bias, get_app_config
 from utils.format import format_citation
 from utils.state import save_persistent_state
 
@@ -12,14 +12,57 @@ _LEVEL_DESCRIPTIONS = {
     "expert":        "Mastery — you can innovate and define best practices in this area.",
 }
 
+_FALLBACK_DISCLAIMER = (
+    "These skill assessments are AI-generated inferences based on the information you provided. "
+    "They may not fully reflect your actual abilities. Use them as a starting point, not a definitive evaluation."
+)
 
-def render_skill_gap_summary(num_skills: int, num_gaps: int) -> None:
+
+def render_skill_gap_summary(
+    num_skills: int,
+    num_gaps: int,
+    ai_disclaimer: str | None = None,
+    goal_assessment: dict | None = None,
+    learning_goal: str = "",
+) -> None:
     """Render the skill-count summary, a review instruction, and a level-description reference."""
+    disclaimer = (ai_disclaimer or "").strip() or _FALLBACK_DISCLAIMER
+    auto_refined_block = ""
+    vague_goal_block = ""
+    assessment = goal_assessment or {}
+    if assessment.get("auto_refined"):
+        original = str(assessment.get("original_goal", "") or "").strip()
+        refined = str(learning_goal or assessment.get("refined_goal", "") or "").strip()
+        auto_refined_block = (
+            "\nYour goal was automatically refined by AI for better results.\n"
+            f"**Original goal:** {original or 'N/A'}. "
+            f"**Refined goal:** {refined or 'N/A'}. "
+        )
+    if assessment.get("is_vague") and not assessment.get("auto_refined"):
+        vague_suggestion = str(
+            assessment.get(
+                "suggestion",
+                "Your goal may be too vague or does not match available course content. "
+                "Consider making it more specific (e.g., include a topic area or skill).",
+            )
+            or ""
+        ).strip()
+        if not vague_suggestion:
+            vague_suggestion = (
+                "Consider making it more specific (e.g., include a topic area or skill)."
+            )
+        vague_goal_block = (
+            "Your goal may be too vague to produce optimal results. "
+            f"{vague_suggestion}\n\n"
+        )
     st.info(
         f"**{num_skills} skills identified · {num_gaps} skill gap{'s' if num_gaps != 1 else ''}**  \n"
-        "Review each skill below. Adjust the **Current Level** if it doesn't match your "
+        f"{vague_goal_block}"
+        "\nReview each skill below. Adjust the **Current Level** if it doesn't match your "
         "actual knowledge, and toggle **Mark as Gap** to correct any mis-classifications. "
-        "Only skills marked as gaps will be included in your learning path."
+        "Only skills marked as gaps will be included in your learning path.\n\n"
+        f"---\n**AI Disclaimer:** {disclaimer}"
+        f"\n\n{auto_refined_block}"
     )
     with st.expander("What do the proficiency levels mean?"):
         for level, description in _LEVEL_DESCRIPTIONS.items():
@@ -87,19 +130,6 @@ def render_goal_assessment_banners(goal):
     assessment = goal.get("goal_assessment")
     if not assessment:
         return
-
-    if assessment.get("auto_refined"):
-        original = assessment.get("original_goal", "")
-        st.info(
-            f"Your goal was automatically refined for better results.\n\n"
-            f"**Original goal:** {original}\n\n"
-            f"**Refined goal:** {goal.get('learning_goal', '')}"
-        )
-    elif assessment.get("is_vague"):
-        suggestion = assessment.get("suggestion", "Consider making your goal more specific.")
-        st.warning(
-            f"Your goal may be too vague to produce optimal results. {suggestion}"
-        )
 
     if assessment.get("all_mastered"):
         suggestion = assessment.get("suggestion", "Consider setting a more advanced goal.")
@@ -225,19 +255,9 @@ def render_identified_skill_gap(goal, method_name="ami"):
                 st.rerun()
 
 
-_FALLBACK_DISCLAIMER = (
-    "These skill assessments are AI-generated inferences based on the information you provided. "
-    "They may not fully reflect your actual abilities. Use them as a starting point, not a definitive evaluation."
-)
-
-
 def render_bias_audit_banners(goal):
-    """Show ethical disclaimer and any bias/calibration warnings from the audit."""
+    """Show bias/calibration warnings from the audit."""
     audit = goal.get("bias_audit")
-
-    # Always show ethical disclaimer (even if audit failed)
-    disclaimer = (audit or {}).get("ethical_disclaimer", _FALLBACK_DISCLAIMER)
-    st.info(disclaimer)
 
     if not audit:
         return

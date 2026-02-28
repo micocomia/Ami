@@ -14,6 +14,11 @@ from ..prompts import (
     adaptive_learner_profiler_task_prompt_update,
     adaptive_learner_profiler_task_prompt_update_cognitive,
     adaptive_learner_profiler_task_prompt_update_preferences,
+    adaptive_learner_profiler_task_prompt_update_information,
+)
+from ..utils import (
+    compose_learner_information_update_inputs,
+    preserve_profile_sections_for_info_only_update,
 )
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -50,6 +55,16 @@ class PreferencesUpdatePayload(BaseModel):
     learner_profile: Union[str, Dict[str, Any], Mapping[str, Any]]
     learner_interactions: Union[str, Dict[str, Any], Mapping[str, Any]]
     learner_information: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
+
+
+class LearnerInformationUpdatePayload(BaseModel):
+    """Payload for updating only learner_information from edits/resume."""
+
+    learner_profile: Union[str, Dict[str, Any], Mapping[str, Any]]
+    edited_learner_information: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
+    resume_text: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
+    current_learner_information: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
+    primary_learner_information: Union[str, Dict[str, Any], Mapping[str, Any]] = ""
 
 
 class AdaptiveLearnerProfiler(BaseAgent):
@@ -94,6 +109,19 @@ class AdaptiveLearnerProfiler(BaseAgent):
         payload_dict = PreferencesUpdatePayload(**input_dict).model_dump()
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated_output = LearnerProfile.model_validate(raw_output)
+        return validated_output.model_dump()
+
+    def update_learner_information(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Update only learner_information based on edited text/resume."""
+        task_prompt = adaptive_learner_profiler_task_prompt_update_information
+        payload_dict = LearnerInformationUpdatePayload(**input_dict).model_dump()
+        raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
+        base_profile = payload_dict.get("learner_profile", {})
+        if not isinstance(base_profile, Mapping):
+            base_profile = {}
+        candidate = raw_output if isinstance(raw_output, Mapping) else {}
+        merged = preserve_profile_sections_for_info_only_update(base_profile, candidate)
+        validated_output = LearnerProfile.model_validate(merged)
         return validated_output.model_dump()
 
 
@@ -159,3 +187,27 @@ def update_learning_preferences_with_llm(
         "learner_interactions": learner_interactions,
         "learner_information": learner_information,
     })
+
+
+def update_learner_information_with_llm(
+    llm: Any,
+    learner_profile: Union[str, Mapping[str, Any]],
+    edited_learner_information: Union[str, Mapping[str, Any]] = "",
+    resume_text: Union[str, Mapping[str, Any]] = "",
+) -> Dict[str, Any]:
+    """Public helper for updating only learner_information via the LLM backend."""
+    profiler = AdaptiveLearnerProfiler(llm)
+    composed = compose_learner_information_update_inputs(
+        current_learner_information=(learner_profile or {}).get("learner_information", "") if isinstance(learner_profile, Mapping) else "",
+        edited_learner_information=edited_learner_information,
+        resume_text=resume_text,
+    )
+    candidate = profiler.update_learner_information({
+        "learner_profile": learner_profile,
+        "edited_learner_information": composed["edited_learner_information"],
+        "resume_text": composed["resume_text"],
+        "current_learner_information": composed["current_learner_information"],
+        "primary_learner_information": composed["primary_learner_information"],
+    })
+    original = learner_profile if isinstance(learner_profile, Mapping) else {}
+    return preserve_profile_sections_for_info_only_update(original, candidate)

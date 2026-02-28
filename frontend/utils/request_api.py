@@ -142,6 +142,7 @@ API_NAMES = {
     "update_profile": "update-learner-profile",
     "update_cognitive_status": "update-cognitive-status",
     "update_learning_preferences": "update-learning-preferences",
+    "update_learner_information": "update-learner-information",
     "schedule_path": "schedule-learning-path",
     "schedule_path_agentic": "schedule-learning-path-agentic",
     "adapt_path": "adapt-learning-path",
@@ -434,6 +435,33 @@ def update_learning_preferences(learner_profile, learner_interactions, learner_i
     if goal_id is not None:
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["update_learning_preferences"], data)
+    return response.get("learner_profile") if response else None
+
+
+def update_learner_information(
+    learner_profile,
+    edited_learner_information="",
+    resume_text="",
+    llm_type=None,
+    method_name=None,
+    user_id=None,
+    goal_id=None,
+):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "learner_profile": str(learner_profile),
+        "edited_learner_information": _normalize_learner_information(edited_learner_information),
+        "resume_text": _normalize_learner_information(resume_text),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    response = make_post_request(API_NAMES["update_learner_information"], data)
     return response.get("learner_profile") if response else None
 
 

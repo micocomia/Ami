@@ -15,6 +15,13 @@ from .fslsm_adaptation import (
     session_signal_keys,
     update_fslsm_from_evidence,
 )
+from .profile_edit_inputs import (
+    clamp_fslsm_value,
+    compose_learner_information_update_inputs,
+    extract_slider_override_dims,
+    normalize_fslsm_slider_values,
+    preserve_profile_sections_for_info_only_update,
+)
 
 __all__ = [
     "FSLSM_DIM_KEYS",
@@ -30,4 +37,9 @@ __all__ = [
     "path_version_hash",
     "session_signal_keys",
     "update_fslsm_from_evidence",
+    "clamp_fslsm_value",
+    "compose_learner_information_update_inputs",
+    "extract_slider_override_dims",
+    "normalize_fslsm_slider_values",
+    "preserve_profile_sections_for_info_only_update",
 ]

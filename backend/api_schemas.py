@@ -75,6 +75,15 @@ class LearningPreferencesUpdateRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class LearnerInformationUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    edited_learner_information: str = ""
+    resume_text: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class LearningPathSchedulingRequest(BaseRequest):
 
     learner_profile: str
