@@ -24,6 +24,7 @@ logger.setLevel(logging.DEBUG)
 import ast
 import json
 import threading
+import time
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header
@@ -45,6 +46,7 @@ from modules.content_generator.agents.content_feedback_simulator import simulate
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
 from api_schemas import *
 from config import load_config
+from services import ContentPrefetchService
 from utils import store
 from utils import auth_store, auth_jwt
 from utils.content_view import build_learning_content_view_model
@@ -261,6 +263,40 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _build_learning_content_payload(
+    llm: Any,
+    *,
+    learner_profile: Any,
+    learning_path: Any,
+    learning_session: Any,
+    use_search: bool,
+    allow_parallel: bool,
+    with_quiz: bool,
+    goal_context: Any,
+    method_name: str = "ami",
+) -> Dict[str, Any]:
+    learning_content = generate_learning_content_with_llm(
+        llm,
+        learner_profile,
+        learning_path,
+        learning_session,
+        allow_parallel=allow_parallel,
+        with_quiz=with_quiz,
+        use_search=use_search,
+        goal_context=goal_context,
+        quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
+        method_name=method_name,
+        search_rag_manager=search_rag_manager,
+    )
+    learning_content["view_model"] = build_learning_content_view_model(
+        learning_content.get("document", ""),
+        learning_content.get("sources_used", []),
+        content_format=learning_content.get("content_format", "standard"),
+        audio_mode=learning_content.get("audio_mode"),
+    )
+    return learning_content
+
+
 def _extract_fslsm_dims(profile: Dict[str, Any]) -> Dict[str, float]:
     return fslsm_adaptation.extract_fslsm_dims(profile)
 
@@ -275,6 +311,10 @@ def _normalize_adaptation_state(goal: Dict[str, Any]) -> Dict[str, Any]:
 
 def _path_version_hash(goal: Dict[str, Any]) -> str:
     return fslsm_adaptation.path_version_hash(goal)
+
+
+def _current_path_hash(user_id: str, goal_id: int) -> str:
+    return _path_version_hash(store.get_goal(user_id, goal_id) or {})
 
 
 def _compute_band_state(
@@ -660,9 +700,25 @@ async def create_goal(user_id: str, request: GoalCreateRequest):
 @app.patch("/goals/{user_id}/{goal_id}")
 async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
     payload = {k: v for k, v in request.model_dump().items() if v is not None}
+    goal_before = store.get_goal(user_id, goal_id)
+    if goal_before is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    path_hash_before = _path_version_hash(goal_before)
     goal = store.patch_goal(user_id, goal_id, payload)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
+    if (
+        PREFETCH_SERVICE.prefetch_enabled()
+        and "learning_path" in payload
+        and _path_version_hash(goal) != path_hash_before
+    ):
+        PREFETCH_SERVICE.enqueue_for_goal(
+            user_id=user_id,
+            goal_id=goal_id,
+            trigger_source="goal_patch",
+            start_after=-1,
+            apply_cooldown=False,
+        )
     return store.get_goal_aggregate(user_id, goal_id)
 
 
@@ -680,9 +736,52 @@ async def goal_runtime_state(user_id: str, goal_id: int):
 
 
 @app.get("/learning-content/{user_id}/{goal_id}/{session_index}")
-async def get_learning_content(user_id: str, goal_id: int, session_index: int):
+async def get_learning_content(user_id: str, goal_id: int, session_index: int, no_wait: bool = False):
+    started = time.perf_counter()
+    path_hash = PREFETCH_SERVICE.current_path_hash(user_id, goal_id)
     record = store.get_learning_content(user_id, goal_id, session_index)
+    if record:
+        PREFETCH_SERVICE.log_content_event(
+            "get_content",
+            user_id=user_id,
+            goal_id=goal_id,
+            session_index=session_index,
+            trigger_source="api_get_learning_content",
+            status="cache_hit",
+            path_hash=path_hash,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
     if not record:
+        if PREFETCH_SERVICE.prefetch_enabled() and not bool(no_wait):
+            PREFETCH_SERVICE.wait_for_inflight_content(
+                user_id=user_id,
+                goal_id=goal_id,
+                session_index=session_index,
+                timeout_secs=PREFETCH_SERVICE.prefetch_short_wait_secs(),
+            )
+            record = store.get_learning_content(user_id, goal_id, session_index)
+            if record:
+                PREFETCH_SERVICE.log_content_event(
+                    "get_content",
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    session_index=session_index,
+                    trigger_source="api_get_learning_content",
+                    status="get_wait_hit",
+                    path_hash=path_hash,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                )
+    if not record:
+        PREFETCH_SERVICE.log_content_event(
+            "get_content",
+            user_id=user_id,
+            goal_id=goal_id,
+            session_index=session_index,
+            trigger_source="api_get_learning_content",
+            status="get_miss",
+            path_hash=path_hash,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
         raise HTTPException(status_code=404, detail="Learning content not found")
     return record.get("learning_content", {})
 
@@ -759,6 +858,31 @@ async def session_activity(request: SessionActivityRequest):
         activity["start_time"] = activity["intervals"][0].get("start_time")
         activity["end_time"] = activity["intervals"][-1].get("end_time")
     store.upsert_session_activity(request.user_id, request.goal_id, request.session_index, activity)
+    if request.event_type == "start":
+        goal_for_prefetch = store.get_goal(request.user_id, request.goal_id) or {}
+        next_idx = PREFETCH_SERVICE.first_unlearned_session_index(
+            goal_for_prefetch.get("learning_path", []),
+            start_after=request.session_index,
+        )
+        PREFETCH_SERVICE.log_content_event(
+            "session_start_target",
+            user_id=request.user_id,
+            goal_id=request.goal_id,
+            session_index=int(next_idx) if next_idx is not None else -1,
+            trigger_source="session_start",
+            status="resolved_next_session" if next_idx is not None else "no_candidate",
+            path_hash=_path_version_hash(goal_for_prefetch),
+            duration_ms=0.0,
+            current_session_index=request.session_index,
+        )
+        if next_idx is not None:
+            PREFETCH_SERVICE.enqueue_for_session(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=next_idx,
+                trigger_source="session_start",
+                apply_cooldown=True,
+            )
     return {"ok": True, "trigger": trigger}
 
 
@@ -1331,6 +1455,10 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
             adaptation_state["snapshot_saved_at"] = None
             adaptation_state["last_failed_fingerprint"] = None
             adaptation_state["last_failed_at"] = None
+            changed_future_indices = PREFETCH_SERVICE.changed_unlearned_indices(
+                current_plan.get("learning_path", []),
+                result_plan.get("learning_path", []),
+            )
             store.patch_goal(
                 request.user_id,
                 request.goal_id,
@@ -1339,6 +1467,18 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
                     "plan_agent_metadata": agent_metadata,
                     "adaptation_state": adaptation_state,
                 },
+            )
+            PREFETCH_SERVICE.invalidate_learning_content_indices(
+                request.user_id,
+                request.goal_id,
+                changed_future_indices,
+            )
+            PREFETCH_SERVICE.enqueue_for_goal(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                trigger_source="adapt_applied",
+                start_after=-1,
+                apply_cooldown=False,
             )
             store.delete_profile_snapshot(request.user_id, request.goal_id)
             return {
@@ -1483,6 +1623,7 @@ async def get_personas():
     return {"personas": PERSONAS}
 
 
+_prefetch_cfg = app_config.get("prefetch", {}) if hasattr(app_config, "get") else {}
 APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
@@ -1490,6 +1631,11 @@ APP_CONFIG = {
     "default_method_name": "ami",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
+    "prefetch_enabled": bool(_prefetch_cfg.get("enabled", True)),
+    "prefetch_wait_short_secs": int(_prefetch_cfg.get("wait_short_secs", 8)),
+    "prefetch_wait_long_secs": int(_prefetch_cfg.get("wait_long_secs", 130)),
+    "prefetch_cooldown_secs": int(_prefetch_cfg.get("cooldown_secs", 20)),
+    "prefetch_max_workers": int(_prefetch_cfg.get("max_workers", 2)),
     "mastery_threshold_default": 70,
     "mastery_threshold_by_proficiency": {
         "beginner": 60,
@@ -1563,6 +1709,16 @@ APP_CONFIG = {
         },
     },
 }
+
+PREFETCH_SERVICE = ContentPrefetchService(
+    app_config=APP_CONFIG,
+    logger=logger,
+    store=store,
+    get_llm=get_llm,
+    build_learning_content_payload=_build_learning_content_payload,
+    path_hash_fn=_path_version_hash,
+    current_path_hash_fn=_current_path_hash,
+)
 
 
 @app.get("/config")
@@ -1956,44 +2112,236 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
         raise HTTPException(status_code=400, detail="Unsupported method_name. Expected 'ami'.")
 
     llm = get_llm(request.model_provider, request.model_name)
-    learning_path = request.learning_path
-    learner_profile = request.learner_profile
-    learning_session = request.learning_session
+    learning_path = _parse_jsonish(request.learning_path, request.learning_path)
+    learner_profile = _parse_jsonish(request.learner_profile, request.learner_profile)
+    learning_session = _parse_jsonish(request.learning_session, request.learning_session)
     use_search = request.use_search
     allow_parallel = request.allow_parallel
     with_quiz = request.with_quiz
     goal_context = request.goal_context
+    cache_key: Optional[str] = None
+    owner_token: Optional[str] = None
+    path_hash_at_start: Optional[str] = None
+    session_guard_hash_at_start: Optional[str] = None
+    owner_terminal_status = "succeeded"
+    started = time.perf_counter()
 
     try:
-        learning_content = generate_learning_content_with_llm(
-            llm,
-            learner_profile,
-            learning_path,
-            learning_session,
-            allow_parallel=allow_parallel,
-            with_quiz=with_quiz,
-            use_search=use_search,
-            goal_context=goal_context,
-            quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
-            method_name=request.method_name,
-            search_rag_manager=search_rag_manager,
+        has_cache_identity = (
+            request.user_id is not None
+            and request.goal_id is not None
+            and request.session_index is not None
         )
-        learning_content["view_model"] = build_learning_content_view_model(
-            learning_content.get("document", ""),
-            learning_content.get("sources_used", []),
-            content_format=learning_content.get("content_format", "standard"),
-            audio_mode=learning_content.get("audio_mode"),
-        )
-        if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
-            store.upsert_learning_content(
+        if has_cache_identity:
+            cache_key = PREFETCH_SERVICE.content_cache_key(request.user_id, request.goal_id, request.session_index)
+            path_hash_now = PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id)
+            session_guard_hash_at_start = PREFETCH_SERVICE.session_guard_hash_for_target(
                 request.user_id,
                 request.goal_id,
                 request.session_index,
-                learning_content,
             )
+            cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+            if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="cache_hit",
+                    path_hash=path_hash_now,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                )
+                return cached["learning_content"]
+            if PREFETCH_SERVICE.prefetch_enabled():
+                if PREFETCH_SERVICE.singleflight_status(cache_key) == "running":
+                    PREFETCH_SERVICE.log_content_event(
+                        "generate_content",
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                        trigger_source="on_demand",
+                        status="join_wait",
+                        path_hash=path_hash_now,
+                        duration_ms=(time.perf_counter() - started) * 1000.0,
+                    )
+                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                    )
+                    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+                    if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                        PREFETCH_SERVICE.log_content_event(
+                            "generate_content",
+                            user_id=request.user_id,
+                            goal_id=request.goal_id,
+                            session_index=request.session_index,
+                            trigger_source="on_demand",
+                            status="join_hit",
+                            path_hash=path_hash_now,
+                            duration_ms=(time.perf_counter() - started) * 1000.0,
+                        )
+                        return cached["learning_content"]
+
+                while owner_token is None:
+                    path_hash_now = PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id)
+                    path_hash_at_start = path_hash_now
+                    session_guard_hash_at_start = PREFETCH_SERVICE.session_guard_hash_for_target(
+                        request.user_id,
+                        request.goal_id,
+                        request.session_index,
+                    )
+                    owner_token = PREFETCH_SERVICE.singleflight_try_start(
+                        cache_key,
+                        path_hash_at_start=path_hash_at_start,
+                        trigger_source="on_demand",
+                        session_guard_hash_at_start=session_guard_hash_at_start,
+                    )
+                    if owner_token is not None:
+                        break
+                    PREFETCH_SERVICE.log_content_event(
+                        "generate_content",
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                        trigger_source="on_demand",
+                        status="join_wait",
+                        path_hash=path_hash_now,
+                        duration_ms=(time.perf_counter() - started) * 1000.0,
+                    )
+                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                    )
+                    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+                    if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                        PREFETCH_SERVICE.log_content_event(
+                            "generate_content",
+                            user_id=request.user_id,
+                            goal_id=request.goal_id,
+                            session_index=request.session_index,
+                            trigger_source="on_demand",
+                            status="join_hit",
+                            path_hash=path_hash_now,
+                            duration_ms=(time.perf_counter() - started) * 1000.0,
+                        )
+                        return cached["learning_content"]
+        if has_cache_identity:
+            PREFETCH_SERVICE.log_content_event(
+                "generate_content",
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=request.session_index,
+                trigger_source="on_demand",
+                status="fallback_generate",
+                path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
+
+        learning_content = _build_learning_content_payload(
+            llm,
+            learner_profile=learner_profile,
+            learning_path=learning_path,
+            learning_session=learning_session,
+            use_search=use_search,
+            allow_parallel=allow_parallel,
+            with_quiz=with_quiz,
+            goal_context=goal_context,
+            method_name=request.method_name,
+        )
+        if has_cache_identity:
+            stale, stale_reason, path_hash_current = PREFETCH_SERVICE.is_stale_for_target_session(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=request.session_index,
+                session_guard_hash_at_start=session_guard_hash_at_start,
+            )
+            if stale:
+                owner_terminal_status = "discarded"
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="fallback_discarded",
+                    path_hash=path_hash_at_start or path_hash_current,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    stale_reason=stale_reason,
+                    path_hash_current=path_hash_current,
+                )
+            else:
+                store.upsert_learning_content(
+                    request.user_id,
+                    request.goal_id,
+                    request.session_index,
+                    learning_content,
+                )
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="fallback_saved",
+                    path_hash=path_hash_at_start or path_hash_current,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    path_hash_current=path_hash_current,
+                )
         return learning_content
+    except HTTPException as e:
+        if owner_token and cache_key:
+            owner_terminal_status = "failed"
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status="failed",
+                error=str(e),
+            )
+            if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="failed",
+                    path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    error=str(e),
+                )
+        raise
     except Exception as e:
+        if owner_token and cache_key:
+            owner_terminal_status = "failed"
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status="failed",
+                error=str(e),
+            )
+            if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="failed",
+                    path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    error=str(e),
+                )
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if owner_token and cache_key:
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status=owner_terminal_status,
+            )
 
 @app.post("/simulate-content-feedback")
 async def simulate_content_feedback(request: LearningContentFeedbackRequest):

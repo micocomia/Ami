@@ -117,7 +117,8 @@ def _auto_adapt_if_needed(goal, runtime_state=None):
         return
     st.session_state[inflight_key] = True
     try:
-        result = adapt_learning_path(user_id=user_id, goal_id=goal_id)
+        with st.spinner("Adapting your learning path based on recent progress..."):
+            result = adapt_learning_path(user_id=user_id, goal_id=goal_id)
     finally:
         st.session_state[inflight_key] = False
     if not isinstance(result, dict):
@@ -228,6 +229,9 @@ def render_learning_path():
         st.rerun()
 
     else:
+        adaptation = (runtime_state or {}).get("adaptation", {})
+        if adaptation.get("suggested", False):
+            st.info("Learning path update in progress. This can take up to 2 minutes.")
         _auto_adapt_if_needed(goal, runtime_state)
         runtime_state = _get_runtime_state(goal.get("id"))
         render_overall_information(goal, runtime_state)

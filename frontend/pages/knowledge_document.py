@@ -291,6 +291,8 @@ def render_content_preparation(goal):
         cached_learning_content = get_learning_content(user_id, selected_gid, selected_sid)
         if cached_learning_content:
             _cache_learning_content(session_uid, cached_learning_content)
+            # Ensure the page re-enters the "document available" branch and renders immediately.
+            st.rerun()
             return cached_learning_content
 
     with st.spinner("Generating personalized learning content..."):

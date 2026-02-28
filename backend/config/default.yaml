@@ -38,3 +38,10 @@ verified_content:
 server:
   host: 127.0.0.1
   port: 8000
+
+prefetch:
+  enabled: true
+  wait_short_secs: 8
+  wait_long_secs: 130
+  cooldown_secs: 20
+  max_workers: 2

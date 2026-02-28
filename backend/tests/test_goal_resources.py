@@ -105,3 +105,22 @@ class TestGoalResources:
         })
         assert heartbeat_resp.status_code == 200
         assert "trigger" in heartbeat_resp.json()
+
+    def test_learning_content_no_wait_bypasses_inflight_wait(self, client):
+        import main
+
+        goal = store.create_goal("alice", {"learning_goal": "Learn Python", "learning_path": [{"id": "Session 1", "if_learned": False}]})
+        cache_key = f"alice:{goal['id']}:0"
+        owner_token = main.PREFETCH_SERVICE.singleflight_try_start(
+            cache_key,
+            path_hash_at_start="abc",
+            trigger_source="test",
+        )
+        assert owner_token is not None
+        resp = client.get(f"/learning-content/alice/{goal['id']}/0?no_wait=true")
+        assert resp.status_code == 404
+        main.PREFETCH_SERVICE.singleflight_finish(
+            cache_key,
+            owner_token=owner_token,
+            status="failed",
+        )

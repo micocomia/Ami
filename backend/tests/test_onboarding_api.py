@@ -548,6 +548,11 @@ class TestConfigEndpoint:
             "default_method_name",
             "motivational_trigger_interval_secs",
             "max_refinement_iterations",
+            "prefetch_enabled",
+            "prefetch_wait_short_secs",
+            "prefetch_wait_long_secs",
+            "prefetch_cooldown_secs",
+            "prefetch_max_workers",
             "fslsm_thresholds",
         ]
         for key in required_keys:
@@ -627,12 +632,14 @@ class TestAdaptationEndpoints:
     @patch("main.get_llm")
     @patch("main.create_simulate_feedback_tool")
     @patch("main.reschedule_learning_path_with_llm")
-    def test_adapt_learning_path_auto_mode_works(self, mock_reschedule, mock_sim_tool, mock_get_llm, client):
+    @patch("main.PREFETCH_SERVICE.enqueue_for_goal")
+    def test_adapt_learning_path_auto_mode_works(self, mock_enqueue_prefetch, mock_reschedule, mock_sim_tool, mock_get_llm, client):
         goal_id = self._seed_goal_and_profile()
         mock_get_llm.return_value = MagicMock()
         sim_tool = MagicMock()
         sim_tool.invoke.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
         mock_sim_tool.return_value = sim_tool
+        mock_enqueue_prefetch.return_value = "queued"
         mock_reschedule.return_value = {
             "learning_path": [{
                 "id": "Session 1",
@@ -656,3 +663,4 @@ class TestAdaptationEndpoints:
         data = resp.json()
         assert "adaptation" in data
         assert "status" in data["adaptation"]
+        mock_enqueue_prefetch.assert_called_once()
