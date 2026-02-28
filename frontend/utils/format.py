@@ -25,11 +25,17 @@ def extract_sources_used(knowledge_drafts):
     """
     if isinstance(knowledge_drafts, str):
         knowledge_drafts = ast.literal_eval(knowledge_drafts)
+    if not knowledge_drafts:
+        return []
+
     sources = []
     seen_keys = set()
     for draft in knowledge_drafts:
         if isinstance(draft, dict):
-            for s in draft.get("sources_used", []):
+            draft_sources = draft.get("sources_used") or []
+            if not isinstance(draft_sources, list):
+                continue
+            for s in draft_sources:
                 key = _source_dedup_key(s)
                 if key not in seen_keys:
                     seen_keys.add(key)
@@ -129,49 +135,3 @@ def inject_citation_tooltips(markdown_text, sources):
 
     # Match [N] but not when part of a markdown link [text](url)
     return re.sub(r'(?<!\[)\[(\d+)\](?!\()', _replace_citation, markdown_text)
-
-
-def convert_knowledge_perspectives_to_markdown(data):
-    markdown_text = ""
-    for category, items in data.items():
-        markdown_text += f"- **{category.capitalize()}**\n"
-        for item in items:
-            markdown_text += f"  - {item}\n"
-    return markdown_text
-
-
-def prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts):
-    if isinstance(knowledge_points, str):
-        knowledge_points = ast.literal_eval(knowledge_points)
-    if isinstance(knowledge_drafts, str):
-        knowledge_drafts = ast.literal_eval(knowledge_drafts)
-    if isinstance(document_structure, str):
-        document_structure = ast.literal_eval(document_structure)
-    print("!!!doucment_stru:",document_structure)
-    part_titles = {
-        'foundational': "## Foundational Concepts",
-        'practical': "## Practical Applications",
-        'strategic': "## Strategic Insights"
-    }
-
-    learning_document = f"# {document_structure['title']}"
-    learning_document += f"\n\n{document_structure['overview']}"
-
-    for k_type, part_title in part_titles.items():
-        learning_document += f"\n\n{part_title}\n"
-        for k_id, knowledge_point in enumerate(knowledge_points):
-            if knowledge_point['type'] != k_type:
-                continue
-            knowledge_draft = knowledge_drafts[k_id]
-            learning_document += f"\n\n### {knowledge_draft['title']}\n"
-            learning_document += f"\n\n{knowledge_draft['content']}\n"
-    learning_document += f"\n\n## Summary\n\n{document_structure['summary']}"
-
-    # Collect all unique sources and append References section
-    all_sources = extract_sources_used(knowledge_drafts)
-    if all_sources:
-        learning_document += "\n\n## References\n\n"
-        for idx, source_ref in enumerate(all_sources, start=1):
-            learning_document += format_citation(source_ref, idx) + "\n"
-
-    return learning_document

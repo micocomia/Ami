@@ -127,15 +127,18 @@ def identify_skill_gap_with_llm(
                 evaluation = SkillGapEvaluator(lightweight_llm).evaluate({
                     "learning_goal": learning_goal,
                     "learner_information": learner_information,
-                    "retrieved_context": retrieved_context_str,
+                    "coverage_context": retrieved_context_str,
                     "skill_requirements": effective_requirements,
                     "skill_gaps": skill_gaps_result,
                 })
                 if evaluation.get("is_acceptable", False):
                     break  # result accepted
                 evaluator_feedback = evaluation.get("feedback", "")
+                issues = evaluation.get("issues", [])
+                if issues:
+                    logger.info("SkillGapEvaluator issues: %s", " | ".join(str(i) for i in issues))
                 if evaluator_feedback:
-                    logger.info(f"SkillGapEvaluator rejected result: {evaluator_feedback[:100]}")
+                    logger.info("SkillGapEvaluator rejected result: %s", evaluator_feedback)
             except Exception as e:
                 logger.warning(f"SkillGapEvaluator failed: {e}")
                 break

@@ -1,7 +1,7 @@
 import streamlit as st
 from streamlit_float import *
 from utils.request_api import chat_with_tutor
-from utils.state import index_goal_by_id
+from utils.state import get_selected_goal
 
 
 @st.dialog("🤖 Ask Tutor")
@@ -10,10 +10,9 @@ def ask_autor_chatbot():
     # messages.chat_message("user").write(prompt)
     st.info(instruction)
     
-    if index_goal_by_id(st.session_state["selected_goal_id"]) == None:
+    goal = get_selected_goal()
+    if not isinstance(goal, dict):
         goal = st.session_state["to_add_goal"]
-    else:
-        goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
     learner_profile = goal["learner_profile"]
 
     messages = st.container(height=300)

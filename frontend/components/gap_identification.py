@@ -51,10 +51,13 @@ def render_identifying_skill_gap(goal):
                 " — do NOT list these as skill gaps]:\n" + skill_lines
             )
 
-        skill_gaps, goal_assessment, retrieved_sources = identify_skill_gap(learning_goal, learner_information, llm_type)
+        skill_gaps, goal_assessment, retrieved_sources, goal_context = identify_skill_gap(
+            learning_goal, learner_information, llm_type
+        )
     goal["skill_gaps"] = skill_gaps
     goal["goal_assessment"] = goal_assessment
     goal["retrieved_sources"] = retrieved_sources or []
+    goal["goal_context"] = goal_context or {}
     goal["_last_identified_goal"] = goal["learning_goal"]
     # If the goal was auto-refined, update the learning_goal to the refined version
     if goal_assessment and goal_assessment.get("auto_refined") and goal_assessment.get("refined_goal"):
@@ -124,7 +127,7 @@ def has_any_gap(skill_gaps):
     return any(g.get("is_gap", False) for g in (skill_gaps or []))
 
 
-def render_identified_skill_gap(goal, method_name="genmentor"):
+def render_identified_skill_gap(goal, method_name="ami"):
     """
     Render skill gaps in a card-style with prev/next switching.
     """

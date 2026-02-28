@@ -26,10 +26,16 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_DATA_DIR", data_dir)
     monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
     monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
+    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
+    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
+    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
+    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
     monkeypatch.setattr(store, "_profiles", {})
     monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_USER_STATES_PATH", data_dir / "user_states.json")
-    monkeypatch.setattr(store, "_user_states", {})
+    monkeypatch.setattr(store, "_goals", {})
+    monkeypatch.setattr(store, "_learning_content_cache", {})
+    monkeypatch.setattr(store, "_session_activity", {})
+    monkeypatch.setattr(store, "_mastery_history", {})
     # Isolate snapshot state
     monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
     monkeypatch.setattr(store, "_profile_snapshots", {})
@@ -299,14 +305,26 @@ class TestDeleteAllUserData:
         assert store.get_events("alice") == []
         assert len(store.get_events("bob")) == 1
 
-    def test_delete_all_user_data_removes_user_state(self):
-        store.put_user_state("alice", {"theme": "dark"})
-        store.put_user_state("bob", {"theme": "light"})
+    def test_delete_all_user_data_removes_goal_content_and_activity(self):
+        alice_goal = store.create_goal("alice", {"learning_goal": "Python"})
+        bob_goal = store.create_goal("bob", {"learning_goal": "Go"})
+        store.upsert_learning_content("alice", alice_goal["id"], 0, {"document": "A", "quizzes": {}})
+        store.upsert_learning_content("bob", bob_goal["id"], 0, {"document": "B", "quizzes": {}})
+        store.upsert_session_activity("alice", alice_goal["id"], 0, {"start_time": "2026-01-01T00:00:00+00:00"})
+        store.upsert_session_activity("bob", bob_goal["id"], 0, {"start_time": "2026-01-01T00:00:00+00:00"})
+        store.append_mastery_history("alice", alice_goal["id"], 0.5)
+        store.append_mastery_history("bob", bob_goal["id"], 0.25)
 
         store.delete_all_user_data("alice")
 
-        assert store.get_user_state("alice") is None
-        assert store.get_user_state("bob") == {"theme": "light"}
+        assert store.get_goal("alice", alice_goal["id"]) is None
+        assert store.get_learning_content("alice", alice_goal["id"], 0) is None
+        assert store.get_session_activity("alice", alice_goal["id"], 0) is None
+        assert store.get_mastery_history("alice", alice_goal["id"]) == []
+        assert store.get_goal("bob", bob_goal["id"]) is not None
+        assert store.get_learning_content("bob", bob_goal["id"], 0) is not None
+        assert store.get_session_activity("bob", bob_goal["id"], 0) is not None
+        assert store.get_mastery_history("bob", bob_goal["id"]) != []
 
     def test_delete_all_user_data_removes_snapshots(self):
         store.save_profile_snapshot("alice", 0, {"v": "snap"})

@@ -21,7 +21,13 @@ Your role is to perform the "Integration" step by synthesizing multiple `knowled
 
 1.  **Synthesize Content**: This is your primary task.
     * Combine all text from the `knowledge_drafts` into a single, logical markdown flow.
+    * Preserve the pedagogical order of the provided drafts unless the `session_adaptation_contract` explicitly requires a different ordering.
     * Ensure smooth transitions between topics.
+    * Structure the `content` field using stable `##` section headings in the intended teaching order so downstream rendering can preserve the sequence.
+    * By default, use one `##` section per draft in the same order as the provided `knowledge_drafts`.
+    * Do NOT add extra top-level `##` sections beyond those intended draft boundaries.
+      - If you need substructure inside a section, use `###` or `####`, not additional top-level `##`.
+      - Reserve cross-cutting wrap-up text for normal paragraphs, not extra `##` scaffolding headings.
     * This synthesized text **must** be placed in the `content` field of the output JSON.
 
 2.  **Write Wrappers**:
@@ -32,6 +38,7 @@ Your role is to perform the "Integration" step by synthesizing multiple `knowled
 3.  **Personalize and Refine**:
     * Adapt the final tone and style based on the `learner_profile`.
     * Ensure the final document is structured, clear, and engaging.
+    * If `integration_feedback` is provided, treat it as binding repair guidance for this integration attempt.
 
 **Final Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.
@@ -53,6 +60,13 @@ Ensure the final document is aligned with the learner's profile and session goal
 **Selected Learning Session**:
 {learning_session}
 
+**Session Adaptation Contract**:
+{session_adaptation_contract}
+
 **Knowledge Drafts to Integrate**:
 {knowledge_drafts}
-{understanding_hints}"""
+{understanding_hints}
+
+**Integration Feedback (if any)**:
+{integration_feedback}
+""".strip()

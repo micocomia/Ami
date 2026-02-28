@@ -205,7 +205,7 @@ Key pages:
 
 ## How it works
 
-- UI state is stored in Streamlit `st.session_state` and persisted through backend state endpoints (for example `/user-state/{user_id}`) via utilities in `utils/state.py`.
+- UI state is stored in Streamlit `st.session_state`. Domain state is persisted through explicit backend resources such as goals, learning-content cache, session activity, runtime state, and dashboard metrics endpoints.
 - Backend calls are made with `httpx` via `utils/request_api.py` using endpoints under `config.backend_endpoint`.
 - When `use_mock_data=True`, the app reads JSON fixtures from `assets/data_example/` instead of calling the backend.
 - The knowledge document page supports section-by-section pagination, a clickable sidebar TOC, and auto-scroll to anchors.

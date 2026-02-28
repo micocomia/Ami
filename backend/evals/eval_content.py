@@ -1,11 +1,8 @@
 """
 Content Generator Evaluation — LLM-as-a-Judge
 
-For each scenario, runs the full 4-stage content pipeline:
-  1. explore-knowledge-points
-  2. draft-knowledge-points
-  3. integrate-learning-document
-  4. generate-document-quizzes
+For each scenario, runs the unified content generation pipeline via:
+  - generate-learning-content
 
 This mirrors exactly what the frontend knowledge_document.py does in
 render_content_preparation() for both the baseline (GenMentor) and the
@@ -179,60 +176,29 @@ def _count_skill_gaps(sg_body: dict) -> int:
     return 0
 
 
+def _unwrap_learning_content_body(body: dict) -> dict:
+    """Support both legacy {'learning_content': {...}} and flat payload contracts."""
+    if not isinstance(body, dict):
+        return {}
+    wrapped = body.get("learning_content")
+    if isinstance(wrapped, dict):
+        return wrapped
+    return body
+
+
 def _prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts) -> str:
     """
     Inline equivalent of the frontend's prepare_markdown_document().
-    Converts the structured document dict returned by integrate-learning-document
-    into a flat markdown string for use by the LLM judge.
+    Converts a structured document dict into a flat markdown string for use by the LLM judge.
     """
-    if isinstance(document_structure, str):
-        try:
-            import ast
-            document_structure = ast.literal_eval(document_structure)
-        except Exception:
-            return document_structure  # already a string, return as-is
+    from modules.content_generator.agents.learning_document_integrator import prepare_markdown_document
 
-    if not isinstance(document_structure, dict):
-        return json.dumps(document_structure)
-
-    part_titles = {
-        "foundational": "## Foundational Concepts",
-        "practical": "## Practical Applications",
-        "strategic": "## Strategic Insights",
-    }
-
-    doc = f"# {document_structure.get('title', '')}"
-    doc += f"\n\n{document_structure.get('overview', '')}"
-
-    for k_type, part_title in part_titles.items():
-        doc += f"\n\n{part_title}\n"
-        for k_id, kp in enumerate(knowledge_points):
-            if kp.get("type") != k_type:
-                continue
-            if k_id >= len(knowledge_drafts):
-                continue
-            kd = knowledge_drafts[k_id]
-            doc += f"\n\n### {kd.get('title', '')}\n"
-            doc += f"\n\n{kd.get('content', '')}\n"
-
-    doc += f"\n\n## Summary\n\n{document_structure.get('summary', '')}"
-    return doc
+    return prepare_markdown_document(document_structure, knowledge_points, knowledge_drafts)
 
 
 def run_content_pipeline(base_url: str, learning_goal: str, learner_information: str) -> dict:
-    """
-    Run onboarding + content generation for the first session of the learning path,
-    mirroring the 4-stage pipeline in the frontend's render_content_preparation():
-      Stage 1: explore-knowledge-points
-      Stage 2: draft-knowledge-points
-      Stage 3: integrate-learning-document
-      Stage 4: generate-document-quizzes
-
-    Returns dict with: profile_body, path_body, session, knowledge_points, content_body
-    content_body keys: learning_document (markdown str), quizzes (dict)
-    """
+    """Run onboarding + one-shot content generation for session 1."""
     with httpx.Client(timeout=300.0) as client:
-        # Skill gap
         sg_resp = client.post(
             f"{base_url}/identify-skill-gap-with-info",
             json=_base_payload({"learning_goal": learning_goal, "learner_information": learner_information}),
@@ -248,7 +214,6 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
                 "skill_gap_count": 0,
             }
 
-        # Profile
         profile_resp = client.post(
             f"{base_url}/create-learner-profile-with-info",
             json=_base_payload({
@@ -260,7 +225,6 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         profile_resp.raise_for_status()
         profile_body = _unwrap_profile_body(profile_resp.json())
 
-        # Learning path
         path_resp = client.post(
             f"{base_url}/schedule-learning-path",
             json=_base_payload({
@@ -274,83 +238,27 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         sessions = path_body.get("learning_path", [])
         if not sessions:
             raise ValueError("No sessions in learning path")
-
-        # Evaluate content for session 1 only (cost control)
         first_session = sessions[0]
 
-        learner_profile_str = repr(profile_body)
-        learning_path_str = repr(path_body)
-        session_str = repr(first_session)
-
-        # Stage 1/4: Explore knowledge points
-        explore_resp = client.post(
-            f"{base_url}/explore-knowledge-points",
+        content_resp = client.post(
+            f"{base_url}/generate-learning-content",
             json=_base_payload({
-                "learner_profile": learner_profile_str,
-                "learning_path": learning_path_str,
-                "learning_session": session_str,
-            }),
-        )
-        explore_resp.raise_for_status()
-        knowledge_points = explore_resp.json().get("knowledge_points", [])
-
-        # Stage 2/4: Draft knowledge points
-        draft_resp = client.post(
-            f"{base_url}/draft-knowledge-points",
-            json=_base_payload({
-                "learner_profile": learner_profile_str,
-                "learning_path": learning_path_str,
-                "learning_session": session_str,
-                "knowledge_points": json.dumps(knowledge_points),
+                "learner_profile": repr(profile_body),
+                "learning_path": repr(path_body),
+                "learning_session": repr(first_session),
                 "use_search": True,
-                "allow_parallel": False,
+                "allow_parallel": True,
+                "with_quiz": True,
+                "method_name": "ami",
             }),
         )
-        draft_resp.raise_for_status()
-        knowledge_drafts = draft_resp.json().get("knowledge_drafts", [])
-
-        # Stage 3/4: Integrate learning document
-        integrate_resp = client.post(
-            f"{base_url}/integrate-learning-document",
-            json=_base_payload({
-                "learner_profile": learner_profile_str,
-                "learning_path": learning_path_str,
-                "learning_session": session_str,
-                "knowledge_points": json.dumps(knowledge_points),
-                "knowledge_drafts": json.dumps(knowledge_drafts),
-                "output_markdown": False,
-            }),
-        )
-        integrate_resp.raise_for_status()
-        integrate_body = integrate_resp.json()
-
-        doc_structure = integrate_body.get("learning_document")
-        document_is_markdown = integrate_body.get("document_is_markdown", False)
-
-        if document_is_markdown or isinstance(doc_structure, str):
-            learning_document = doc_structure or ""
-        else:
-            learning_document = _prepare_markdown_document(doc_structure, knowledge_points, knowledge_drafts)
-
-        # Stage 4/4: Generate document quizzes
-        quiz_resp = client.post(
-            f"{base_url}/generate-document-quizzes",
-            json=_base_payload({
-                "learner_profile": learner_profile_str,
-                "learning_document": str(learning_document),
-                "single_choice_count": 3,
-                "multiple_choice_count": 1,
-                "true_false_count": 1,
-                "short_answer_count": 1,
-                "open_ended_count": 0,
-            }),
-        )
-        quiz_resp.raise_for_status()
-        quizzes = quiz_resp.json().get("document_quiz", {})
+        content_resp.raise_for_status()
+        learning_content = _unwrap_learning_content_body(content_resp.json())
 
         content_body = {
-            "learning_document": learning_document,
-            "quizzes": quizzes,
+            "learning_document": learning_content.get("document", ""),
+            "quizzes": learning_content.get("quizzes", {}),
+            "sources_used": learning_content.get("sources_used", []),
         }
 
     return {
@@ -359,7 +267,7 @@ def run_content_pipeline(base_url: str, learning_goal: str, learner_information:
         "profile_body": profile_body,
         "path_body": path_body,
         "session": first_session,
-        "knowledge_points": knowledge_points,
+        "knowledge_points": first_session.get("associated_skills", []),
         "content_body": content_body,
     }
 
@@ -469,8 +377,7 @@ def run_eval_content(scenarios: list[dict], prefetched_runs: dict | None = None)
             sg_t = timings.get("identify_skill_gap")
             profile_t = timings.get("create_learner_profile")
             path_t = timings.get("schedule_learning_path")
-            integrate_t = timings.get("integrate_learning_document")
-            quiz_t = timings.get("generate_document_quizzes")
+            generate_t = timings.get("generate_learning_content")
 
             if _is_ok_timing_entry(sg_t):
                 skill_gap_count = _count_skill_gaps(sg_t["body"])
@@ -491,28 +398,19 @@ def run_eval_content(scenarios: list[dict], prefetched_runs: dict | None = None)
             if (
                 _is_ok_timing_entry(profile_t)
                 and _is_ok_timing_entry(path_t)
-                and _is_ok_timing_entry(integrate_t)
-                and _is_ok_timing_entry(quiz_t)
+                and _is_ok_timing_entry(generate_t)
             ):
                 profile_body = _unwrap_profile_body(profile_t["body"])
                 path_body = path_t["body"]
                 sessions = path_body.get("learning_path", [])
                 first_session = sessions[0] if sessions else {}
-                explore_t = timings.get("explore_knowledge_points")
-                integrate_body = integrate_t["body"] or {}
-                learning_document = integrate_body.get("learning_document", "")
-                quizzes = (quiz_t["body"] or {}).get("document_quiz", {})
+                generated_body = generate_t["body"] or {}
+                learning_content = _unwrap_learning_content_body(generated_body)
+                learning_document = learning_content.get("document", "")
+                quizzes = learning_content.get("quizzes", {})
 
                 # Validate essential fields; otherwise fallback to live pipeline.
                 if first_session and learning_document is not None:
-                    # Keep formatting logic consistent with run_content_pipeline().
-                    if not (integrate_body.get("document_is_markdown", False) or isinstance(learning_document, str)):
-                        draft_t = timings.get("draft_knowledge_points")
-                        if _is_ok_timing_entry(explore_t) and _is_ok_timing_entry(draft_t):
-                            kp_list = (explore_t["body"] or {}).get("knowledge_points", [])
-                            kd_list = (draft_t["body"] or {}).get("knowledge_drafts", [])
-                            learning_document = _prepare_markdown_document(learning_document, kp_list, kd_list)
-
                     info = scenario["learner_information"]  # plain text — for judge context only
                     is_enhanced = version_cfg["has_fslsm"]
 
@@ -520,8 +418,7 @@ def run_eval_content(scenarios: list[dict], prefetched_runs: dict | None = None)
                     if isinstance(content_md, dict):
                         content_md = json.dumps(content_md)
                     content_excerpt = str(content_md)[:3000]
-                    explored_kps = (explore_t["body"] or {}).get("knowledge_points", []) if _is_ok_timing_entry(explore_t) else []
-                    knowledge_points = explored_kps or first_session.get("associated_skills", [])
+                    knowledge_points = first_session.get("associated_skills", [])
 
                     user_prompt = SHARED_JUDGE_USER.format(
                         learner_information=info,

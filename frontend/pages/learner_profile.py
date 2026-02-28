@@ -1,16 +1,29 @@
-import math
 import streamlit as st
-from utils.request_api import create_learner_profile, get_learner_profile, update_learning_preferences, auth_delete_user, get_app_config, get_behavioral_metrics
+from utils.request_api import (
+    create_learner_profile,
+    get_learner_profile,
+    update_learning_preferences,
+    auth_delete_user,
+    get_app_config,
+    get_behavioral_metrics,
+    delete_user_data,
+)
 from components.skill_info import render_skill_info
-from components.navigation import render_navigation
 from utils.pdf import extract_text_from_pdf
-from streamlit_extras.tags import tagger_component 
-from utils.state import save_persistent_state, delete_persistent_state, propagate_profile_fields_to_other_goals
+from utils.state import (
+    delete_persistent_state,
+    get_selected_goal,
+    save_persistent_state,
+    propagate_profile_fields_to_other_goals,
+)
 
 
 def render_learner_profile():
     # Title and introduction
-    goal = st.session_state["goals"][st.session_state["selected_goal_id"]]
+    goal = get_selected_goal()
+    if not isinstance(goal, dict):
+        st.info("No active goal selected.")
+        return
 
     st.title("Learner Profile")
     st.write("An overview of the learner's background, goals, progress, preferences, and behavioral patterns.")
@@ -340,39 +353,14 @@ def render_additional_info_form(goal):
             with st.spinner("Updating your profile..."):
                 update_learner_profile_with_additional_info(goal)
 
-def _get_fslsm_dims(profile):
-    """Extract FSLSM dimensions dict from a learner profile."""
-    return (
-        profile
-        .get("learning_preferences", {})
-        .get("fslsm_dimensions", {})
-    )
-
-
-def _has_significant_fslsm_change(old_profile, new_profile, threshold=0.3):
-    """Return True if any FSLSM dimension changed by >= threshold."""
-    old_dims = _get_fslsm_dims(old_profile)
-    new_dims = _get_fslsm_dims(new_profile)
-    for key in ("fslsm_processing", "fslsm_perception", "fslsm_input", "fslsm_understanding"):
-        old_val = old_dims.get(key, 0.0)
-        new_val = new_dims.get(key, 0.0)
-        if abs(old_val - new_val) >= threshold:
-            return True
-    return False
-
-
 def update_learner_profile_with_additional_info(goal):
     additional_info = st.session_state["additional_info"]
-    old_profile = goal.get("learner_profile", {})
     user_id = st.session_state.get("userId")
     goal_id = st.session_state.get("selected_goal_id")
     # Pass user_id/goal_id so the backend saves immediately and captures a
     # pre-update snapshot for adapt-learning-path delta comparison.
-    new_learner_profile = update_learning_preferences(old_profile, additional_info, user_id=user_id, goal_id=goal_id)
+    new_learner_profile = update_learning_preferences(goal.get("learner_profile", {}), additional_info, user_id=user_id, goal_id=goal_id)
     if new_learner_profile is not None:
-        # Detect significant FSLSM preference changes
-        if _has_significant_fslsm_change(old_profile, new_learner_profile):
-            st.session_state[f"adaptation_suggested_{goal_id}"] = True
         # Profile is already persisted to the backend by update_learning_preferences.
 
         goal["learner_profile"] = new_learner_profile
@@ -398,12 +386,21 @@ def show_restart_onboarding_dialog():
             # Keep the user logged in after clearing progress
             user_id = st.session_state.get("userId", "default")
             backend_ep = st.session_state.get("backend_endpoint")
+            prev_llm_type = st.session_state.get("llm_type")
+            prev_available_models = st.session_state.get("available_models")
             try:
                 st.session_state["_autosave_enabled"] = False
             except Exception:
                 pass
             try:
-                delete_persistent_state()
+                # Full reset: clear profiles/events/snapshots/state, not only UI state.
+                if backend_ep:
+                    status, _resp = delete_user_data(backend_ep, user_id)
+                    if status != 200:
+                        # Fallback for compatibility if /user-data is unavailable.
+                        delete_persistent_state()
+                else:
+                    delete_persistent_state()
             except Exception:
                 pass
             try:
@@ -414,8 +411,12 @@ def show_restart_onboarding_dialog():
             st.session_state["userId"] = user_id
             if backend_ep:
                 st.session_state["backend_endpoint"] = backend_ep
+            if isinstance(prev_available_models, list) and prev_available_models:
+                st.session_state["available_models"] = prev_available_models
+            if isinstance(prev_llm_type, str) and prev_llm_type.strip():
+                st.session_state["llm_type"] = prev_llm_type
             try:
-                st.switch_page("pages/onboarding.py")
+                st.switch_page("main.py")
             except Exception:
                 st.rerun()
     with col_cancel:

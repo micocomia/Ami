@@ -119,10 +119,7 @@ If a scenario yields `0` identified skill gaps, plan/content rows are marked:
   - `/identify-skill-gap-with-info`
   - `/create-learner-profile-with-info`
   - `/schedule-learning-path`
-  - `/explore-knowledge-points`
-  - `/draft-knowledge-points`
-  - `/integrate-learning-document`
-  - `/generate-document-quizzes`
+  - `/generate-learning-content`
 - Judge type: LLM-as-a-judge, `1-5`
 
 ### Shared metrics
@@ -143,7 +140,7 @@ All metrics have explicit score anchors for `1,2,3,4,5`.
 
 ## D. RAG Evaluation
 - Script: `5902Group5/backend/evals/eval_rag.py`
-- Drafting endpoint used for evaluation: `/draft-knowledge-points` (single-item list)
+- Drafting endpoint used for evaluation: `/draft-knowledge-point`
 - Automatic metrics: RAGAS (`0-1` scale)
 
 ### Core RAGAS metrics

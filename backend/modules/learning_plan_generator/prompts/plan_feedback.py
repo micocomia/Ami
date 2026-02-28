@@ -53,9 +53,13 @@ Your assessment should focus on the three key criteria below.
 **Provided Details**:
 * **Learner Profile**: {learner_profile}
 * **Learning Path**: {learning_path}
+* **Deterministic SOLO Audit**: {solo_audit}
 
 **Evaluation Criteria**:
 1.  **Progression**: How is the logical flow, pacing, and difficulty scaling for this learner? Assess whether the sequence follows SOLO taxonomy progression (from foundational understanding toward integrated/abstract understanding). A correctly scheduled path advances each skill by exactly one SOLO level per session (unlearned→beginner, beginner→intermediate, intermediate→advanced, advanced→expert). Flag only genuine skips of two or more levels within a skill, not valid one-step advances.
+    - Your progression and pacing claims MUST be consistent with the deterministic audit:
+      * If `solo_audit.violations` is empty, do NOT claim SOLO skip/pacing-level jump issues.
+      * If `solo_audit.violations` is non-empty, you MUST acknowledge progression issues and include corrective directives.
 2.  **Engagement**: Would this path be interesting and motivating for this learner? Evaluate activity variety and delivery style through FSLSM dimensions (Active/Reflective, Sensing/Intuitive, Visual/Verbal, Sequential/Global).
 3.  **Personalization**: How well is the path tailored to the learner's goals, skills, and preferences? Explicitly check alignment with the learner's FSLSM profile and whether SOLO level targeting matches their current cognitive readiness.
 

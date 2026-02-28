@@ -1,8 +1,27 @@
 import json
 import httpx
 import streamlit as st
+from typing import Optional
 from config import backend_endpoint, use_mock_data, use_search
 from datetime import datetime, timezone
+
+
+def _get_backend_endpoint() -> str:
+    """Resolve backend endpoint from live session state, falling back to config."""
+    endpoint = st.session_state.get("backend_endpoint", backend_endpoint)
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        endpoint = backend_endpoint
+    endpoint = endpoint.strip()
+    if not endpoint.endswith("/"):
+        endpoint += "/"
+    return endpoint
+
+
+def _normalize_endpoint(endpoint: Optional[str]) -> str:
+    value = (endpoint or "").strip()
+    if not value:
+        return _get_backend_endpoint()
+    return value if value.endswith("/") else f"{value}/"
 
 
 def _debug_enabled() -> bool:
@@ -109,6 +128,13 @@ def _normalize_skill_gaps(skill_gaps):
 API_NAMES = {
     "auth_register": "auth/register",
     "auth_login": "auth/login",
+    "goals": "goals",
+    "goal_runtime_state": "goal-runtime-state",
+    "learning_content_cache": "learning-content",
+    "session_activity": "session-activity",
+    "complete_session": "complete-session",
+    "submit_content_feedback": "submit-content-feedback",
+    "dashboard_metrics": "dashboard-metrics",
     "chat_with_tutor": "chat-with-tutor",
     "refine_goal": "refine-learning-goal",
     "identify_skill_gap": "identify-skill-gap-with-info",
@@ -118,18 +144,8 @@ API_NAMES = {
     "update_learning_preferences": "update-learning-preferences",
     "schedule_path": "schedule-learning-path",
     "schedule_path_agentic": "schedule-learning-path-agentic",
-    "reschedule_path": "reschedule-learning-path",
     "adapt_path": "adapt-learning-path",
-    "explore_knowledge_perspectives": "explore-knowledge-perspectives",
-    "draft_knowledge_perspective": "draft-knowledge-perspective",
-    "draft_point_perspectives": "draft-point-perspectives",
-    "integrate_knowledge_document": "integrate-knowledge-document",
-    "tailor_learning_content": "tailor-learning-content",
-    "explore_knowledge_points": "explore-knowledge-points",
-    "draft_knowledge_point": "draft-knowledge-point",
-    "draft_knowledge_points": "draft-knowledge-points",
-    "integrate_learning_document": "integrate-learning-document",
-    "generate_document_quizzes": "generate-document-quizzes",
+    "generate_learning_content": "generate-learning-content",
     "simulate_path_feedback": "simulate-path-feedback",
     "refine_path": "refine-learning-path",
     "iterative_refine_path": "iterative-refine-path",
@@ -160,7 +176,7 @@ def make_post_request(api_name, data, mock_data_path=None, timeout=500):
     if use_mock_data and mock_data_path:
         return json.load(open(mock_data_path))
 
-    backend_url = f"{backend_endpoint}{api_name}"
+    backend_url = f"{_get_backend_endpoint()}{api_name}"
 
     try:
         response = httpx.post(backend_url, json=data, timeout=timeout)
@@ -197,7 +213,7 @@ def make_post_request(api_name, data, mock_data_path=None, timeout=500):
 
 def extract_pdf_text(file):
     """Extract text from a PDF file using the backend API."""
-    backend_url = f"{backend_endpoint}extract-pdf-text"
+    backend_url = f"{_get_backend_endpoint()}extract-pdf-text"
     try:
         files = {"file": (file.name, file.getvalue(), "application/pdf")}
         response = httpx.post(backend_url, files=files, timeout=60)
@@ -211,7 +227,7 @@ def extract_pdf_text(file):
         return ""
 
 def get_available_models(backend_endpoint):
-    backend_url = f"{backend_endpoint}list-llm-models"
+    backend_url = f"{_normalize_endpoint(backend_endpoint)}list-llm-models"
     try:
         response = httpx.get(backend_url, timeout=30)
         if response.status_code == 200:
@@ -273,8 +289,13 @@ def identify_skill_gap(
         data["goal_id"] = goal_id
     response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
     if not response:
-        return None, None, None
-    return response.get("skill_gaps"), response.get("goal_assessment"), response.get("retrieved_sources")
+        return None, None, None, None
+    return (
+        response.get("skill_gaps"),
+        response.get("goal_assessment"),
+        response.get("retrieved_sources"),
+        response.get("goal_context"),
+    )
 
 
 def audit_skill_gap_bias(skill_gaps_dict, learner_information, llm_type=None, method_name=None):
@@ -437,7 +458,7 @@ def schedule_learning_path_agentic(learner_profile, session_count=None, llm_type
     return None
 
 
-def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, method_name=None):
+def adapt_learning_path(user_id, goal_id, new_learner_profile=None, force=False, llm_type=None, method_name=None):
     """Call the adaptive plan regeneration endpoint."""
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
@@ -445,68 +466,33 @@ def adapt_learning_path(user_id, goal_id, new_learner_profile, llm_type=None, me
     data = {
         "user_id": str(user_id),
         "goal_id": int(goal_id),
-        "new_learner_profile": str(new_learner_profile),
+        "force": bool(force),
     }
+    if new_learner_profile is not None:
+        data["new_learner_profile"] = str(new_learner_profile)
     response = make_post_request(API_NAMES["adapt_path"], data, timeout=120)
     if response:
         return {
             "learning_path": response.get("learning_path"),
             "agent_metadata": response.get("agent_metadata", {}),
+            "adaptation": response.get("adaptation", {}),
         }
     return None
 
-
-def reschedule_learning_path(learning_path, learner_profile, session_count, other_feedback="", llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    # Backend expects learner_profile and learning_path as strings.
-    try:
-        session_count_int = int(session_count)
-    except Exception:
-        session_count_int = cfg["default_session_count"]
-    data = {
-        "learning_path": str(learning_path),
-        "learner_profile": str(learner_profile),
-        "session_count": session_count_int,
-        "other_feedback": str(other_feedback),
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request(API_NAMES["reschedule_path"], data, "./assets/data_example/learning_path.json")
-    return response.get("rescheduled_learning_path") if response else None
-
-# @st.cache_resource
-def generate_document_quizzes(learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count=0, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_document": str(learning_document),
-        "single_choice_count": single_choice_count,
-        "multiple_choice_count": multiple_choice_count,
-        "true_false_count": true_false_count,
-        "short_answer_count": short_answer_count,
-        "open_ended_count": open_ended_count,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("generate-document-quizzes", data, "./assets/data_example/document_quiz.json")
-    return response.get("document_quiz") if response else None
-
-# @st.cache_resource
-def explore_knowledge_points(learner_profile, learning_path, learning_session, llm_type=None, method_name=None):
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-    }
-    response = make_post_request("explore-knowledge-points", data, "./assets/data_example/knowledge_points.json")
-    return response.get("knowledge_points") if response else None
-
-# @st.cache_resource
-def draft_knowledge_point(learner_profile, learning_path, learning_session, knowledge_points, knowledge_point, use_search, llm_type=None, method_name=None):
+def generate_learning_content(
+    learner_profile,
+    learning_path,
+    learning_session,
+    use_search=True,
+    allow_parallel=True,
+    with_quiz=True,
+    goal_context=None,
+    user_id=None,
+    goal_id=None,
+    session_index=None,
+    llm_type=None,
+    method_name=None,
+):
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
     method_name = method_name or cfg["default_method_name"]
@@ -514,58 +500,147 @@ def draft_knowledge_point(learner_profile, learning_path, learning_session, know
         "learner_profile": str(learner_profile),
         "learning_path": str(learning_path),
         "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "knowledge_point": str(knowledge_point),
-        "use_search": use_search,
+        "use_search": bool(use_search),
+        "allow_parallel": bool(allow_parallel),
+        "with_quiz": bool(with_quiz),
+        "goal_context": _coerce_jsonable(goal_context),
         "llm_type": str(llm_type),
         "method_name": str(method_name),
     }
-    response = make_post_request("draft-knowledge-point", data, "./assets/data_example/knowledge_point.json")
-    return response.get("knowledge_draft") if response else None
-
-# @st.cache_resource
-def draft_knowledge_points(learner_profile, learning_path, learning_session, knowledge_points, allow_parallel, use_search, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "allow_parallel": allow_parallel,
-        "use_search": use_search,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("draft-knowledge-points", data, "./assets/data_example/knowledge_points.json")
-    return response.get("knowledge_drafts") if response else None
-
-# @st.cache_resource
-def integrate_learning_document(learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts, output_markdown=False, llm_type=None, method_name=None):
-    cfg = get_app_config()
-    llm_type = llm_type or cfg["default_llm_type"]
-    method_name = method_name or cfg["default_method_name"]
-    data = {
-        "learner_profile": str(learner_profile),
-        "learning_path": str(learning_path),
-        "learning_session": str(learning_session),
-        "knowledge_points": str(knowledge_points),
-        "knowledge_drafts": str(knowledge_drafts),
-        "output_markdown": output_markdown,
-        "llm_type": str(llm_type),
-        "method_name": str(method_name),
-    }
-    response = make_post_request("integrate-learning-document", data, "./assets/data_example/learning_document.json")
+    if user_id is not None:
+        data["user_id"] = str(user_id)
+    if goal_id is not None:
+        data["goal_id"] = int(goal_id)
+    if session_index is not None:
+        data["session_index"] = int(session_index)
+    response = make_post_request(API_NAMES["generate_learning_content"], data, "./assets/data_example/learning_document.json")
     if not response:
         return None
-    # Return enriched dict including audio-visual metadata from Sprint 3 backend
-    return {
-        "learning_document": response.get("learning_document"),
-        "content_format": response.get("content_format", "standard"),
-        "audio_url": response.get("audio_url"),
-        "document_is_markdown": response.get("document_is_markdown", False),
+    if isinstance(response, dict) and isinstance(response.get("learning_content"), dict):
+        return response["learning_content"]
+    return response if isinstance(response, dict) else None
+
+
+def list_goals(user_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json().get("goals", [])
+    except Exception:
+        pass
+    return []
+
+
+def create_goal(user_id, goal_payload):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}"
+    try:
+        resp = httpx.post(url, json=_coerce_jsonable(goal_payload), timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def update_goal(user_id, goal_id, patch_payload):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}/{goal_id}"
+    try:
+        resp = httpx.patch(url, json=_coerce_jsonable(patch_payload), timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def delete_goal(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goals']}/{user_id}/{goal_id}"
+    try:
+        resp = httpx.delete(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_goal_runtime_state(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['goal_runtime_state']}/{user_id}?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_learning_content(user_id, goal_id, session_index):
+    url = f"{_get_backend_endpoint()}{API_NAMES['learning_content_cache']}/{user_id}/{goal_id}/{session_index}"
+    try:
+        resp = httpx.get(url, timeout=60)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def delete_learning_content(user_id, goal_id, session_index):
+    url = f"{_get_backend_endpoint()}{API_NAMES['learning_content_cache']}/{user_id}/{goal_id}/{session_index}"
+    try:
+        resp = httpx.delete(url, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def post_session_activity(user_id, goal_id, session_index, event_type, event_time=None):
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "event_type": str(event_type),
     }
+    if event_time is not None:
+        data["event_time"] = str(event_time)
+    response = make_post_request(API_NAMES["session_activity"], data)
+    return response if response else None
+
+
+def complete_session(user_id, goal_id, session_index, session_end_time=None, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    if session_end_time is not None:
+        data["session_end_time"] = str(session_end_time)
+    response = make_post_request(API_NAMES["complete_session"], data, timeout=120)
+    return response if response else None
+
+
+def submit_content_feedback(user_id, goal_id, feedback, llm_type=None, method_name=None):
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "feedback": _coerce_jsonable(feedback),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    response = make_post_request(API_NAMES["submit_content_feedback"], data, timeout=120)
+    return response if response else None
 
 def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
     """Submit quiz answers for mastery evaluation."""
@@ -581,7 +656,7 @@ def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
 
 def get_session_mastery_status(user_id, goal_id):
     """Get mastery status for all sessions in a goal."""
-    url = f"{backend_endpoint}session-mastery-status/{user_id}?goal_id={goal_id}"
+    url = f"{_get_backend_endpoint()}session-mastery-status/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -593,7 +668,7 @@ def get_session_mastery_status(user_id, goal_id):
 
 def get_behavioral_metrics(user_id, goal_id=None):
     """Fetch computed behavioral metrics from the backend."""
-    url = f"{backend_endpoint}behavioral-metrics/{user_id}"
+    url = f"{_get_backend_endpoint()}behavioral-metrics/{user_id}"
     if goal_id is not None:
         url += f"?goal_id={goal_id}"
     try:
@@ -612,7 +687,7 @@ def get_quiz_mix(user_id, goal_id, session_index):
     true_false_count, short_answer_count, open_ended_count.
     Falls back to a standard beginner mix if the endpoint is unavailable.
     """
-    url = f"{backend_endpoint}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
+    url = f"{_get_backend_endpoint()}quiz-mix/{user_id}?goal_id={goal_id}&session_index={session_index}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -629,35 +704,27 @@ def get_quiz_mix(user_id, goal_id, session_index):
     }
 
 
-def get_user_state(backend_ep, user_id):
-    """GET /user-state/{user_id} → (status_code, response_json)"""
-    if use_mock_data:
-        return 404, {"detail": "mock mode — no persisted state"}
-    url = f"{backend_ep}user-state/{user_id}"
+def get_dashboard_metrics(user_id, goal_id):
+    url = f"{_get_backend_endpoint()}{API_NAMES['dashboard_metrics']}/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
-        return resp.status_code, resp.json()
-    except Exception as e:
-        return None, {"detail": str(e)}
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
 
-def save_user_state(backend_ep, user_id, state):
-    """PUT /user-state/{user_id} → (status_code, response_json)"""
+def delete_user_data(backend_ep, user_id):
+    """DELETE /user-data/{user_id} → (status_code, response_json)
+
+    Clears all non-auth data: profiles (mastered skills, FSLSM, learner info),
+    events, user state, and profile snapshots. Does NOT remove auth credentials.
+    Used by Restart Onboarding.
+    """
     if use_mock_data:
         return 200, {"ok": True}
-    url = f"{backend_ep}user-state/{user_id}"
-    try:
-        resp = httpx.put(url, json={"state": state}, timeout=30)
-        return resp.status_code, resp.json()
-    except Exception as e:
-        return None, {"detail": str(e)}
-
-
-def delete_user_state(backend_ep, user_id):
-    """DELETE /user-state/{user_id} → (status_code, response_json)"""
-    if use_mock_data:
-        return 200, {"ok": True}
-    url = f"{backend_ep}user-state/{user_id}"
+    url = f"{backend_ep}user-data/{user_id}"
     try:
         resp = httpx.delete(url, timeout=30)
         return resp.status_code, resp.json()
@@ -670,7 +737,7 @@ def auth_register(username, password):
     if use_mock_data:
         return 200, {"token": "mock-token", "username": username}
     data = {"username": username, "password": password}
-    backend_url = f"{backend_endpoint}{API_NAMES['auth_register']}"
+    backend_url = f"{_get_backend_endpoint()}{API_NAMES['auth_register']}"
     try:
         response = httpx.post(backend_url, json=data, timeout=30)
         return response.status_code, response.json()
@@ -683,7 +750,7 @@ def auth_login(username, password):
     if use_mock_data:
         return 200, {"token": "mock-token", "username": username}
     data = {"username": username, "password": password}
-    backend_url = f"{backend_endpoint}{API_NAMES['auth_login']}"
+    backend_url = f"{_get_backend_endpoint()}{API_NAMES['auth_login']}"
     try:
         response = httpx.post(backend_url, json=data, timeout=30)
         return response.status_code, response.json()
@@ -695,7 +762,7 @@ def auth_delete_user(token):
     """Delete the authenticated user's account via DELETE /auth/user."""
     if use_mock_data:
         return 200, {"ok": True}
-    url = f"{backend_endpoint}auth/user"
+    url = f"{_get_backend_endpoint()}auth/user"
     try:
         headers = {"Authorization": f"Bearer {token}"}
         resp = httpx.delete(url, headers=headers, timeout=30)
@@ -706,7 +773,7 @@ def auth_delete_user(token):
 
 def sync_profile(user_id, goal_id):
     """Sync a goal's profile with shared fields from all other goals."""
-    backend_url = f"{backend_endpoint}sync-profile/{user_id}/{goal_id}"
+    backend_url = f"{_get_backend_endpoint()}sync-profile/{user_id}/{goal_id}"
     try:
         response = httpx.post(backend_url, timeout=30)
         if response.status_code == 200:
@@ -718,7 +785,7 @@ def sync_profile(user_id, goal_id):
 
 def get_learner_profile(user_id, goal_id):
     """Retrieve an existing learner profile from the backend store. Returns None if not found."""
-    url = f"{backend_endpoint}profile/{user_id}?goal_id={goal_id}"
+    url = f"{_get_backend_endpoint()}profile/{user_id}?goal_id={goal_id}"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -730,7 +797,7 @@ def get_learner_profile(user_id, goal_id):
 
 def save_learner_profile(user_id, goal_id, learner_profile):
     """Persist a learner profile to the backend store without triggering an LLM call."""
-    backend_url = f"{backend_endpoint}profile/{user_id}/{goal_id}"
+    backend_url = f"{_get_backend_endpoint()}profile/{user_id}/{goal_id}"
     try:
         response = httpx.put(backend_url, json={"learner_profile": learner_profile}, timeout=30)
         return response.status_code == 200
@@ -743,7 +810,7 @@ def get_personas():
     from utils.personas import PERSONAS as LOCAL_PERSONAS
     if use_mock_data:
         return LOCAL_PERSONAS
-    url = f"{backend_endpoint}personas"
+    url = f"{_get_backend_endpoint()}personas"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:
@@ -759,7 +826,7 @@ _LOCAL_APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
     "default_llm_type": "gpt4o",
-    "default_method_name": "genmentor",
+    "default_method_name": "ami",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
     "fslsm_thresholds": {
@@ -805,7 +872,7 @@ def get_app_config():
     if use_mock_data:
         _cached_app_config = _LOCAL_APP_CONFIG
         return _cached_app_config
-    url = f"{backend_endpoint}config"
+    url = f"{_get_backend_endpoint()}config"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:

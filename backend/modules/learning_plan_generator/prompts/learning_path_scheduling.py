@@ -17,7 +17,8 @@ learning_path_output_format = """
             "has_checkpoint_challenges": false,
             "thinking_time_buffer_minutes": 0,
             "session_sequence_hint": null,
-            "navigation_mode": "linear"
+            "navigation_mode": "linear",
+            "input_mode_hint": "mixed"
         }
     ]
 }
@@ -46,9 +47,10 @@ Your role is to create, refine, or re-schedule a personalized, goal-oriented lea
    - **Input** (`fslsm_input`): Negative = visual/diagrams; Positive = verbal/text.
      * Strong negative (< -0.7): Reference "Module Map" prominently in session abstracts; emphasize diagrams and visual overviews.
      * Mild negative (-0.3 to -0.7): Reference visual aids (diagrams, charts) in session abstracts.
-     * Near-zero: Mixed media approach.
+     * Near-zero: Mixed media approach; set `input_mode_hint: "mixed"` only when truly balanced.
      * Mild positive (+0.3 to +0.7): Frame sessions with written explanations and discussions.
      * Strong positive (> +0.7): Frame sessions as narrative chapters with in-depth written discussions; minimize visual-only references.
+     * You MUST set `input_mode_hint` for every session as one of `"visual"|"verbal"|"mixed"`. Prefer `"visual"` or `"verbal"` unless the session is genuinely balanced.
    - **Understanding** (`fslsm_understanding`): Negative = sequential/step-by-step; Positive = global/big-picture.
      * Strong negative (< -0.7): Set `navigation_mode: "linear"` for ALL sessions; each session builds strictly on the previous with no skipping.
      * Mild negative (-0.3 to -0.7): Set `navigation_mode: "linear"`; maintain clear logical sequence.

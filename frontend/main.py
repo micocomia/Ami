@@ -1,6 +1,10 @@
 import streamlit as st
-import time
-from utils.state import initialize_session_state, change_selected_goal_id, save_persistent_state, load_persistent_state
+from utils.state import (
+    change_selected_goal_id,
+    initialize_session_state,
+    normalize_selected_goal_id,
+    save_persistent_state,
+)
 from components.topbar import logout
 initialize_session_state()
 
@@ -129,102 +133,13 @@ render_reasoning_panel(st.sidebar)
 from components.debug_sidebar import render_debug_sidebar
 render_debug_sidebar()
 
-# ---- Learning analytics (defensive) ----
-# The app may reach this page before goals are loaded/created. Avoid crashes.
-st.session_state.setdefault("learned_skills_history", {})
-
 goals = st.session_state.get("goals") or []
-selected = st.session_state.get("selected_goal_id", 0)
-
-goal = None
-# If selected is a list index
-if isinstance(selected, int) and 0 <= selected < len(goals):
-    goal = goals[selected]
-# If selected is an id and goals are dicts with "id"
-elif goals:
-    for g in goals:
+if goals:
+    if normalize_selected_goal_id():
         try:
-            if isinstance(g, dict) and g.get("id") == selected:
-                goal = g
-                break
+            save_persistent_state()
         except Exception:
             pass
-    # Fallback: pick first goal to keep app functional
-    if goal is None:
-        goal = goals[0]
-        st.session_state["selected_goal_id"] = 0
-
-if goal is not None:
-    goal["start_time"] = time.time()
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
-
-    # Compute mastery rate defensively
-    mastery_rate = 0
-    try:
-        unlearned_skill = len(goal["learner_profile"]["cognitive_status"]["in_progress_skills"])
-        learned_skill = len(goal["learner_profile"]["cognitive_status"]["mastered_skills"])
-        all_skill = learned_skill + unlearned_skill
-        mastery_rate = (learned_skill / all_skill) if all_skill else 0
-    except Exception:
-        # If profile keys are missing, skip analytics quietly
-        all_skill = 0
-
-    # Track mastery history per-goal id if available
-    goal_id = None
-    try:
-        goal_id = goal.get("id") if isinstance(goal, dict) else None
-    except Exception:
-        goal_id = None
-
-    if goal_id is not None:
-        if goal_id not in st.session_state["learned_skills_history"]:
-            st.session_state["learned_skills_history"][goal_id] = []
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-
-        # First sample
-        if all_skill:
-            if st.session_state["learned_skills_history"][goal_id] == []:
-                st.session_state["learned_skills_history"][goal_id].append(mastery_rate)
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-
-        # Periodic sample every 10 minutes
-        try:
-            if (time.time() - goal["start_time"]) > 600:
-                goal["start_time"] = time.time()
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-                st.session_state["learned_skills_history"][goal_id].append(mastery_rate)
-                try:
-                    save_persistent_state()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Keep last 10 points
-        if len(st.session_state["learned_skills_history"][goal_id]) > 10:
-            st.session_state["learned_skills_history"][goal_id].pop(0)
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
-# ---- End learning analytics ----
 
 try:
     if st.session_state.get("_autosave_enabled", True):
@@ -240,4 +155,3 @@ if len(st.session_state["goals"]) != 0:
         pass
 
 pg.run()
-

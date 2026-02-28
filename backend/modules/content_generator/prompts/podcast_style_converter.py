@@ -18,6 +18,8 @@ Your task is to rewrite a learning document as a lively, engaging **Host-Expert 
 6. Preserve ALL factual content from the original document — do not omit or hallucinate information.
 7. Make dialogue natural and conversational — the HOST asks questions and guides the discussion; the EXPERT explains and elaborates.
 8. Keep each turn concise (2–5 sentences). Avoid monologues.
+9. If you encounter non-English terms (e.g., "bonjour"), replace them with an English-friendly pronunciation spelling that TTS can read naturally (e.g., use "bohn-zhoor" instead of "bonjour"). Do NOT keep both forms; output only the TTS-friendly form. Prefer readable phonetic respelling (not IPA), and keep meaning/facts unchanged.
+10. Preserve list structure for speech clarity: keep bullets/numbered items as separate lines, and ensure each item reads as a complete short sentence so TTS does not run items together as one continuous paragraph.
 
 **Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.
@@ -39,6 +41,8 @@ Your task is to rewrite a learning document as a **rich, spoken-word narrative**
 5. Do NOT use `[HOST]` or `[EXPERT]` labels. This is a continuous first-person narrative.
 6. Preserve ALL factual content from the original document — do not omit or hallucinate information.
 7. Use transitional phrases ("Now, here's where it gets interesting...", "Think of it this way...") to maintain flow.
+8. If you encounter non-English terms (e.g., "bonjour"), replace them with an English-friendly pronunciation spelling that TTS can read naturally (e.g., use "bohn-zhoor" instead of "bonjour"). Do NOT keep both forms; output only the TTS-friendly form. Prefer readable phonetic respelling (not IPA), and keep meaning/facts unchanged.
+9. Preserve list structure for speech clarity: keep bullets/numbered items as separate lines, and ensure each item reads as a complete short sentence so TTS does not run items together as one continuous paragraph.
 
 **Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.

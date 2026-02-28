@@ -295,3 +295,41 @@ class TestPlanQualityGatePassthrough:
             )
 
         assert metadata["evaluation"]["feedback_summary"] == feedback_content
+
+    def test_quality_gate_contract_unchanged_with_extra_simulator_fields(self):
+        """Pipeline should ignore extra simulator fields and keep using gate contract keys."""
+        feedback = {
+            "feedback": {
+                "progression": "Progression needs bridging.",
+                "engagement": "Engagement is acceptable.",
+                "personalization": "Personalization is acceptable.",
+            },
+            "suggestions": {"progression": "Add bridging.", "engagement": "", "personalization": ""},
+            "is_acceptable": False,
+            "issues": ["SOLO progression skipped for 1 skill transition(s)"],
+            "improvement_directives": "Insert bridging sessions.",
+            "solo_audit": {"violation_count": 1, "has_violations": True},
+            "simulation_metadata": {"simulation_model": "gpt-4o-mini"},
+        }
+
+        sim_tool = MagicMock()
+        sim_tool.invoke.return_value = feedback
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
+
+        with patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
+            return_value=mock_scheduler,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
+            return_value=sim_tool,
+        ):
+            _, metadata = schedule_learning_path_agentic(
+                llm=MagicMock(),
+                learner_profile=_LEARNER_PROFILE,
+                max_refinements=0,
+            )
+
+        assert metadata["evaluation"]["pass"] is False
+        assert metadata["evaluation"]["issues"] == ["SOLO progression skipped for 1 skill transition(s)"]
