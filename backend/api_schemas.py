@@ -13,6 +13,17 @@ class ChatWithAutorRequest(BaseRequest):
 
     messages: str
     learner_profile: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+    session_index: Optional[int] = None
+    use_search: Optional[bool] = None
+    use_vector_retrieval: Optional[bool] = None
+    use_web_search: Optional[bool] = None
+    use_media_search: Optional[bool] = None
+    allow_preference_updates: Optional[bool] = None
+    top_k: Optional[int] = None
+    return_metadata: bool = False
+    learner_information: Optional[str] = None
 
 
 class LearningGoalRefinementRequest(BaseRequest):

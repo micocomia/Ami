@@ -40,10 +40,11 @@ from modules.learning_plan_generator import *
 from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
     schedule_learning_path_agentic,
 )
-from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
+from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
 from modules.content_generator import *
 from modules.content_generator.agents.content_feedback_simulator import simulate_content_feedback_with_llm
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
+from modules.ai_chatbot_tutor.utils import safe_update_learning_preferences
 from api_schemas import *
 from config import load_config
 from services import ContentPrefetchService
@@ -934,23 +935,25 @@ async def complete_session(request: CompleteSessionRequest):
 async def submit_content_feedback(request: SubmitContentFeedbackRequest):
     llm = get_llm(request.model_provider, request.model_name)
     feedback = _parse_jsonish(request.feedback, request.feedback)
-    profile = store.get_profile(request.user_id, request.goal_id) or {}
-    profile_before_update = copy.deepcopy(profile) if isinstance(profile, dict) else {}
-    store.save_profile_snapshot(request.user_id, request.goal_id, profile_before_update)
-    _record_snapshot_timestamp(request.user_id, request.goal_id)
-    profile = update_learning_preferences_with_llm(llm, profile, feedback, "")
-    _reset_adaptation_on_profile_sign_flip(
-        request.user_id,
-        request.goal_id,
-        profile_before_update,
-        profile if isinstance(profile, dict) else {},
+    merged, profile_updated = safe_update_learning_preferences(
+        llm,
+        learner_interactions=feedback,
+        learner_information="",
+        user_id=request.user_id,
+        goal_id=request.goal_id,
+        get_profile_fn=store.get_profile,
+        save_snapshot_fn=store.save_profile_snapshot,
+        record_snapshot_timestamp_fn=_record_snapshot_timestamp,
+        update_learning_preferences_fn=update_learning_preferences_with_llm,
+        reset_adaptation_on_sign_flip_fn=_reset_adaptation_on_profile_sign_flip,
+        upsert_profile_fn=store.upsert_profile,
+        refresh_goal_profile_fn=_refresh_goal_profile,
     )
-    store.upsert_profile(request.user_id, request.goal_id, profile)
-    merged = _refresh_goal_profile(request.user_id, request.goal_id)
     return {
         "ok": True,
         "goal": _goal_aggregate_or_404(request.user_id, request.goal_id),
         "learner_profile": merged,
+        "profile_updated": profile_updated,
         "goal_runtime_state": _build_goal_runtime_state(request.user_id, request.goal_id),
         "profile_sync_applied": True,
     }
@@ -1249,7 +1252,7 @@ class AdaptLearningPathRequest(BaseRequest):
 @app.post("/adapt-learning-path")
 async def adapt_learning_path(request: AdaptLearningPathRequest):
     """Detect preference/mastery changes and adapt the learning path accordingly."""
-    from modules.tools.plan_regeneration_tool import (
+    from modules.learning_plan_generator.utils.plan_regeneration import (
         compute_fslsm_deltas,
         decide_regeneration,
         RegenerationDecision,
@@ -1759,14 +1762,75 @@ async def chat_with_autor(request: ChatWithAutorRequest):
             converted_messages = ast.literal_eval(request.messages)
         else:
             return JSONResponse(status_code=400, content={"detail": "messages must be a JSON array string"})
-        response = chat_with_tutor_with_llm(
+
+        def _safe_tutor_preference_update(
+            *,
+            user_id: str,
+            goal_id: int,
+            latest_user_message: str,
+            learner_information: str = "",
+            signals: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
+            interactions = {
+                "source": "ai_tutor_chat",
+                "additional_comments": latest_user_message,
+                "signals": signals or {},
+            }
+            updated_profile, profile_updated = safe_update_learning_preferences(
+                llm,
+                learner_interactions=interactions,
+                learner_information=learner_information or "",
+                user_id=user_id,
+                goal_id=goal_id,
+                max_fslsm_delta=0.05,
+                get_profile_fn=store.get_profile,
+                save_snapshot_fn=store.save_profile_snapshot,
+                record_snapshot_timestamp_fn=_record_snapshot_timestamp,
+                update_learning_preferences_fn=update_learning_preferences_with_llm,
+                reset_adaptation_on_sign_flip_fn=_reset_adaptation_on_profile_sign_flip,
+                upsert_profile_fn=store.upsert_profile,
+                # Avoid cross-goal merge overwriting this turn's freshly-updated
+                # preference signal before we return metadata to the caller.
+                refresh_goal_profile_fn=lambda uid, gid: store.get_profile(uid, gid) or {},
+            )
+            return {
+                "profile_updated": profile_updated,
+                "updated_learner_profile": updated_profile if profile_updated else None,
+                "reason": "Profile updated from strong tutor preference signal." if profile_updated else "No persisted preference change.",
+            }
+
+        result = chat_with_tutor_with_llm(
             llm,
             converted_messages,
             learner_profile,
             search_rag_manager=search_rag_manager,
-            use_search=True,
+            safe_preference_update_fn=_safe_tutor_preference_update,
+            use_search=request.use_search if request.use_search is not None else True,
+            top_k=request.top_k or 5,
+            user_id=request.user_id,
+            goal_id=request.goal_id,
+            session_index=request.session_index,
+            use_vector_retrieval=request.use_vector_retrieval,
+            use_web_search=request.use_web_search,
+            use_media_search=request.use_media_search,
+            allow_preference_updates=(
+                request.allow_preference_updates
+                if request.allow_preference_updates is not None
+                else True
+            ),
+            learner_information=request.learner_information or "",
+            return_metadata=bool(request.return_metadata),
         )
-        return {"response": response}
+        if isinstance(result, dict):
+            response_payload = {
+                "response": result.get("response", ""),
+                "profile_updated": bool(result.get("profile_updated", False)),
+            }
+            updated_profile = result.get("updated_learner_profile")
+            if isinstance(updated_profile, dict):
+                response_payload["updated_learner_profile"] = updated_profile
+            return response_payload
+        return {"response": result}
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 

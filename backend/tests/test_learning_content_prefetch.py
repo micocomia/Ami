@@ -346,7 +346,7 @@ def test_on_demand_owner_unrelated_session_change_still_saves(_mock_llm, client)
 @patch("main.get_llm", return_value=MagicMock())
 @patch("main.create_simulate_feedback_tool")
 @patch("main.reschedule_learning_path_with_llm")
-@patch("modules.tools.plan_regeneration_tool.decide_regeneration")
+@patch("modules.learning_plan_generator.utils.plan_regeneration.decide_regeneration")
 def test_adapt_applied_invalidates_only_changed_future_sessions(
     mock_decide,
     mock_reschedule,
@@ -356,7 +356,7 @@ def test_adapt_applied_invalidates_only_changed_future_sessions(
     monkeypatch,
 ):
     import main
-    from modules.tools.plan_regeneration_tool import RegenerationDecision
+    from modules.learning_plan_generator.utils.plan_regeneration import RegenerationDecision
 
     monkeypatch.setitem(main.APP_CONFIG, "prefetch_enabled", False)
 

@@ -416,7 +416,7 @@ def show_restart_onboarding_dialog():
             if isinstance(prev_llm_type, str) and prev_llm_type.strip():
                 st.session_state["llm_type"] = prev_llm_type
             try:
-                st.switch_page("main.py")
+                st.switch_page("pages/onboarding.py")
             except Exception:
                 st.rerun()
     with col_cancel:
@@ -448,7 +448,7 @@ def show_delete_account_dialog():
                 st.session_state["userId"] = "default"
                 st.success("Account deleted successfully.")
                 try:
-                    st.switch_page("main.py")
+                    st.rerun()
                 except Exception:
                     st.rerun()
             else:

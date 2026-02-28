@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from modules.learning_plan_generator.agents.learning_path_scheduler import LearningPathScheduler
-from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
+from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
 
 
 JSONDict = Dict[str, Any]

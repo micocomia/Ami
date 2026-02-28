@@ -239,7 +239,18 @@ def get_available_models(backend_endpoint):
         # st.write("Failed to fetch available models. Error:", e)
         return []
 
-def chat_with_tutor(chat_messages, learner_profile, llm_type=None, method_name=None):
+def chat_with_tutor(
+    chat_messages,
+    learner_profile,
+    llm_type=None,
+    method_name=None,
+    *,
+    user_id=None,
+    goal_id=None,
+    session_index=None,
+    learner_information="",
+    return_metadata=False,
+):
     cfg = get_app_config()
     llm_type = llm_type or cfg["default_llm_type"]
     method_name = method_name or cfg["default_method_name"]
@@ -248,9 +259,27 @@ def chat_with_tutor(chat_messages, learner_profile, llm_type=None, method_name=N
         "learner_profile": str(learner_profile),
         "llm_type": str(llm_type),
         "method_name": str(method_name),
+        "use_web_search": bool(use_search),
+        "use_vector_retrieval": True,
+        "use_media_search": True,
+        "allow_preference_updates": True,
+        "return_metadata": bool(return_metadata),
     }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
+    if isinstance(session_index, int) and session_index >= 0:
+        data["session_index"] = session_index
+    if learner_information is not None:
+        data["learner_information"] = _normalize_learner_information(learner_information)
+
     response = make_post_request(API_NAMES["chat_with_tutor"], data, "./assets/data_example/ai)tutor_chat.json")
-    return response.get("response") if response else None
+    if not response:
+        return None
+    if return_metadata:
+        return response
+    return response.get("response")
 
 def refine_learning_goal(learning_goal, learner_information, llm_type=None, method_name=None):
     cfg = get_app_config()

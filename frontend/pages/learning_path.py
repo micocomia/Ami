@@ -142,20 +142,25 @@ def _auto_adapt_if_needed(goal, runtime_state=None):
         st.rerun()
 
 def render_learning_path():
-    if not st.session_state.get("if_complete_onboarding"):
-        st.switch_page("main.py")
-
     goal = _get_selected_goal()
+    has_existing_learning_path = isinstance(goal, dict) and bool(goal.get("learning_path"))
+    onboarding_complete = st.session_state.get("if_complete_onboarding")
+
+    if not onboarding_complete and not has_existing_learning_path:
+        st.switch_page("pages/onboarding.py")
+
     if not isinstance(goal, dict):
         st.info("No goal selected yet (or goals data not loaded). Go to Onboarding / Goal Management first.")
         return
     runtime_state = _get_runtime_state(goal.get("id"))
     save_persistent_state()
-    if not goal["learning_goal"] or not st.session_state["learner_information"]:
-        st.switch_page("main.py")
-    else:
-        if not goal["skill_gaps"]:
-            st.switch_page("pages/skill_gap.py")
+    if not has_existing_learning_path:
+        if not goal.get("learning_goal"):
+            st.switch_page("pages/goal_management.py" if onboarding_complete else "pages/onboarding.py")
+        if not goal.get("skill_gaps"):
+            st.switch_page("pages/goal_management.py" if onboarding_complete else "pages/skill_gap.py")
+        if not goal.get("learner_profile"):
+            st.switch_page("pages/goal_management.py" if onboarding_complete else "pages/onboarding.py")
 
     st.title("Learning Path")
     st.write("Track your learning progress through the sessions below.")
