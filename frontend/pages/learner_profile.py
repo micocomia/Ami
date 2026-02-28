@@ -341,11 +341,11 @@ def show_edit_profile_dialog(goal):
 
     mode = st.radio(
         "Choose update mode",
-        ["FSLSM updates", "Enhance learner information ONLY"],
+        ["Learning Preferences", "Learner Information"],
         key=f"edit_profile_mode_{goal_id}",
     )
 
-    if mode == "FSLSM updates":
+    if mode == "Learning Preferences":
         st.caption("Adjust your current FSLSM dimensions directly using sliders.")
         slider_specs = [
             ("processing", "Processing", "Active", "Reflective"),
@@ -409,7 +409,7 @@ def show_edit_profile_dialog(goal):
         type="pdf",
         key=f"edit_resume_upload_{goal_id}",
     )
-    if st.button("Save Learner Information", type="primary", key=f"save_learner_info_{goal_id}"):
+    if st.button("Save Learner Information Changes", type="primary", key=f"save_learner_info_{goal_id}"):
         resume_text = ""
         if pdf_file is not None:
             with st.spinner("Extracting text from resume..."):
