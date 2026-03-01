@@ -638,7 +638,7 @@ _SOLO_LEVEL_COLORS = {
     "prestructural": "#FF4444",
     "unistructural": "#FF8800",
     "multistructural": "#DDAA00",
-    "relational": "#2288FF",
+    "relational": "#51C8DD",
     "extended_abstract": "#22CC66",
 }
 

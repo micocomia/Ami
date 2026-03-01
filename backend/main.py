@@ -52,6 +52,7 @@ from services import ContentPrefetchService
 from utils import store
 from utils import auth_store, auth_jwt
 from utils.content_view import build_learning_content_view_model
+from utils.motivational_messages import pick_motivational_message
 
 
 app_config = load_config(config_name="main")
@@ -846,10 +847,11 @@ async def session_activity(request: SessionActivityRequest):
             heartbeats.append(event_time)
             trigger_count = len(activity.setdefault("trigger_events", []))
             kind = "posture" if trigger_count % 2 == 0 else "encouragement"
-            message = (
-                "Stay hydrated and keep a healthy posture."
-                if kind == "posture" else
-                "Keep up the good work!"
+            fslsm_dims = _extract_fslsm_dims(
+                store.get_profile(request.user_id, request.goal_id) or {}
+            )
+            message = pick_motivational_message(
+                kind, fslsm_dims, trigger_index=trigger_count // 2
             )
             activity["trigger_events"].append({"kind": kind, "time": event_time})
             trigger = {"show": True, "kind": kind, "message": message}

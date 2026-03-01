@@ -2,7 +2,7 @@
 
 /* declore color varibale */
 :root {
-    --primary: #007bff;
+    --primary: #51C8DD;
     --secondary: #6c757d;
     --success: #28a745;
     --info: #17a2b8;
@@ -90,5 +90,4 @@ section[data-testid='stSidebar'] {
         display: none;
     }
 }
-
 

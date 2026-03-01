@@ -129,7 +129,7 @@ def inject_citation_tooltips(markdown_text, sources):
         if tip is None:
             return match.group(0)  # unknown citation, leave as-is
         return (
-            f'<span title="{tip}" style="cursor:help; color:#1a73e8; font-weight:600;">'
+            f'<span title="{tip}" style="cursor:help; color:#51C8DD; font-weight:600;">'
             f'<sup>[{num}]</sup></span>'
         )
 

@@ -74,8 +74,7 @@ except Exception:
 
 from components.chatbot import render_chatbot
 
-st.set_page_config(page_title="Ami", page_icon="🧠", layout="wide")
-st.logo("./assets/avatar.png")
+st.set_page_config(page_title="Ami", page_icon="./assets/avatar.png", layout="wide")
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
 
 if not st.session_state.get("logged_in", False):
@@ -107,7 +106,6 @@ else:
     onboarding = st.Page("pages/onboarding.py", title="Onboarding", icon=":material/how_to_reg:", default=True, url_path="onboarding")
     learning_path = st.Page("pages/learning_path.py", title="Learning Path", icon=":material/route:", default=False, url_path="learning_path")
 skill_gaps = st.Page("pages/skill_gap.py", title="Skill Gap", icon=":material/insights:", default=False, url_path="skill_gap")
-knowledge_document = st.Page("pages/knowledge_document.py", title="Resume Learning", icon=":material/menu_book:", default=False, url_path="knowledge_document")
 learner_profile = st.Page("pages/learner_profile.py", title="My Profile", icon=":material/person:", default=False, url_path="learner_profile")
 goal_management = st.Page("pages/goal_management.py", title="Goal Management", icon=":material/flag:", default=False, url_path="goal_management")
 dashboard = st.Page("pages/dashboard.py", title="Analytics Dashboard", icon=":material/browse:", default=False, url_path="dashboard")
@@ -118,7 +116,7 @@ if not st.session_state["if_complete_onboarding"]:
     pg = st.navigation({"Ami": [onboarding, skill_gaps, learning_path]}, position="hidden", expanded=True)
 else:
     nav_position = "sidebar"
-    pg = st.navigation({"Ami": [goal_management, learning_path, knowledge_document, learner_profile, dashboard]}, position=nav_position, expanded=True)
+    pg = st.navigation({"Ami": [goal_management, learning_path, learner_profile, dashboard]}, position=nav_position, expanded=True)
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.get('userId', '')}**")
         if st.button("Logout", icon=":material/exit_to_app:"):
