@@ -1,238 +1,336 @@
 # Frontend of Ami
 
-A Streamlit-based UI for Ami that guides learners through onboarding, goal refinement, skill-gaps analysis, learning-path scheduling, and in-session knowledge documents with quizzes. It talks to the Python backend over simple HTTP endpoints and can also run in a mock/offline mode using sample JSONs.
+A Streamlit-based UI for Ami that supports authentication, onboarding, skill-gap analysis, learning-path navigation, in-session learning documents with multi-modal content, learner profile management, and analytics dashboards.
+
+This frontend talks to the FastAPI backend over HTTP and can also run in mock mode with local JSON fixtures.
+
+> **Note:** Streamlit is the current frontend interface. A React SPA is under active development and planned for the Beta release (Mar 18, 2026), which will provide a more polished, production-grade learner experience.
+
+## Current App Flow
+
+The app is auth-gated and goal-aware:
+
+1. Login / Register
+2. Onboarding (persona selection → FSLSM profile inferred + goal + optional resume)
+3. Skill Gap (two-loop reflexion + bias audit)
+4. Goal Management / Learning Path
+5. Resume Learning (knowledge document + audio + media + quizzes)
+6. Learner Profile (separate edit flows for FSLSM learning style vs. personal/background information)
+7. Analytics Dashboard
+
+If the user already has goals, the app routes directly into post-onboarding pages after login.
+
+## How Frontend Uses the Enhanced Backend Pipelines
+
+The frontend pages are thin orchestration/UI layers on top of backend pipelines:
+
+- **Onboarding + Skill Gap** call the reflexion-enabled skill-gap flow (`/identify-skill-gap-with-info`) that performs goal clarification, skill-gap critique, and mandatory bias audit.
+- **Learning Path** uses agentic planning and adaptation endpoints (`/schedule-learning-path-agentic`, `/adapt-learning-path`) backed by embedded plan feedback simulation.
+- **Resume Learning (Knowledge Document)** consumes `/generate-learning-content`, which runs the full backend quality pipeline (draft evaluation, FSLSM-aware adaptation, targeted repair) before returning document + quiz + audio + media payloads.
+- **Session Prefetch**: `ContentPrefetchService` runs in the backend background; subsequent sessions are prefetched while the learner works through the current one, reducing transition wait times.
+- **Chatbot** calls `/chat-with-tutor`, where the backend assembles runtime tools per request (session content retrieval, vector retrieval, web-ephemeral retrieval, media search, optional signal-gated FSLSM preference update).
+- **Learner Profile** uses separate scoped update endpoints: `/update-learning-preferences` for FSLSM dimensions and `/update-learner-information` for personal/background details.
 
 ## Quickstart
 
 ### Option A: Docker (Recommended)
 
-Docker lets you run the frontend inside an isolated container so you don't need to install Python, manage dependencies, or worry about conflicts with other software on your computer. Think of it as a lightweight, self-contained package that has everything the frontend needs to run.
+Docker runs the frontend in an isolated container so you do not need to manage local Python dependencies.
 
 #### Step 1 — Install Docker Desktop
 
-Download and install **Docker Desktop** for your operating system:
+Download and install Docker Desktop for your OS:
 
 | Operating System | Download Link |
 |---|---|
-| **Windows 10/11** | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) |
-| **macOS (Intel / Apple Silicon)** | [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) |
-| **Linux (Ubuntu, Fedora, etc.)** | [Docker Desktop for Linux](https://docs.docker.com/desktop/setup/install/linux/) |
+| Windows 10/11 | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) |
+| macOS (Intel / Apple Silicon) | [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) |
+| Linux | [Docker Desktop for Linux](https://docs.docker.com/desktop/setup/install/linux/) |
 
-After installation, **open Docker Desktop** and wait until the whale icon in your system tray / menu bar shows a steady state (not "starting…"). Docker Desktop must be running whenever you want to start the frontend.
+After installation, open Docker Desktop and wait until it is fully started.
 
-> **Windows users:** Docker Desktop requires WSL 2 (Windows Subsystem for Linux). The installer will prompt you to enable it if it is not already turned on. Follow the on-screen instructions and restart your computer if asked.
-
-#### Step 2 — Open a Terminal
-
-You will run all commands below in a terminal (also called a command prompt or shell):
-
-- **Windows:** Open **PowerShell** or **Command Prompt** (search for either in the Start menu).
-- **macOS:** Open **Terminal** (found in Applications > Utilities, or search with Spotlight).
-- **Linux:** Open your preferred terminal emulator.
-
-Navigate to the `frontend` folder of this project. For example, if you cloned the repository to your home directory:
+#### Step 2 — Open a Terminal and Enter the Frontend Folder
 
 ```bash
-cd path/to/5902Group5/frontend
+cd path/to/Ami/frontend
 ```
 
-Replace `path/to/5902Group5/frontend` with the actual path where you downloaded or cloned the project.
+Replace `path/to/Ami` with your local path.
 
-#### Step 3 — Make Sure the Backend Is Running
+#### Step 3 — Start the Backend (Recommended)
 
-The frontend needs the backend server to be up so it can fetch data. Follow the instructions in `../backend/README.md` to start the backend first. By default the backend runs at `http://localhost:8000`.
+The frontend expects a running backend.
 
-> **Tip:** If you just want to explore the UI without a backend, you can skip this step and use **mock mode** instead. Open `config.py` and set `use_mock_data = True` before building the container.
+From repo root in another terminal:
 
-#### Step 4 — Build and Start the Frontend
+```bash
+./scripts/start_backend.sh 8000
+```
 
-Run the following command from the `frontend` folder:
+By default, frontend calls `http://127.0.0.1:8000/` (or Docker override; see below).
+
+> You can still run frontend in mock mode with no backend by setting `use_mock_data=True` in `frontend/config.py`.
+
+#### Step 4 — Build and Start Frontend Container
+
+From `frontend/`:
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-**What this does:**
-- Downloads a base Python image (first time only).
-- Installs all required Python libraries inside the container.
-- Starts the Streamlit frontend server.
+First run may take several minutes while Docker downloads base images and dependencies.
 
-> **First run:** This may take **5–10 minutes** because it needs to download and install everything. You will see a lot of log output — this is normal. Subsequent starts are near-instant because Docker caches the work it already did.
+#### Step 5 — Open the App
 
-When you see output similar to:
+Visit:
 
-```
-frontend-1  |   You can now view your Streamlit app in your browser.
-frontend-1  |
-frontend-1  |   URL: http://0.0.0.0:8501
-```
-
-the frontend is ready.
-
-#### Step 5 — Verify It Is Running
-
-Open your web browser and go to:
-
-```
+```text
 http://localhost:8501
 ```
 
-You should see the **Ami onboarding page**. If you see this, the frontend is running correctly.
+#### Stopping / Restarting
 
-#### Connecting to the Backend
+Stop:
 
-By default the Docker container connects to the backend at `http://host.docker.internal:8000/` — this means a backend running on your host machine (outside Docker). If you need to point to a different backend, edit the `BACKEND_ENDPOINT` variable in `docker/docker-compose.yml`:
+```bash
+docker compose -f docker/docker-compose.yml down
+```
+
+Restart:
+
+```bash
+docker compose -f docker/docker-compose.yml up
+```
+
+Rebuild after dependency/code changes:
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
+### Option B: Local Python Setup
+
+#### Prerequisites
+
+- Python 3.13
+- `pip` (or conda)
+
+#### Local Setup (venv)
+
+From repo root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r frontend/requirements.txt
+```
+
+Start frontend (default port 8501):
+
+```bash
+./scripts/start_frontend.sh
+```
+
+Or direct from `frontend/`:
+
+```bash
+streamlit run main.py
+```
+
+Run on a custom frontend port:
+
+```bash
+./scripts/start_frontend.sh 8600
+# or
+FRONTEND_PORT=8600 ./scripts/start_frontend.sh
+```
+
+#### Local Setup (Conda Alternative)
+
+```bash
+conda create -n ami-frontend python=3.13 -y
+conda activate ami-frontend
+pip install -r frontend/requirements.txt
+./scripts/start_frontend.sh
+```
+
+## Backend Connection Behavior
+
+Frontend resolves backend URLs through `frontend/config.py` and environment variables.
+
+- `BACKEND_ENDPOINT`
+  - API base URL used for HTTP calls from `utils/request_api.py`
+  - default: `http://127.0.0.1:8000/`
+- `BACKEND_PUBLIC_ENDPOINT`
+  - browser-facing backend base for rendered media URLs (audio/diagrams)
+  - default: derived from backend endpoint (for Docker, resolves to localhost-friendly URL)
+
+### Docker Defaults
+
+`frontend/docker/docker-compose.yml` sets:
 
 ```yaml
 environment:
-  - BACKEND_ENDPOINT=http://your-backend-host:8000/
+  - BACKEND_ENDPOINT=http://host.docker.internal:8000/
+  - BACKEND_PUBLIC_ENDPOINT=http://localhost:8000/
 ```
 
-#### Stopping the Frontend
+### When to Change These
 
-- **Option 1:** In the terminal where Docker is running, press `Ctrl+C`. This sends a stop signal to the container.
-- **Option 2:** Open a new terminal and run:
-
-  ```bash
-  docker compose -f docker/docker-compose.yml down
-  ```
-
-Both options cleanly shut down the server.
-
-#### Restarting After Stopping
-
-To start the frontend again, run the same command from Step 4:
-
-```bash
-docker compose -f docker/docker-compose.yml up --build
-```
-
-> **Tip:** If you haven't changed any code since the last build, you can drop `--build` to start faster:
-> ```bash
-> docker compose -f docker/docker-compose.yml up
-> ```
-
-#### Rebuilding After Pulling New Code
-
-Whenever you pull new changes from the repository (e.g., via `git pull`), rebuild the container so it picks up the updates:
-
-```bash
-git pull
-docker compose -f docker/docker-compose.yml up --build
-```
-
-#### Troubleshooting
-
-| Problem | Solution |
-|---|---|
-| `docker: command not found` | Docker Desktop is not installed, or its CLI tools are not on your PATH. Reinstall Docker Desktop and restart your terminal. On macOS, if Docker Desktop is installed but the command is still not found, add `export PATH="$HOME/.docker/bin:$PATH"` to your `~/.zshrc` file, then run `source ~/.zshrc` or open a new terminal. |
-| `Cannot connect to the Docker daemon` | Docker Desktop is not running. Open the Docker Desktop application and wait for it to finish starting. |
-| `port 8501 is already in use` | Another application is using port 8501. Stop that application, or change the port in `docker/docker-compose.yml` by editing `"8501:8501"` to e.g. `"8502:8501"` (then access the frontend at `http://localhost:8502`). |
-| Backend 404/500 errors in the UI | Make sure the backend is running and `BACKEND_ENDPOINT` is correct in `docker/docker-compose.yml`. |
-| Build fails with network errors | Check your internet connection. Docker needs to download packages during the first build. |
-| `error during connect: … permission denied` (Linux) | Your user may not be in the `docker` group. Run `sudo usermod -aG docker $USER`, then log out and log back in. |
-
-### Option B: Manual Setup (Conda)
-
-**Prerequisites:**
-- Python 3.13
-- [Conda](https://docs.conda.io/en/latest/miniconda.html)
-
-```bash
-# 1. Create and activate a conda environment
-conda create -n ami-frontend python=3.13 -y
-conda activate ami-frontend
-
-# 2. Install dependencies
-cd frontend
-pip install -r requirements.txt
-```
-
-Then launch the app:
-
-```bash
-# Run against a live backend (default)
-#   Make sure the backend server is up (see ../backend)
-streamlit run main.py
-
-# Or run using mock data (no backend needed)
-#   Edit config.py: set use_mock_data = True
-streamlit run main.py
-```
-
-The app will open at <http://localhost:8501> by default.
+- Backend running on a non-default host/port.
+- Remote backend deployment.
+- Browser cannot load generated media URLs (adjust `BACKEND_PUBLIC_ENDPOINT`).
 
 ## Configuration
 
-All UI-related toggles live in `config.py`:
+`frontend/config.py` currently exposes:
 
-- `backend_endpoint`: Base URL for the backend API (default `http://127.0.0.1:8000/`). Can be overridden with the `BACKEND_ENDPOINT` environment variable.
-- `use_mock_data`: When `True`, the UI serves sample data from `assets/data_example/` and does not call the backend.
-- `use_search`: Allows knowledge drafting to use retrieval/search (sent to backend).
+- `backend_endpoint`
+- `backend_public_endpoint`
+- `use_mock_data`
+- `use_search`
 
-Update these as needed before launching. If you deploy the backend elsewhere, set `backend_endpoint` accordingly.
+Environment variables can override endpoint values:
 
-## Project structure
+```bash
+export BACKEND_ENDPOINT="http://127.0.0.1:8000/"
+export BACKEND_PUBLIC_ENDPOINT="http://127.0.0.1:8000/"
+```
+
+## Mock Mode
+
+Mock mode returns fixture data from `frontend/assets/data_example/` instead of calling backend APIs.
+
+1. Open `frontend/config.py`
+2. Set:
+
+```python
+use_mock_data = True
+```
+
+3. Run frontend:
+
+```bash
+./scripts/start_frontend.sh
+```
+
+## Debug and Transparency Features
+
+- **API Debug Sidebar** (`components/debug_sidebar.py`): shows last request URL/status/payload/response when debug mode is enabled.
+- **Agent Reasoning Panel** (sidebar toggle in `main.py`): displays backend-returned `reasoning` or `trace` payloads when available.
+
+## How It Works
+
+- UI state is stored in Streamlit `st.session_state`.
+- Durable state is backend-owned and retrieved via explicit endpoints (goals, profiles, runtime state, content cache, session activity, analytics).
+- Frontend no longer relies on legacy monolithic user-state persistence.
+
+## API Interface Notes
+
+Many generation/update endpoints support optional model override fields:
+
+- `model_provider`
+- `model_name`
+
+Frontend helpers pass these where applicable and otherwise use backend defaults from `/config` and `/list-llm-models`.
+
+For chatbot requests specifically, the backend supports additive optional controls used by the frontend helper layer:
+
+- `use_vector_retrieval`, `use_web_search`, `use_media_search`
+- `allow_preference_updates`
+- contextual fields: `user_id`, `goal_id`, `session_index`, `learner_information`
+- `return_metadata` (structured response mode with profile-update metadata)
+
+## Project Structure
 
 ```text
 frontend/
-  main.py                 # Streamlit entry. Builds navigation and loads CSS/logo
-  config.py               # Frontend configuration flags and API base URL
-  requirements.txt        # Python dependencies (Streamlit + extras)
-  .streamlit/config.toml  # Streamlit theme/layout defaults
+  main.py                    # Streamlit entrypoint, auth gate, navigation
+  config.py                  # Endpoint and mode flags
+  requirements.txt           # Dependencies
+  .streamlit/config.toml     # Streamlit defaults (theme/server)
 
-  docker/                 # Docker setup
+  pages/
+    onboarding.py            # Persona + goal input; FSLSM profile inferred
+    skill_gap.py             # Gap identification and schedule handoff
+    goal_management.py       # Goal CRUD and activation
+    learning_path.py         # Path display + adaptation controls
+    knowledge_document.py    # Learning content, audio, media, quizzes, session completion
+    learner_profile.py       # Profile views; separate edit flows for FSLSM vs. learner info
+    dashboard.py             # Analytics widgets
+
+  components/                # Reusable UI pieces (chatbot, gap display, topbar, debug)
+  utils/                     # API client, state management, parsing/format helpers
+  assets/                    # CSS, JS, avatar, mock data
+  docker/
     Dockerfile
     docker-compose.yml
-    .dockerignore
-
-  assets/                 # Static assets and mock data
-    css/                  # UI styles
-    data_example/         # JSON fixtures for mock mode
-
-  components/             # Reusable Streamlit components (chatbot, time tracking, etc.)
-  pages/                  # Multi-page app: onboarding, learning path, knowledge document, dashboard, ...
-  utils/                  # Helpers: API requests, formatting, PDF, state management, colors
 ```
 
-Key pages:
+## Backend Requirements for Full (Non-Mock) Flow
 
-- `pages/onboarding.py`: Collect learner info and set initial goal.
-- `pages/learning_path.py`: View, (re)schedule, and navigate sessions.
-- `pages/knowledge_document.py`: In-session reading experience with a document TOC, pagination, and quizzes.
-- `pages/goal_management.py`: Manage/refine goals.
-- `pages/dashboard.py`: Basic analytics overview.
+Ensure backend is running and reachable at `BACKEND_ENDPOINT`, with these endpoint groups available:
 
-## How it works
+- Auth: `/auth/*`
+- Goals/Profile: `/goals/*`, `/profile/*`, `/sync-profile/*`
+- Learning runtime/content: `/goal-runtime-state/*`, `/learning-content/*`, `/session-activity`, `/complete-session`
+- Generation/planning: `/identify-skill-gap-with-info`, `/schedule-learning-path-agentic`, `/generate-learning-content`, `/chat-with-tutor`
+- Analytics: `/dashboard-metrics/*`, `/behavioral-metrics/*`
 
-- UI state is stored in Streamlit `st.session_state`. Domain state is persisted through explicit backend resources such as goals, learning-content cache, session activity, runtime state, and dashboard metrics endpoints.
-- Backend calls are made with `httpx` via `utils/request_api.py` using endpoints under `config.backend_endpoint`.
-- When `use_mock_data=True`, the app reads JSON fixtures from `assets/data_example/` instead of calling the backend.
-- The knowledge document page supports section-by-section pagination, a clickable sidebar TOC, and auto-scroll to anchors.
+Backend docs: `http://localhost:8000/docs`
 
-## Common tasks
+## Common Tasks
 
-- Switch to mock mode:
+### Start backend and frontend together (two terminals)
 
-  1. Open `config.py`
-  2. Set `use_mock_data = True`
-  3. Run `streamlit run main.py`
+Terminal 1 (repo root):
 
-- Point frontend to a remote backend:
+```bash
+./scripts/start_backend.sh 8000
+```
 
-  1. Open `config.py`
-  2. Set `backend_endpoint = "http://<host>:<port>/"`
+Terminal 2 (repo root):
 
-- Change default theme/layout:
+```bash
+./scripts/start_frontend.sh
+```
 
-  - Edit `.streamlit/config.toml` (e.g., theme colors, base font).
+### Point frontend to remote backend
 
-## Development tips
+Set in environment:
 
-- Streamlit auto-reloads on file save. Keep logs visible in the terminal.
-- Keep new code in `components/` when it's reusable, and page-specific logic under `pages/`.
-- Prefer small, focused functions in `utils/` for API calls and formatting.
-- Avoid heavy work on every rerun. Cache with `@st.cache_data` or `@st.cache_resource` when safe.
+```bash
+export BACKEND_ENDPOINT="http://<host>:<port>/"
+export BACKEND_PUBLIC_ENDPOINT="http://<host>:<port>/"
+./scripts/start_frontend.sh
+```
+
+### Reset to mock exploration
+
+```python
+# frontend/config.py
+use_mock_data = True
+```
+
+## Troubleshooting
+
+| Problem | Likely Cause | Fix |
+|---|---|---|
+| App opens but actions fail | Backend unavailable or wrong endpoint | Start backend on `8000` or update `BACKEND_ENDPOINT` |
+| Media/audio links fail in browser | Wrong public backend URL | Set `BACKEND_PUBLIC_ENDPOINT` to browser-reachable host |
+| `docker: command not found` | Docker not installed/available in PATH | Install Docker Desktop and restart terminal |
+| `Cannot connect to Docker daemon` | Docker Desktop not running | Start Docker Desktop fully |
+| Port `8501` in use | Another process on same port | Run `./scripts/start_frontend.sh 8600` or update compose mapping |
+| Login succeeds but no goals appear | Backend data missing/cleared for user | Check backend `/goals/{user_id}` and onboarding completion |
+| Model list looks wrong/empty | Backend model config issue | Check backend `/list-llm-models` and backend config/env |
+
+## Development Tips
+
+- Streamlit reruns on every interaction; keep heavy work in backend APIs.
+- Put reusable UI in `components/`; page-specific orchestration in `pages/`.
+- Keep API shape handling centralized in `utils/request_api.py`.
+- Validate UI against both modes: live backend and `use_mock_data=True`.
 
 ## License
 

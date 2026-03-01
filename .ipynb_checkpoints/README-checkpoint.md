@@ -14,7 +14,7 @@ The system is grounded in two pedagogical frameworks:
 - **Felder-Silverman Learning Style Model (FSLSM)**: characterizes each learner across four dimensions (active/reflective, sensing/intuitive, visual/verbal, sequential/global) to drive content format and presentation
 - **SOLO Taxonomy**: classifies cognitive complexity across five levels (pre-structural → extended abstract) to calibrate content difficulty and quiz depth
 
-Problem: adaptive tutoring systems typically collapse content planning, skill-gap detection, and response generation into a single pass. Ami introduces tighter control loops — parse/critique/refine steps, quality evaluators, targeted repair, ethics/bias auditing, and request-time tool routing — to improve reliability and personalization.
+Ami's core problem: adaptive tutoring systems typically collapse content planning, skill-gap detection, and response generation into a single pass. Ami introduces tighter control loops — parse/critique/refine steps, quality evaluators, targeted repair, ethics/bias auditing, and request-time tool routing — to improve reliability and personalization.
 
 This repo contains:
 - `backend/`: FastAPI backend (auth, goals/profiles, reflexion pipelines, content generation with quality gates, session runtime, analytics, session prefetch)
@@ -40,12 +40,13 @@ Implemented by `schedule_learning_path_agentic` with bounded refinement iteratio
 
 ### 3. Content Generation Quality Pipeline
 
-The orchestrator runs a staged pipeline with two embedded reflexion loops:
+The orchestrator runs a staged pipeline:
 
 `explore → draft → [deterministic + LLM draft checkpoints] → targeted draft repair → integrate → final quality checkpoint → targeted repair / fallback`
 
-- **Draft reflexion loop**: `KnowledgeDraftEvaluator` evaluates each knowledge point draft; failed sections are repaired before integration
-- **Integration reflexion loop**: `IntegratedDocumentEvaluator` evaluates the full document; targeted repair (`integrator_only` or `section_redraft`) runs on failure, with a fallback path when the quality budget is exhausted
+Key additions over the baseline:
+- Draft evaluated by `KnowledgeDraftEvaluator` before integration
+- Final integrated document evaluated by `IntegratedDocumentEvaluator`
 - FSLSM-aware content adaptation (`fslsm_adaptation.py`) tailors format per learner style
 - Multi-modal enrichment: TTS audio generation, media search (videos/diagrams/podcasts), ASCII diagram rendering
 
@@ -65,17 +66,7 @@ Ami (the chatbot tutor) assembles tools at request time based on per-request tog
 
 Implemented through `AITutorChatbot._build_runtime_tools` and `create_ai_tutor_tools`.
 
-### 5. Adaptive Learner Profile Updates
-
-The learner profile is not static after onboarding — it evolves throughout the learning lifecycle through three update channels:
-
-- **Manual edit**: The learner explicitly adjusts FSLSM dimensions via sliders (`update_learning_preferences_with_llm` → `/update-learning-preferences`) or updates background/bio via text and optional resume re-upload (`update_learner_information_with_llm` → `/update-learner-information`). These two paths are scoped separately to prevent unintended cross-field changes.
-- **Quiz-driven cognitive progression**: Mastery evaluation outcomes drive `update_cognitive_status_with_llm`, tracking SOLO level advancement session-over-session.
-- **Chatbot signal-gated updates**: When Ami detects a strong learning preference signal during tutoring (e.g., "I prefer visual explanations"), the `update_learning_preferences_from_signal` tool applies a preference update — but only when signal confidence and user/goal context are both present.
-
-Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the chatbot tool `update_learning_preferences_from_signal`.
-
-### 6. Session Prefetch
+### 5. Session Prefetch
 
 `ContentPrefetchService` (`services/content_prefetch.py`) prefetches upcoming learning sessions in the background while a learner works through their current session. This reduces wait time at session transitions without blocking the current session flow.
 
@@ -95,7 +86,7 @@ Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the 
 
 2. **`learner_profiler`**
 
-   Learner profile creation and multi-channel updates. FSLSM-driven adaptation utilities; scoped update endpoints (FSLSM dimensions vs. learner information updated separately); quiz-driven SOLO cognitive status progression; signal-gated preference updates from chatbot interactions; and fairness validation.
+   Learner profile creation and updates. FSLSM-driven adaptation utilities, scoped update endpoints (FSLSM dimensions vs. learner information updated separately), and fairness validation.
 
 3. **`learning_plan_generator`**
 
