@@ -1,6 +1,6 @@
 <div align="center">
   <p align="center">
-    <img src="resources/logo.png" alt="Ami Logo" width="200"/>
+    <img src="resources/Logo.png" alt="Ami Logo" width="200"/>
   </p> 
    <p><b>Ami: Adaptive Mentoring Intelligence</b></p>
   <p>A cognitive-style adaptive AI tutor — an enhanced fork of GenMentor (WWW 2025)</p>
