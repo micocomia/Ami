@@ -5,7 +5,9 @@ import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ApiToastBridge } from '@/components/ApiToastBridge';
-import { HasEnteredGoalProvider } from '@/context/HasEnteredGoalContext';
+import { AuthProvider } from '@/context/AuthContext';
+import { GoalsProvider } from '@/context/GoalsContext';
+import { AppStartup } from '@/components/AppStartup';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -20,12 +22,15 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <HasEnteredGoalProvider>
-        <ToastProvider>
-          <ApiToastBridge />
-          <RouterProvider router={router} />
-        </ToastProvider>
-      </HasEnteredGoalProvider>
+      <AuthProvider>
+        <GoalsProvider>
+          <ToastProvider>
+            <ApiToastBridge />
+            <AppStartup />
+            <RouterProvider router={router} />
+          </ToastProvider>
+        </GoalsProvider>
+      </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

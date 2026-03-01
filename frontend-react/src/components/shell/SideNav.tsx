@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
-import { useHasEnteredGoal } from '@/context/HasEnteredGoalContext';
+import { useGoalsContext } from '@/context/GoalsContext';
 
 interface NavSubItem {
   to: string;
@@ -11,10 +11,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: React.ReactNode;
-  badge?: number;
-  /** Only show when user has entered a goal */
   showWhenHasGoal?: boolean;
-  /** Sub-navigation (e.g. Analytics → Overview, Active Goal) */
   children?: NavSubItem[];
 }
 
@@ -40,21 +37,12 @@ const NAV_ITEMS: NavItem[] = [
   {
     to: '/learning-path',
     label: 'Learning Path',
+    showWhenHasGoal: true,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
       </svg>
     ),
-  },
-  {
-    to: '/learning-session',
-    label: 'Sessions',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-      </svg>
-    ),
-    badge: 24,
   },
   {
     to: '/profile',
@@ -68,6 +56,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     to: '/analytics',
     label: 'Analytics',
+    showWhenHasGoal: true,
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
@@ -85,10 +74,11 @@ interface SideNavProps {
 }
 
 export function SideNav({ collapsed = false }: SideNavProps) {
-  const { hasEnteredGoal } = useHasEnteredGoal();
+  const { goals } = useGoalsContext();
+  const hasGoal = goals.length > 0;
   const location = useLocation();
   const pathname = location.pathname;
-  const navItems = NAV_ITEMS.filter((item) => !item.showWhenHasGoal || hasEnteredGoal);
+  const navItems = NAV_ITEMS.filter((item) => !item.showWhenHasGoal || hasGoal);
 
   return (
     <aside
@@ -108,7 +98,7 @@ export function SideNav({ collapsed = false }: SideNavProps) {
       {/* Navigation */}
       <nav className="flex-1 py-3 overflow-y-auto">
         <ul className="flex flex-col gap-0.5 px-2">
-          {navItems.map(({ to, label, icon, badge, children }) => {
+          {navItems.map(({ to, label, icon, children }) => {
             const isAnalyticsGroup = label === 'Analytics' && children?.length;
             const isAnalyticsActive = pathname === '/analytics' || pathname === '/analytics/active-goal';
 
@@ -176,39 +166,12 @@ export function SideNav({ collapsed = false }: SideNavProps) {
                 >
                   {icon}
                   {!collapsed && label}
-                  {!collapsed && badge != null && (
-                    <span className="ml-auto bg-slate-200 text-slate-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                      {badge}
-                    </span>
-                  )}
                 </NavLink>
               </li>
             );
           })}
         </ul>
       </nav>
-
-      {/* Bottom: Example page link */}
-      <div className="px-2 pb-3 mt-auto border-t border-slate-200 pt-3">
-        <NavLink
-          to="/example/refine-goal"
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-              isActive
-                ? 'bg-sidebar-active text-slate-900'
-                : 'text-slate-600 hover:bg-sidebar-hover hover:text-slate-800',
-              collapsed && 'justify-center px-0',
-            )
-          }
-          title="API Example"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
-          </svg>
-          {!collapsed && 'API Example'}
-        </NavLink>
-      </div>
     </aside>
   );
 }

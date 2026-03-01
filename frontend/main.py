@@ -108,15 +108,16 @@ else:
 skill_gaps = st.Page("pages/skill_gap.py", title="Skill Gap", icon=":material/insights:", default=False, url_path="skill_gap")
 learner_profile = st.Page("pages/learner_profile.py", title="My Profile", icon=":material/person:", default=False, url_path="learner_profile")
 goal_management = st.Page("pages/goal_management.py", title="Goal Management", icon=":material/flag:", default=False, url_path="goal_management")
+knowledge_document = st.Page("pages/knowledge_document.py", title="Knowledge Document", icon=":material/book_2:", default=False, url_path="knowledge_document")
 dashboard = st.Page("pages/dashboard.py", title="Analytics Dashboard", icon=":material/browse:", default=False, url_path="dashboard")
 
 # Learning Analytics Dashboard
 if not st.session_state["if_complete_onboarding"]:
     nav_position = "sidebar"
-    pg = st.navigation({"Ami": [onboarding, skill_gaps, learning_path]}, position="hidden", expanded=True)
+    pg = st.navigation({"Ami": [onboarding, skill_gaps, learning_path, knowledge_document]}, position="hidden", expanded=True)
 else:
     nav_position = "sidebar"
-    pg = st.navigation({"Ami": [goal_management, learning_path, learner_profile, dashboard]}, position=nav_position, expanded=True)
+    pg = st.navigation({"Ami": [goal_management, learning_path, knowledge_document, learner_profile, dashboard]}, position=nav_position, expanded=True)
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.get('userId', '')}**")
         if st.button("Logout", icon=":material/exit_to_app:"):

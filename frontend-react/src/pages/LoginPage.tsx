@@ -1,19 +1,27 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Button, InputField } from '@/components/ui';
-
-const DEMO_EMAIL = 'demo@genmentor.ai';
-const DEMO_PASSWORD = 'demo';
+import { useLogin } from '@/api/endpoints/auth';
+import { useAuthContext } from '@/context/AuthContext';
 
 export function LoginPage() {
-  const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const { login } = useAuthContext();
+  const loginMutation = useLogin();
 
-  const loginWithDemo = () => {
-    setEmail(DEMO_EMAIL);
-    setPassword(DEMO_PASSWORD);
-    navigate('/dashboard');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!username.trim() || !password) return;
+    try {
+      const data = await loginMutation.mutateAsync({ username: username.trim(), password });
+      login(data);
+      // Navigation handled by RootRedirect after auth state updates
+    } catch {
+      setError('Invalid username or password. Please try again.');
+    }
   };
 
   return (
@@ -25,19 +33,13 @@ export function LoginPage() {
         </p>
       </div>
 
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          // TODO: wire up useLogin
-        }}
-      >
+      <form className="space-y-4" onSubmit={handleSubmit}>
         <InputField
-          label="Email"
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          label="Username"
+          type="text"
+          placeholder="your_username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
         />
         <InputField
@@ -48,16 +50,9 @@ export function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        <Button type="submit" className="w-full">
-          Sign in
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full"
-          onClick={loginWithDemo}
-        >
-          Use demo account
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+          {loginMutation.isPending ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
 

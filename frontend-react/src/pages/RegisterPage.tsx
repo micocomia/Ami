@@ -1,11 +1,31 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, InputField } from '@/components/ui';
+import { useRegister } from '@/api/endpoints/auth';
+import { useAuthContext } from '@/context/AuthContext';
 
 export function RegisterPage() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const { login } = useAuthContext();
+  const registerMutation = useRegister();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    if (username.trim().length < 3) { setError('Username must be at least 3 characters.'); return; }
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    try {
+      const data = await registerMutation.mutateAsync({ username: username.trim(), password });
+      login(data);
+      // Navigation handled by RootRedirect
+    } catch {
+      setError('Registration failed. Username may already be taken.');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -16,25 +36,19 @@ export function RegisterPage() {
         </p>
       </div>
 
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          // TODO: wire up useRegister
-        }}
-      >
+      <form className="space-y-4" onSubmit={handleSubmit}>
         <InputField
-          label="Email"
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          label="Username"
+          type="text"
+          placeholder="choose_a_username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
         />
         <InputField
           label="Password"
           type="password"
-          placeholder="At least 8 characters"
+          placeholder="At least 6 characters"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
@@ -48,8 +62,9 @@ export function RegisterPage() {
           error={confirm && confirm !== password ? 'Passwords do not match' : undefined}
           required
         />
-        <Button type="submit" className="w-full">
-          Create account
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
+          {registerMutation.isPending ? 'Creating account…' : 'Create account'}
         </Button>
       </form>
 
