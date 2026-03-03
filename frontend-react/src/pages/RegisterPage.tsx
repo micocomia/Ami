@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button, InputField } from '@/components/ui';
 import { useRegister } from '@/api/endpoints/auth';
 import { useAuthContext } from '@/context/AuthContext';
@@ -10,6 +10,7 @@ export function RegisterPage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const { login } = useAuthContext();
+  const navigate = useNavigate();
   const registerMutation = useRegister();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,7 +22,7 @@ export function RegisterPage() {
     try {
       const data = await registerMutation.mutateAsync({ username: username.trim(), password });
       login(data);
-      // Navigation handled by RootRedirect
+      navigate('/', { replace: true }); // RootRedirect at '/' handles onboarding vs learning-path
     } catch {
       setError('Registration failed. Username may already be taken.');
     }

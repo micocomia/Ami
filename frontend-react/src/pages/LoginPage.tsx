@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button, InputField } from '@/components/ui';
 import { useLogin } from '@/api/endpoints/auth';
 import { useAuthContext } from '@/context/AuthContext';
@@ -9,6 +9,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login } = useAuthContext();
+  const navigate = useNavigate();
   const loginMutation = useLogin();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -18,7 +19,7 @@ export function LoginPage() {
     try {
       const data = await loginMutation.mutateAsync({ username: username.trim(), password });
       login(data);
-      // Navigation handled by RootRedirect after auth state updates
+      navigate('/', { replace: true }); // RootRedirect at '/' routes to onboarding or learning-path
     } catch {
       setError('Invalid username or password. Please try again.');
     }
