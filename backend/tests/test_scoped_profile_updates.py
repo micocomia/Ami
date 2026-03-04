@@ -210,6 +210,194 @@ class TestLearnerInformationUpdatePreservesEverythingElse:
         assert result["behavioral_patterns"] == SAMPLE_PROFILE["behavioral_patterns"]
 
 
+class TestCognitiveUpdateGuardrails:
+    def test_premature_mastery_is_reverted(self):
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["cognitive_status"]["in_progress_skills"].append(
+            {
+                "name": "Python",
+                "required_proficiency_level": "advanced",
+                "current_proficiency_level": "unlearned",
+            }
+        )
+
+        updated = copy.deepcopy(profile)
+        updated["cognitive_status"]["mastered_skills"].append(
+            {"name": "Python", "proficiency_level": "beginner"}
+        )
+        updated["cognitive_status"]["in_progress_skills"] = [
+            s for s in updated["cognitive_status"]["in_progress_skills"] if s["name"] != "Python"
+        ]
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_cognitive_status_with_llm(
+                mock_llm,
+                profile,
+                {
+                    "id": "Session X",
+                    "if_learned": True,
+                    "desired_outcome_when_completed": [{"name": "Python", "level": "beginner"}],
+                },
+            )
+
+        mastered_names = {s["name"] for s in result["cognitive_status"]["mastered_skills"]}
+        assert "Python" not in mastered_names
+
+        in_progress = [
+            s for s in result["cognitive_status"]["in_progress_skills"] if s["name"] == "Python"
+        ]
+        assert len(in_progress) == 1
+        assert in_progress[0]["required_proficiency_level"] == "advanced"
+        assert in_progress[0]["current_proficiency_level"] == "beginner"
+
+    def test_legitimate_mastery_is_preserved(self):
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+
+        updated = copy.deepcopy(profile)
+        updated["cognitive_status"]["mastered_skills"].append(
+            {"name": "Data Analysis", "proficiency_level": "intermediate"}
+        )
+        updated["cognitive_status"]["in_progress_skills"] = [
+            s for s in updated["cognitive_status"]["in_progress_skills"]
+            if s["name"] != "Data Analysis"
+        ]
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_cognitive_status_with_llm(
+                mock_llm,
+                profile,
+                {
+                    "id": "Session 2",
+                    "if_learned": True,
+                    "desired_outcome_when_completed": [{"name": "Data Analysis", "level": "intermediate"}],
+                },
+            )
+
+        mastered_names = {s["name"] for s in result["cognitive_status"]["mastered_skills"]}
+        in_progress_names = {s["name"] for s in result["cognitive_status"]["in_progress_skills"]}
+        assert "Data Analysis" in mastered_names
+        assert "Data Analysis" not in in_progress_names
+
+    def test_partial_completion_does_not_create_duplicate_in_progress(self):
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["cognitive_status"]["in_progress_skills"].append(
+            {
+                "name": "Python",
+                "required_proficiency_level": "advanced",
+                "current_proficiency_level": "unlearned",
+            }
+        )
+
+        updated = copy.deepcopy(profile)
+        updated["cognitive_status"]["mastered_skills"].append(
+            {"name": "Python", "proficiency_level": "beginner"}
+        )
+        updated["cognitive_status"]["in_progress_skills"] = [
+            s if s["name"] != "Python" else {
+                "name": "Python",
+                "required_proficiency_level": "advanced",
+                "current_proficiency_level": "unlearned",
+            }
+            for s in updated["cognitive_status"]["in_progress_skills"]
+        ]
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_cognitive_status_with_llm(
+                mock_llm,
+                profile,
+                {
+                    "id": "Session Y",
+                    "if_learned": True,
+                    "desired_outcome_when_completed": [{"name": "Python", "level": "beginner"}],
+                },
+            )
+
+        in_progress = [
+            s for s in result["cognitive_status"]["in_progress_skills"] if s["name"] == "Python"
+        ]
+        mastered_names = {s["name"] for s in result["cognitive_status"]["mastered_skills"]}
+        assert len(in_progress) == 1
+        assert in_progress[0]["current_proficiency_level"] == "beginner"
+        assert "Python" not in mastered_names
+
+    def test_guardrail_uses_normalized_skill_name_matching(self):
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["cognitive_status"]["in_progress_skills"].append(
+            {
+                "name": "Data Analysis",
+                "required_proficiency_level": "advanced",
+                "current_proficiency_level": "unlearned",
+            }
+        )
+
+        updated = copy.deepcopy(profile)
+        updated["cognitive_status"]["mastered_skills"].append(
+            {"name": "data-analysis!!", "proficiency_level": "beginner"}
+        )
+        updated["cognitive_status"]["in_progress_skills"] = [
+            s for s in updated["cognitive_status"]["in_progress_skills"]
+            if s["name"] != "Data Analysis"
+        ]
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_cognitive_status_with_llm(
+                mock_llm,
+                profile,
+                {
+                    "id": "Session Z",
+                    "if_learned": True,
+                    "desired_outcome_when_completed": [{"name": "  Data   Analysis  ", "level": "beginner"}],
+                },
+            )
+
+        in_progress = [
+            s for s in result["cognitive_status"]["in_progress_skills"] if s["name"] == "Data Analysis"
+        ]
+        mastered_names = {s["name"] for s in result["cognitive_status"]["mastered_skills"]}
+        assert len(in_progress) == 1
+        assert in_progress[0]["current_proficiency_level"] == "beginner"
+        assert "data-analysis!!" not in mastered_names
+
+    def test_guardrail_applies_only_when_if_learned_true(self):
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["cognitive_status"]["in_progress_skills"].append(
+            {
+                "name": "Python",
+                "required_proficiency_level": "advanced",
+                "current_proficiency_level": "unlearned",
+            }
+        )
+
+        updated = copy.deepcopy(profile)
+        updated["cognitive_status"]["mastered_skills"].append(
+            {"name": "Python", "proficiency_level": "beginner"}
+        )
+        updated["cognitive_status"]["in_progress_skills"] = [
+            s for s in updated["cognitive_status"]["in_progress_skills"] if s["name"] != "Python"
+        ]
+
+        mock_llm = MagicMock()
+        with patch.object(AdaptiveLearnerProfiler, "invoke", return_value=updated):
+            result = update_cognitive_status_with_llm(
+                mock_llm,
+                profile,
+                {
+                    "id": "Session N",
+                    "if_learned": False,
+                    "desired_outcome_when_completed": [{"name": "Python", "level": "beginner"}],
+                },
+            )
+
+        mastered_names = {s["name"] for s in result["cognitive_status"]["mastered_skills"]}
+        in_progress_names = {s["name"] for s in result["cognitive_status"]["in_progress_skills"]}
+        assert "Python" in mastered_names
+        assert "Python" not in in_progress_names
+
+
 class TestPayloadValidation:
     def test_cognitive_payload_requires_fields(self):
         """CognitiveUpdatePayload should reject missing required fields."""

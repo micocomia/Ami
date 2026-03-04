@@ -131,6 +131,7 @@ def _build_baseline_skill_levels(learner_profile: Any) -> Dict[str, int]:
 
 def build_deterministic_solo_audit(learner_profile: Any, learning_path: Any) -> Dict[str, Any]:
     current_levels = _build_baseline_skill_levels(learner_profile)
+    initial_levels = dict(current_levels)  # snapshot before sessions advance the levels
     baseline_levels = {
         skill: SOLO_LEVEL_NAMES[level] for skill, level in sorted(current_levels.items(), key=lambda item: item[0])
     }
@@ -180,6 +181,8 @@ def build_deterministic_solo_audit(learner_profile: Any, learning_path: Any) -> 
             # Same-level/downward transitions are allowed; keep highest reached level for future checks.
             current_levels[normalized_skill] = max(from_value, to_value)
 
+    coverage_gaps = _build_coverage_gaps(learner_profile, current_levels, initial_levels)
+
     return {
         "policy": "No skill may advance by more than one SOLO level in a single session step.",
         "level_order": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
@@ -188,6 +191,9 @@ def build_deterministic_solo_audit(learner_profile: Any, learning_path: Any) -> 
         "violations": violations,
         "violation_count": len(violations),
         "has_violations": bool(violations),
+        "coverage_gaps": coverage_gaps,
+        "coverage_gap_count": len(coverage_gaps),
+        "has_coverage_gaps": bool(coverage_gaps),
     }
 
 
@@ -266,6 +272,54 @@ def _build_violation_directives(violations: Sequence[Mapping[str, Any]]) -> str:
     )
 
 
+def _build_coverage_gaps(
+    learner_profile: Any,
+    post_session_levels: Dict[str, int],
+    initial_levels: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    """Check that the path reaches required_proficiency_level for each in_progress skill."""
+    if not isinstance(learner_profile, Mapping):
+        return []
+    cognitive_status = learner_profile.get("cognitive_status", {})
+    if not isinstance(cognitive_status, Mapping):
+        return []
+
+    in_progress_skills = cognitive_status.get("in_progress_skills", [])
+    if not isinstance(in_progress_skills, Sequence) or isinstance(in_progress_skills, (str, bytes)):
+        return []
+
+    gaps: List[Dict[str, Any]] = []
+    for skill in in_progress_skills:
+        if not isinstance(skill, Mapping):
+            continue
+        raw_name = skill.get("name")
+        normalized = _normalize_skill_name(raw_name)
+        if not normalized:
+            continue
+        required_level_name = _coerce_level_name(
+            skill.get("required_proficiency_level"), default="beginner"
+        )
+        required_value = SOLO_LEVELS[required_level_name]
+        initial_value = initial_levels.get(normalized, SOLO_LEVELS["unlearned"])
+        # Only flag if advancement is actually needed
+        if required_value <= initial_value:
+            continue
+        reached_value = post_session_levels.get(normalized, initial_value)
+        if reached_value < required_value:
+            gaps.append({
+                "skill": str(raw_name or "").strip(),
+                "normalized_skill": normalized,
+                "current_level": SOLO_LEVEL_NAMES[initial_value],
+                "required_level": required_level_name,
+                "reached_level": SOLO_LEVEL_NAMES[reached_value],
+                "missing_levels": [
+                    SOLO_LEVEL_NAMES[lvl]
+                    for lvl in range(reached_value + 1, required_value + 1)
+                ],
+            })
+    return gaps
+
+
 def reconcile_feedback_with_solo_audit(
     feedback: LearnerPlanFeedback,
     solo_audit: Mapping[str, Any],
@@ -277,6 +331,8 @@ def reconcile_feedback_with_solo_audit(
     directives = str(data.get("improvement_directives", "") or "").strip()
     violations = solo_audit.get("violations", [])
     violation_count = int(solo_audit.get("violation_count", 0) or 0)
+    coverage_gaps = solo_audit.get("coverage_gaps", [])
+    coverage_gap_count = int(solo_audit.get("coverage_gap_count", 0) or 0)
 
     if not isinstance(violations, list):
         violations = []
@@ -336,6 +392,26 @@ def reconcile_feedback_with_solo_audit(
                 "Insert bridging sessions so each skill advances by at most one SOLO level per session."
             )
             had_override = True
+
+    if coverage_gap_count > 0 and data.get("is_acceptable") is not False:
+        data["is_acceptable"] = False
+        had_override = True
+        for gap in coverage_gaps[:2]:
+            skill = gap.get("skill", "a skill")
+            required = gap.get("required_level", "?")
+            reached = gap.get("reached_level", "?")
+            issue = f"Path for '{skill}' only reaches '{reached}' but required level is '{required}'"
+            if issue not in issues:
+                issues.append(issue)
+        if not directives:
+            gap_details = "; ".join(
+                f"'{g.get('skill')}' needs {' → '.join(g.get('missing_levels', []))}"
+                for g in coverage_gaps[:2]
+            )
+            directives = (
+                f"Add sessions to reach the required proficiency level for: {gap_details}. "
+                "Advance one SOLO level per session."
+            )
 
     issues = _dedupe_nonempty(issues)
     if len(issues) > 3:

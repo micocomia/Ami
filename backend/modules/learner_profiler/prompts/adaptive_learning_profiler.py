@@ -152,7 +152,8 @@ Also update learner_information to reflect newly mastered skills or significant 
 RULES:
 - You MUST preserve learning_preferences and behavioral_patterns EXACTLY as they are in the previous profile. Copy them verbatim.
 - Only update cognitive_status (overall_progress, mastered_skills, in_progress_skills).
-- If if_learned is True and the desired_outcome level meets or exceeds the required level, move the skill to mastered_skills.
+- If if_learned is True and the session's desired_outcome level for a skill EQUALS OR EXCEEDS that skill's required_proficiency_level in in_progress_skills, move the skill from in_progress_skills to mastered_skills.
+- If if_learned is True but the session's desired_outcome level for a skill is BELOW the skill's required_proficiency_level, update that skill's current_proficiency_level in in_progress_skills to the session's desired_outcome level. Do NOT move it to mastered_skills.
 - Recalculate overall_progress based on the updated skill statuses.
 - Update learner_information to briefly note any newly mastered skills or significant progress (e.g., append "Has now mastered Python Basics." if the learner just mastered that skill). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to cognitive progress.
 

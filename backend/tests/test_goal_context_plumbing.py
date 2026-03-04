@@ -375,37 +375,3 @@ def test_removed_content_generation_endpoints_return_404():
         assert client.post(endpoint, json={}).status_code == 404
 
 
-def test_draft_knowledge_point_endpoint_still_available():
-    from main import app
-
-    payload = {
-        "learner_profile": "{}",
-        "learning_path": "{}",
-        "learning_session": "{}",
-        "knowledge_points": '[{"name":"Variables","role":"foundational","solo_level":"beginner"}]',
-        "knowledge_point": '{"name":"Variables","role":"foundational","solo_level":"beginner"}',
-        "use_search": False,
-    }
-    with patch("main.get_llm", return_value=MagicMock()), \
-         patch("main.draft_knowledge_point_with_llm", return_value={"title": "Draft", "content": "Body"}):
-        client = TestClient(app)
-        response = client.post("/draft-knowledge-point", json=payload)
-    assert response.status_code == 200
-    assert response.json()["knowledge_draft"]["title"] == "Draft"
-
-
-def test_draft_knowledge_point_endpoint_rejects_invalid_shape():
-    from main import app
-
-    payload = {
-        "learner_profile": "{}",
-        "learning_path": "{}",
-        "learning_session": "{}",
-        "knowledge_points": '[{"name":"Variables","type":"foundational"}]',
-        "knowledge_point": '{"name":"Variables","type":"foundational"}',
-        "use_search": False,
-    }
-    with patch("main.get_llm", return_value=MagicMock()):
-        client = TestClient(app)
-        response = client.post("/draft-knowledge-point", json=payload)
-    assert response.status_code == 422

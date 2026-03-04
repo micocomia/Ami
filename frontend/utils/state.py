@@ -37,13 +37,9 @@ def initialize_session_state():
         st.session_state["backend_public_endpoint"] = config.backend_public_endpoint
 
     if "available_models" not in st.session_state:
-        from utils.request_api import get_available_models, get_app_config
-        models = get_available_models(st.session_state["backend_endpoint"])
-        if models:
-            st.session_state["available_models"] = [f"{m.get('model_provider', '')}/{m.get('model_name', '')}" for m in models]
-        else:
-            cfg = get_app_config()
-            st.session_state["available_models"] = [cfg["default_llm_type"]]
+        from utils.request_api import check_backend, get_app_config
+        cfg = check_backend(st.session_state["backend_endpoint"]) or get_app_config()
+        st.session_state["available_models"] = [cfg["default_llm_type"]] if cfg else ["openai/gpt-4o"]
 
     if "llm_type" not in st.session_state:
         if len(st.session_state["available_models"]) > 0:

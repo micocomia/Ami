@@ -127,39 +127,6 @@ def test_update_learning_preferences_clears_only_old_sign_key(mock_get_llm, mock
     assert "fslsm_perception" in budget
 
 
-@patch("main.update_learner_profile_with_llm")
-@patch("main.get_llm")
-def test_update_learner_profile_clears_only_old_sign_key(mock_get_llm, mock_update, client):
-    user_id = "alice"
-    old_profile = _profile(-0.8)
-    new_profile = _profile(1.0)
-    goal_id = _seed_goal_with_state(user_id, old_profile)
-    mock_get_llm.return_value = MagicMock()
-    mock_update.return_value = new_profile
-
-    response = client.post(
-        "/update-learner-profile",
-        json={
-            "learner_profile": str(old_profile),
-            "learner_interactions": "{}",
-            "learner_information": "",
-            "session_information": "{}",
-            "user_id": user_id,
-            "goal_id": goal_id,
-        },
-    )
-
-    assert response.status_code == 200
-    state = (store.get_goal(user_id, goal_id) or {}).get("adaptation_state", {})
-    windows = state.get("evidence_windows", {})
-    budget = state.get("daily_movement_budget", {})
-    assert "fslsm_input:negative" not in windows
-    assert "fslsm_input:positive" in windows
-    assert "fslsm_perception:negative" in windows
-    assert "fslsm_input" not in budget
-    assert "fslsm_perception" in budget
-
-
 @patch("main.update_learning_preferences_with_llm")
 @patch("main.get_llm")
 def test_submit_content_feedback_clears_only_old_sign_key(mock_get_llm, mock_update, client):

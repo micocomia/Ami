@@ -75,15 +75,6 @@ export interface PersonasResponse {
   personas: Record<string, PersonaInfo>;
 }
 
-export interface LlmModelItem {
-  model_name: string;
-  model_provider: string;
-}
-
-export interface ListLlmModelsResponse {
-  models: LlmModelItem[];
-}
-
 // ─── Core Domain ─────────────────────────────────────────────────────────────
 
 export interface LearnerProfile {
@@ -503,15 +494,6 @@ export interface ValidateProfileFairnessRequest extends BaseRequest {
 
 // ─── Profile Updates ──────────────────────────────────────────────────────────
 
-export interface UpdateLearnerProfileRequest extends BaseRequest {
-  learner_profile: string;
-  learner_interactions: string;
-  learner_information?: string;
-  session_information?: string;
-  user_id?: string;
-  goal_id?: number;
-}
-
 export interface CognitiveStatusUpdateRequest extends BaseRequest {
   learner_profile: string;
   session_information: string;
@@ -545,19 +527,6 @@ export interface ScheduleLearningPathRequest extends BaseRequest {
 export interface ScheduleLearningPathResponse {
   learning_path: LearningPathSession[];
   retrieved_sources?: unknown[];
-}
-
-export interface RescheduleLearningPathRequest extends BaseRequest {
-  learner_profile: string;
-  learning_path: string;
-  session_count?: number;
-  other_feedback?: string;
-}
-
-export interface RescheduleLearningPathResponse {
-  rescheduled_learning_path?: LearningPathSession[];
-  learning_path?: LearningPathSession[];
-  [key: string]: unknown;
 }
 
 export interface AgenticLearningPathRequest extends BaseRequest {
@@ -601,19 +570,6 @@ export interface ExploreKnowledgePointsRequest {
   learner_profile: string;
   learning_path: string;
   learning_session: string;
-}
-
-export interface DraftKnowledgePointRequest extends BaseRequest {
-  learner_profile: string;
-  learning_path: string;
-  learning_session: string;
-  knowledge_points: string;
-  knowledge_point: string;
-  use_search: boolean;
-}
-
-export interface DraftKnowledgePointResponse {
-  knowledge_draft: string;
 }
 
 export interface DraftKnowledgePointsRequest extends BaseRequest {
@@ -670,15 +626,6 @@ export interface TailorKnowledgeContentRequest extends BaseRequest {
 
 export interface TailorKnowledgeContentResponse {
   tailored_content: Record<string, unknown>;
-}
-
-export interface SimulateContentFeedbackRequest extends BaseRequest {
-  learner_profile: string;
-  learning_content: string;
-}
-
-export interface SimulateContentFeedbackResponse {
-  feedback: Record<string, unknown>;
 }
 
 // ─── Chat with Tutor ─────────────────────────────────────────────────────────

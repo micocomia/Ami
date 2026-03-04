@@ -48,16 +48,6 @@ class LearnerProfileInitializationWithInfoRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
-class LearnerProfileUpdateRequest(BaseRequest):
-
-    learner_profile: str
-    learner_interactions: str
-    learner_information: str = ""
-    session_information: str = ""
-    user_id: Optional[str] = None
-    goal_id: Optional[int] = None
-
-
 class CognitiveStatusUpdateRequest(BaseRequest):
 
     learner_profile: str
@@ -131,23 +121,6 @@ class GoalUpdateRequest(BaseModel):
     plan_agent_metadata: Optional[Any] = None
     is_completed: Optional[bool] = None
     is_deleted: Optional[bool] = None
-
-
-class KnowledgePointDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: Any
-    knowledge_point: Any
-    use_search: bool
-    goal_context: Optional[Any] = None
-
-
-class LearningContentFeedbackRequest(BaseRequest):
-
-    learner_profile: str
-    learning_content: str
 
 
 class SessionActivityRequest(BaseModel):

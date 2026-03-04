@@ -7,8 +7,6 @@ import { apiClient } from '../client';
 import type {
   ScheduleLearningPathRequest,
   ScheduleLearningPathResponse,
-  RescheduleLearningPathRequest,
-  RescheduleLearningPathResponse,
   AgenticLearningPathRequest,
   ScheduleLearningPathAgenticResponse,
   AdaptLearningPathRequest,
@@ -19,8 +17,6 @@ import type {
 export type {
   ScheduleLearningPathRequest,
   ScheduleLearningPathResponse,
-  RescheduleLearningPathRequest,
-  RescheduleLearningPathResponse,
   AgenticLearningPathRequest,
   ScheduleLearningPathAgenticResponse,
   AdaptLearningPathRequest,
@@ -38,16 +34,6 @@ export async function scheduleLearningPathApi(
 ): Promise<ScheduleLearningPathResponse> {
   const { data } = await apiClient.post<ScheduleLearningPathResponse>(
     'schedule-learning-path',
-    body
-  );
-  return data;
-}
-
-export async function rescheduleLearningPathApi(
-  body: RescheduleLearningPathRequest
-): Promise<RescheduleLearningPathResponse> {
-  const { data } = await apiClient.post<RescheduleLearningPathResponse>(
-    'reschedule-learning-path',
     body
   );
   return data;
@@ -78,13 +64,6 @@ export function useScheduleLearningPath() {
   return useMutation({
     mutationKey: learningPathKeys.all,
     mutationFn: scheduleLearningPathApi,
-  });
-}
-
-export function useRescheduleLearningPath() {
-  return useMutation({
-    mutationKey: learningPathKeys.all,
-    mutationFn: rescheduleLearningPathApi,
   });
 }
 

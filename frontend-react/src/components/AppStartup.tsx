@@ -1,5 +1,4 @@
 import { useAppConfig } from '@/api/endpoints/config';
-import { useLlmModels } from '@/api/endpoints/config';
 
 /**
  * Warms the React Query cache for global config on app load.
@@ -7,6 +6,5 @@ import { useLlmModels } from '@/api/endpoints/config';
  */
 export function AppStartup() {
   useAppConfig();
-  useLlmModels();
   return null;
 }

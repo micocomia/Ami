@@ -134,7 +134,7 @@ def render_goal_assessment_banners(goal):
     if assessment.get("all_mastered"):
         suggestion = assessment.get("suggestion", "Consider setting a more advanced goal.")
         st.info(
-            f"You already master all required skills for this goal. {suggestion}"
+            f"{suggestion}"
         )
 
 

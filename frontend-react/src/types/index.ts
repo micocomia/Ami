@@ -13,8 +13,6 @@ export type {
   AppConfig,
   PersonaInfo,
   PersonasResponse,
-  LlmModelItem,
-  ListLlmModelsResponse,
   // Core domain
   LearnerProfile,
   LearningPathSession,
@@ -45,7 +43,6 @@ export type {
   LearnerProfileResponse,
   LearningPreferencesUpdateRequest,
   LearnerInformationUpdateRequest,
-  UpdateLearnerProfileRequest,
   CognitiveStatusUpdateRequest,
   // Behavioral metrics
   BehavioralMetricsResponse,
@@ -87,8 +84,6 @@ export type {
   // Learning path
   ScheduleLearningPathRequest,
   ScheduleLearningPathResponse,
-  RescheduleLearningPathRequest,
-  RescheduleLearningPathResponse,
   AgenticLearningPathRequest,
   ScheduleLearningPathAgenticResponse,
   AdaptLearningPathRequest,
@@ -100,11 +95,7 @@ export type {
   GenerateDocumentQuizzesResponse,
   TailorKnowledgeContentRequest,
   TailorKnowledgeContentResponse,
-  SimulateContentFeedbackRequest,
-  SimulateContentFeedbackResponse,
   ExploreKnowledgePointsRequest,
-  DraftKnowledgePointRequest,
-  DraftKnowledgePointResponse,
   DraftKnowledgePointsRequest,
   DraftKnowledgePointsResponse,
   // Chat

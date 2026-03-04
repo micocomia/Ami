@@ -1744,18 +1744,6 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-@app.get("/list-llm-models")
-async def list_llm_models():
-    try:
-        return {"models": [
-            {
-                "model_name": app_config.llm.model_name, 
-                "model_provider": app_config.llm.provider
-            }
-        ]}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": str(e)})
-
 @app.post("/chat-with-tutor")
 async def chat_with_autor(request: ChatWithAutorRequest):
     llm = get_llm(request.model_provider, request.model_name)
@@ -1934,62 +1922,6 @@ async def validate_profile_fairness(request: ProfileFairnessRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-
-@app.post("/update-learner-profile")
-async def update_learner_profile(request: LearnerProfileUpdateRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learner_interactions = request.learner_interactions
-    learner_information = request.learner_information
-    session_information = request.session_information
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            try:
-                learner_profile = ast.literal_eval(learner_profile)
-            except Exception:
-                learner_profile = {"raw": learner_profile}
-        if isinstance(learner_interactions, str) and learner_interactions.strip():
-            try:
-                learner_interactions = ast.literal_eval(learner_interactions)
-            except Exception:
-                learner_interactions = {"raw": learner_interactions}
-        if isinstance(learner_information, str) and learner_information.strip():
-            try:
-                learner_information = ast.literal_eval(learner_information)
-            except Exception:
-                learner_information = {"raw": learner_information}
-        if isinstance(session_information, str) and session_information.strip():
-            try:
-                session_information = ast.literal_eval(session_information)
-            except Exception:
-                pass
-        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
-        old_profile_for_reset = copy.deepcopy(input_profile)
-        # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
-        if request.user_id is not None and request.goal_id is not None:
-            stored_profile = store.get_profile(request.user_id, request.goal_id)
-            if isinstance(stored_profile, dict):
-                old_profile_for_reset = copy.deepcopy(stored_profile)
-            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
-            _record_snapshot_timestamp(request.user_id, request.goal_id)
-        learner_profile = update_learner_profile_with_llm(
-            llm,
-            input_profile,
-            learner_interactions,
-            learner_information,
-            session_information,
-        )
-        if request.user_id is not None and request.goal_id is not None:
-            _reset_adaptation_on_profile_sign_flip(
-                request.user_id,
-                request.goal_id,
-                old_profile_for_reset,
-                learner_profile if isinstance(learner_profile, dict) else {},
-            )
-            store.upsert_profile(request.user_id, request.goal_id, learner_profile)
-        return {"learner_profile": learner_profile}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/update-cognitive-status")
 async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
@@ -2202,50 +2134,6 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/draft-knowledge-point")
-async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
-    from modules.content_generator.utils import (
-        build_session_adaptation_contract,
-        get_fslsm_dim,
-        get_fslsm_input,
-        processing_perception_hints,
-        visual_formatting_hints,
-    )
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points_raw = _parse_jsonish(request.knowledge_points, [])
-    knowledge_point_raw = _parse_jsonish(request.knowledge_point, {})
-    try:
-        validated_knowledge_points = KnowledgePoints.model_validate({"knowledge_points": knowledge_points_raw})
-        validated_knowledge_point = KnowledgePoint.model_validate(knowledge_point_raw)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid knowledge point payload: {exc}")
-    knowledge_points = validated_knowledge_points.model_dump().get("knowledge_points", [])
-    knowledge_point = validated_knowledge_point.model_dump()
-    use_search = request.use_search
-    goal_context = request.goal_context
-    fslsm_input = get_fslsm_input(learner_profile)
-    fslsm_processing = get_fslsm_dim(learner_profile, "fslsm_processing")
-    fslsm_perception = get_fslsm_dim(learner_profile, "fslsm_perception")
-    visual_hints = visual_formatting_hints(fslsm_input)
-    proc_perc_hints = processing_perception_hints(fslsm_processing, fslsm_perception)
-    session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
-    try:
-        knowledge_draft = draft_knowledge_point_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
-            use_search,
-            goal_context=goal_context,
-            visual_formatting_hints=visual_hints,
-            processing_perception_hints=proc_perc_hints,
-            session_adaptation_contract=session_adaptation_contract,
-            search_rag_manager=search_rag_manager,
-        )
-        return {"knowledge_draft": knowledge_draft}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate-learning-content")
 async def generate_learning_content(request: LearningContentGenerationRequest):
@@ -2483,22 +2371,6 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
                 owner_token=owner_token,
                 status=owner_terminal_status,
             )
-
-@app.post("/simulate-content-feedback")
-async def simulate_content_feedback(request: LearningContentFeedbackRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learning_content = request.learning_content
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            learner_profile = ast.literal_eval(learner_profile)
-        if isinstance(learning_content, str) and learning_content.strip():
-            learning_content = ast.literal_eval(learning_content)
-        feedback = simulate_content_feedback_with_llm(llm, learner_profile, learning_content)
-        return {"feedback": feedback}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 if __name__ == "__main__":
     server_cfg = app_config.get("server", {})

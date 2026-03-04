@@ -5,7 +5,7 @@ import requests
 import re
 from urllib.parse import urlparse
 from pathlib import Path
-from utils.request_api import get_available_models, auth_register, auth_login
+from utils.request_api import check_backend, auth_register, auth_login
 
 
 @st.dialog("Login / Register")
@@ -97,14 +97,11 @@ def render_topbar():
         st.session_state["checked_backend"] = False
     if not st.session_state["checked_backend"]:
         try:
-            # try a fast GET to backend root
             internal_backend_endpoint = st.session_state.get("backend_endpoint")
-            models = get_available_models(internal_backend_endpoint)
-            model_id_list = [f"{m['model_provider']}/{m['model_name']}" for m in models]
-            st.session_state["available_models"] = model_id_list
-            backend_ok = True
-            if len(model_id_list) == 0:
-                backend_ok = False
+            cfg = check_backend(internal_backend_endpoint)
+            backend_ok = cfg is not None
+            if backend_ok:
+                st.session_state["available_models"] = [cfg["default_llm_type"]]
         except Exception:
             backend_ok = False
         if not backend_ok:
@@ -169,13 +166,10 @@ def settings():
     if if_check_api:
         did_check_api = True
         try:
-            models = get_available_models(new_backend)
-            model_id_list = [f"{m['model_provider']}/{m['model_name']}" for m in models]
-            if len(model_id_list) > 0:
-                is_valid_backend = True
-            else:
-                is_valid_backend = False
-        except Exception as e:
+            cfg = check_backend(new_backend)
+            model_id_list = [cfg["default_llm_type"]] if cfg else []
+            is_valid_backend = bool(model_id_list)
+        except Exception:
             is_valid_backend = False
         if_check_api = False
 

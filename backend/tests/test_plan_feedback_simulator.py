@@ -121,6 +121,44 @@ class TestDeterministicSOLOAudit:
         assert audit["violations"][0]["from_level"] == "beginner"
         assert audit["violations"][0]["to_level"] == "advanced"
 
+    def test_path_not_reaching_required_level_is_coverage_gap(self):
+        """Path advances correctly (no jumps) but stops before required_proficiency_level."""
+        profile = {
+            "cognitive_status": {
+                "mastered_skills": [],
+                "in_progress_skills": [
+                    {
+                        "name": "Python",
+                        "current_proficiency_level": "unlearned",
+                        "required_proficiency_level": "advanced",
+                    }
+                ],
+            }
+        }
+        path = [
+            {
+                "id": "Session 1",
+                "title": "Python Basics",
+                "desired_outcome_when_completed": [
+                    {"name": "Python", "level": "beginner"},
+                ],
+            },
+            {
+                "id": "Session 2",
+                "title": "Python Intermediate",
+                "desired_outcome_when_completed": [
+                    {"name": "Python", "level": "intermediate"},
+                ],
+            },
+        ]
+        audit = build_deterministic_solo_audit(profile, path)
+        # Transitions are correct (no SOLO skipping violations)
+        assert audit["violation_count"] == 0
+        # But path stops at "intermediate" when "advanced" is required
+        assert audit["coverage_gap_count"] == 1
+        assert audit["coverage_gaps"][0]["required_level"] == "advanced"
+        assert audit["coverage_gaps"][0]["reached_level"] == "intermediate"
+
     def test_skill_name_normalization_matches_equivalent_names(self):
         profile = {
             "cognitive_status": {
@@ -241,3 +279,33 @@ class TestFeedbackReconciliation:
         assert any("SOLO progression skipped" in issue for issue in output["issues"])
         assert "at most one SOLO level" in output["improvement_directives"]
         assert "deterministic SOLO audit found" in output["feedback"]["progression"]
+
+    def test_feedback_path_forces_unacceptable_when_coverage_gap(self, monkeypatch):
+        """Plan is correctly paced but doesn't reach required level → must be unacceptable."""
+        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
+            return _base_feedback(is_acceptable=True, issues=[], directives="")
+
+        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
+
+        profile = {
+            "cognitive_status": {
+                "mastered_skills": [],
+                "in_progress_skills": [
+                    {
+                        "name": "Python",
+                        "current_proficiency_level": "unlearned",
+                        "required_proficiency_level": "advanced",
+                    }
+                ],
+            }
+        }
+        path = [
+            {"id": "Session 1", "title": "Basics", "desired_outcome_when_completed": [{"name": "Python", "level": "beginner"}]},
+            {"id": "Session 2", "title": "Intermediate", "desired_outcome_when_completed": [{"name": "Python", "level": "intermediate"}]},
+        ]
+        simulator = LearningPlanFeedbackSimulator(MagicMock())
+        output = simulator.feedback_path({"learner_profile": profile, "learning_path": path})
+
+        assert output["is_acceptable"] is False
+        assert any("advanced" in issue for issue in output["issues"])
+        assert "advanced" in output["improvement_directives"] or "required" in output["improvement_directives"]

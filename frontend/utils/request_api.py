@@ -227,18 +227,16 @@ def extract_pdf_text(file):
         st.write("Failed to extract PDF text. Error:", e)
         return ""
 
-def get_available_models(backend_endpoint):
-    backend_url = f"{_normalize_endpoint(backend_endpoint)}list-llm-models"
+def check_backend(backend_endpoint):
+    """Check backend reachability by hitting GET /config. Returns config dict or None."""
+    backend_url = f"{_normalize_endpoint(backend_endpoint)}config"
     try:
         response = httpx.get(backend_url, timeout=30)
         if response.status_code == 200:
-            return response.json().get("models", [])
-        else:
-            # st.write("Failed to fetch available models. Status code:", response.status_code)
-            return []
-    except Exception as e:
-        # st.write("Failed to fetch available models. Error:", e)
-        return []
+            return response.json()
+        return None
+    except Exception:
+        return None
 
 def chat_with_tutor(
     chat_messages,
