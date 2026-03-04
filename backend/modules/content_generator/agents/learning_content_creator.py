@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 from base import BaseAgent
-from base.search_rag import SearchRagManager, format_docs
+from base.search_rag import SearchRagManager
 from modules.content_generator.prompts.learning_content_creator import (
     learning_content_creator_system_prompt,
     learning_content_creator_task_prompt_content,
@@ -13,6 +13,16 @@ from modules.content_generator.prompts.learning_content_creator import (
     learning_content_creator_task_prompt_outline,
 )
 from modules.content_generator.schemas import ContentOutline, KnowledgeDraft, LearningContent
+from modules.content_generator.utils.fslsm_adaptation import (
+    _FSLSM_MODERATE as FSLSM_MODERATE_CONST,
+    _FSLSM_STRONG as FSLSM_STRONG_CONST,
+    get_fslsm_dim,
+    get_fslsm_input,
+    narrative_allowance,
+    processing_perception_hints,
+    understanding_hints,
+    visual_formatting_hints,
+)
 
 
 class ContentBasePayload(BaseModel):
@@ -55,7 +65,14 @@ class LearningContentCreator(BaseAgent):
         return validated_output.model_dump()
 
 
-def prepare_content_outline_with_llm(llm, learner_profile, learning_path, learning_session, *, search_rag_manager: Optional[SearchRagManager] = None):
+def prepare_content_outline_with_llm(
+    llm,
+    learner_profile,
+    learning_path,
+    learning_session,
+    *,
+    search_rag_manager: Optional[SearchRagManager] = None,
+):
     creator = LearningContentCreator(llm, search_rag_manager=search_rag_manager)
     payload = {
         "learner_profile": learner_profile,
@@ -65,123 +82,33 @@ def prepare_content_outline_with_llm(llm, learner_profile, learning_path, learni
     return creator.prepare_outline(payload)
 
 
-_FSLSM_STRONG = 0.7
-_FSLSM_MODERATE = 0.3
+# Backward-compatible aliases for existing imports/tests.
+_FSLSM_STRONG = FSLSM_STRONG_CONST
+_FSLSM_MODERATE = FSLSM_MODERATE_CONST
 
 
 def _get_fslsm_input(learner_profile) -> float:
-    """Extract fslsm_input value from a learner profile dict. Returns 0.0 on missing/error."""
-    if isinstance(learner_profile, str):
-        try:
-            import ast as _ast
-            learner_profile = _ast.literal_eval(learner_profile)
-        except Exception:
-            return 0.0
-    if not isinstance(learner_profile, dict):
-        return 0.0
-    try:
-        dims = (
-            learner_profile
-            .get("learning_preferences", {})
-            .get("fslsm_dimensions", {})
-        )
-        if not isinstance(dims, dict):
-            return 0.0
-        val = dims.get("fslsm_input", 0.0)
-        return float(val) if val is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
+    return get_fslsm_input(learner_profile)
 
 
 def _get_fslsm_dim(learner_profile, dim_name: str) -> float:
-    """Extract a named FSLSM dimension value from a learner profile dict. Returns 0.0 on missing/error."""
-    if isinstance(learner_profile, str):
-        try:
-            import ast as _ast
-            learner_profile = _ast.literal_eval(learner_profile)
-        except Exception:
-            return 0.0
-    if not isinstance(learner_profile, dict):
-        return 0.0
-    try:
-        dims = (
-            learner_profile
-            .get("learning_preferences", {})
-            .get("fslsm_dimensions", {})
-        )
-        if not isinstance(dims, dict):
-            return 0.0
-        val = dims.get(dim_name, 0.0)
-        return float(val) if val is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
+    return get_fslsm_dim(learner_profile, dim_name)
 
 
 def _processing_perception_hints(processing: float, perception: float) -> str:
-    """Return per-section hints for the Processing and Perception FSLSM dimensions."""
-    parts = []
-    if processing <= -_FSLSM_MODERATE:
-        parts.append(
-            "**Processing Style (Active)**: After each concept, include a "
-            "`🔧 Try It First` block — a hands-on challenge or trial-and-error simulation "
-            "that lets the learner engage directly before the full explanation."
-        )
-    elif processing >= _FSLSM_MODERATE:
-        parts.append(
-            "**Processing Style (Reflective)**: After each concept, include a "
-            "`🤔 Reflection Pause` block — one deep-thinking question that encourages "
-            "the learner to connect the concept to prior knowledge before moving on."
-        )
-    if perception <= -_FSLSM_MODERATE:
-        parts.append(
-            "**Perception Style (Sensing)**: Present each concept in this order: "
-            "(1) a concrete real-world example first, (2) step-by-step facts or procedure, "
-            "(3) underlying theory last."
-        )
-    elif perception >= _FSLSM_MODERATE:
-        parts.append(
-            "**Perception Style (Intuitive)**: Present each concept in this order: "
-            "(1) the abstract principle or theory first, (2) relationships and patterns, "
-            "(3) concrete examples last."
-        )
-    if not parts:
-        return ""
-    return "\n\n**Learning Style Instructions**:\n" + "\n".join(f"- {p}" for p in parts)
+    return processing_perception_hints(processing, perception)
 
 
 def _understanding_hints(understanding: float) -> str:
-    """Return document-level structure hint for the Understanding FSLSM dimension."""
-    if understanding <= -_FSLSM_MODERATE:
-        return (
-            "\n\n**Understanding Style (Sequential)**: Structure the document with strict linear "
-            "progression. Use explicit 'Building on [previous concept]...' transitions between "
-            "sections. Avoid forward references — do not mention concepts before they have been "
-            "introduced."
-        )
-    elif understanding >= _FSLSM_MODERATE:
-        return (
-            "\n\n**Understanding Style (Global)**: Begin the document with a `🗺️ Big Picture` "
-            "section that shows how this session fits into the overall course and learning path. "
-            "Use cross-references between sections to highlight connections between ideas."
-        )
-    return ""
+    return understanding_hints(understanding)
 
 
 def _visual_formatting_hints(fslsm_input: float) -> str:
-    """Return formatting instruction hints for visual learners based on fslsm_input score."""
-    if fslsm_input <= -_FSLSM_STRONG:
-        return (
-            "\n\n**Visual Formatting Instructions**: This learner is a strong visual learner. "
-            "You MUST include at least one Mermaid diagram (```mermaid ... ```) to illustrate key concepts. "
-            "Use markdown tables to present comparisons, steps, or structured data."
-        )
-    elif fslsm_input <= -_FSLSM_MODERATE:
-        return (
-            "\n\n**Visual Formatting Instructions**: This learner prefers visual content. "
-            "Include markdown tables where applicable to present comparisons or structured data. "
-            "Use code blocks and structured layouts where applicable."
-        )
-    return ""
+    return visual_formatting_hints(fslsm_input)
+
+
+def _narrative_allowance(fslsm_input: float) -> int:
+    return narrative_allowance(fslsm_input)
 
 
 def create_learning_content_with_llm(
@@ -195,167 +122,29 @@ def create_learning_content_with_llm(
     max_workers=3,
     use_search=True,
     output_markdown=True,
-    method_name="genmentor",
+    method_name="ami",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     quiz_mix_config: Optional[dict] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
-    from .goal_oriented_knowledge_explorer import explore_knowledge_points_with_llm
-    from .search_enhanced_knowledge_drafter import draft_knowledge_points_with_llm
-    from .learning_document_integrator import integrate_learning_document_with_llm
-    from .document_quiz_generator import generate_document_quizzes_with_llm
+    """Backward-compatible wrapper around the content-generation orchestrator."""
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
 
-    if method_name == "genmentor":
-        # 1. Explore knowledge points
-        knowledge_points = explore_knowledge_points_with_llm(
-            llm, learner_profile, learning_path, learning_session
-        )
-
-        # 2. Compute visual formatting hints based on fslsm_input
-        fslsm_input = _get_fslsm_input(learner_profile)
-        hints = _visual_formatting_hints(fslsm_input)
-
-        # 2b. Extract remaining FSLSM dimensions and build their hints
-        fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
-        fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
-        fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
-        proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
-        und_hints = _understanding_hints(fslsm_understanding)
-
-        # 3. Draft knowledge points with visual + processing/perception hints
-        knowledge_drafts = draft_knowledge_points_with_llm(
-            llm,
-            learner_profile,
-            learning_path,
-            learning_session,
-            knowledge_points,
-            allow_parallel=allow_parallel,
-            use_search=use_search,
-            max_workers=max_workers,
-            visual_formatting_hints=hints,
-            processing_perception_hints=proc_perc_hints,
-            search_rag_manager=search_rag_manager,
-        )
-
-        # 4. Find media resources for visual learners
-        media_resources = []
-        if fslsm_input <= -_FSLSM_MODERATE:
-            from .media_resource_finder import find_media_resources
-            _search_runner = None
-            if search_rag_manager is not None:
-                _search_runner = getattr(search_rag_manager, "search_runner", None)
-            if _search_runner is None:
-                try:
-                    from config.loader import default_config
-                    from base.searcher_factory import SearchRunner
-                    _search_runner = SearchRunner.from_config(default_config)
-                except Exception:
-                    pass
-            if _search_runner is not None:
-                max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-                max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
-                try:
-                    media_resources = find_media_resources(
-                        _search_runner,
-                        knowledge_points,
-                        max_videos=max_videos,
-                        max_images=max_images,
-                    )
-                except Exception:
-                    media_resources = []
-
-        # 5. Integrate document (with media appended for visual learners and understanding hints)
-        learning_document = integrate_learning_document_with_llm(
-            llm,
-            learner_profile,
-            learning_path,
-            learning_session,
-            knowledge_points,
-            knowledge_drafts,
-            output_markdown=output_markdown,
-            media_resources=media_resources if media_resources else None,
-            understanding_hints=und_hints,
-        )
-
-        # 6. Set content_format
-        content_format = "standard"
-        if fslsm_input <= -_FSLSM_MODERATE:
-            content_format = "visual_enhanced"
-
-        # 7. Podcast conversion for auditory learners
-        audio_url = None
-        if fslsm_input >= _FSLSM_MODERATE:
-            from .podcast_style_converter import convert_to_podcast_with_llm
-            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
-            learning_document = convert_to_podcast_with_llm(
-                llm, learning_document, learner_profile, mode=mode
-            )
-            content_format = "podcast"
-
-            # 8. TTS generation for strong auditory learners
-            if fslsm_input >= _FSLSM_STRONG:
-                from .tts_generator import generate_tts_audio
-                try:
-                    audio_url = generate_tts_audio(learning_document)
-                    learning_document = (
-                        f'<audio controls src="{audio_url}"></audio>\n\n'
-                        + learning_document
-                    )
-                except Exception:
-                    audio_url = None
-
-        learning_content = {"document": learning_document, "content_format": content_format}
-        if audio_url is not None:
-            learning_content["audio_url"] = audio_url
-
-        if not with_quiz:
-            return learning_content
-
-        # 9. Generate quizzes (counts driven by session proficiency)
-        if quiz_mix_config:
-            from utils.quiz_scorer import get_quiz_mix_for_session as _get_quiz_mix
-            _session_dict = (
-                learning_session if isinstance(learning_session, dict)
-                else (learning_session.model_dump() if hasattr(learning_session, "model_dump") else {})
-            )
-            _mix = _get_quiz_mix(_session_dict, quiz_mix_config)
-        else:
-            # Fallback defaults when no config provided
-            _mix = {
-                "single_choice_count": 3,
-                "multiple_choice_count": 0,
-                "true_false_count": 0,
-                "short_answer_count": 0,
-                "open_ended_count": 0,
-            }
-
-        document_quiz = generate_document_quizzes_with_llm(
-            llm,
-            learner_profile,
-            learning_document,
-            single_choice_count=_mix.get("single_choice_count", 3),
-            multiple_choice_count=_mix.get("multiple_choice_count", 0),
-            true_false_count=_mix.get("true_false_count", 0),
-            short_answer_count=_mix.get("short_answer_count", 0),
-            open_ended_count=_mix.get("open_ended_count", 0),
-        )
-        learning_content["quizzes"] = document_quiz
-        return learning_content
-    else:
-        creator = LearningContentCreator(llm, search_rag_manager=search_rag_manager)
-        if document_outline is None:
-            document_outline = prepare_content_outline_with_llm(
-                llm,
-                learner_profile,
-                learning_path,
-                learning_session,
-                search_rag_manager=search_rag_manager,
-            )
-        outline = document_outline if isinstance(document_outline, dict) else document_outline
-        payload = {
-            "learner_profile": learner_profile,
-            "learning_path": learning_path,
-            "learning_session": learning_session,
-            "external_resources": "",
-        }
-        return creator.create_content(payload)
+    return generate_learning_content_with_llm(
+        llm,
+        learner_profile,
+        learning_path,
+        learning_session,
+        allow_parallel=allow_parallel,
+        with_quiz=with_quiz,
+        max_workers=max_workers,
+        use_search=use_search,
+        output_markdown=output_markdown,
+        method_name=method_name,
+        search_rag_manager=search_rag_manager,
+        quiz_mix_config=quiz_mix_config,
+        goal_context=goal_context,
+    )

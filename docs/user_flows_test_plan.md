@@ -1,6 +1,6 @@
 # Ami — User Flows, Backend Tests & Frontend Verification Plan
 
-> **Purpose:** This document lists each user flow's **user story**, the **backend test script** that covers it, and the **Streamlit frontend test steps** to manually verify the flow end-to-end.
+> **Purpose:** This document lists each user flow's **user story**, the **backend test script** that covers it, and the **frontend test steps** to manually verify the flow end-to-end.
 >
 > **Prerequisites for most flows:** Log in or register (see Flow 1). Complete onboarding by selecting a persona, entering a learning goal, and clicking "Begin Learning" (see Flow 2). These setup steps are not repeated in every flow.
 
@@ -86,7 +86,6 @@ python -m pytest backend/tests/test_store_and_auth.py backend/tests/test_auth_ap
 
 | Test file | Class / Tests | What it covers |
 |---|---|---|
-| `test_user_state.py` | `TestUserStateStore` (11 tests), `TestUserStateAPI` (8 tests) | Persona, resume PDF text, goals, and all session state persistence via user-state endpoints |
 | `test_onboarding_api.py` | `TestExtractPdfText` (3 tests) | `POST /extract-pdf-text` — valid PDF, multi-page, missing file (422) |
 | `test_onboarding_api.py` | `TestRefineGoalEndpoint` (4 tests) | `POST /refine-learning-goal` — success (mocked LLM), forwards learner_information, empty info, LLM failure (500) |
 | `test_onboarding_api.py` | `TestIdentifySkillGapEndpoint` (6 tests) | `POST /identify-skill-gap-with-info` — mocked LLM, field validation, pre-existing skill requirements, goal_assessment in response, search_rag_manager wiring |
@@ -102,7 +101,7 @@ python -m pytest backend/tests/test_store_and_auth.py backend/tests/test_auth_ap
 
 **Run command:**
 ```bash
-python -m pytest backend/tests/test_user_state.py backend/tests/test_onboarding_api.py backend/tests/test_store_and_auth.py::TestProfilePersistence backend/tests/test_skill_gap_tools.py backend/tests/test_skill_gap_schemas.py backend/tests/test_skill_gap_orchestrator.py -v
+python -m pytest backend/tests/test_onboarding_api.py backend/tests/test_store_and_auth.py::TestProfilePersistence backend/tests/test_skill_gap_tools.py backend/tests/test_skill_gap_schemas.py backend/tests/test_skill_gap_orchestrator.py -v
 ```
 
 ### Streamlit Frontend Test Steps
@@ -125,7 +124,6 @@ python -m pytest backend/tests/test_user_state.py backend/tests/test_onboarding_
 | 2 | Check `learner_information` (debug sidebar) | Extracted PDF text appended after persona prefix |
 | 3 | Upload a non-PDF file | File uploader rejects it — only `.pdf` accepted |
 | 4 | Skip PDF upload, click **"Begin Learning"** | Flow works normally — PDF is optional |
-| 5 | Click **"Connect LinkedIn"** | Toast: "LinkedIn integration coming soon!" |
 
 #### 2.3 — Setting a learning goal
 
@@ -742,7 +740,6 @@ python -m pytest backend/tests/test_quiz_mix.py backend/tests/test_solo_evaluato
 | File | Tests | Flows Covered |
 |---|---|---|
 | `test_store_and_auth.py` | 33 | Flow 1 (auth), Flow 2 (profile persistence), Flow 3 (data deletion) |
-| `test_user_state.py` | 19 | Flow 2 (persona, resume, goal persistence) |
 | `test_auth_api.py` | 23 | Flow 1 (register/login/me), Flow 3 (delete account + lifecycle) |
 | `test_onboarding_api.py` | 36 | Flow 2 (PDF extract, goal refinement, skill gap, profile creation, events) |
 | `test_skill_gap_tools.py` | 17 | Flow 2 (retrieval tool, goal assessment, goal refinement) |
@@ -761,7 +758,29 @@ python -m pytest backend/tests/test_quiz_mix.py backend/tests/test_solo_evaluato
 | `test_adaptive_content_delivery.py` | 45 | Flow 6 (FSLSM content hints), Flow 11 (audio-visual delivery) |
 | `test_solo_evaluator.py` | 6 | Flow 12 (SOLO level classification, semantic short-answer evaluation) |
 | `test_quiz_mix.py` | 6 | Flow 12 (graduated question mix by proficiency) |
-| **Total** | **315** | |
+| **Subtotal (above)** | **296** | |
+
+**Sprint 4 test files** (added in sprint-4-engine branch; test counts not yet tallied):
+
+| File | Flows Covered |
+|---|---|
+| `test_bias_auditor.py` | Flow 2 (BiasAuditor mandatory ethics gate) |
+| `test_fairness_validator.py` | Flow 2 (profile fairness validation) |
+| `test_scoped_profile_updates.py` | Flow 6 (FSLSM vs learner-info separate updates) |
+| `test_profile_edit_endpoints.py` | Flow 6 (profile edit endpoint contracts) |
+| `test_profile_edit_inputs.py` | Flow 6 (profile edit input parsing) |
+| `test_learning_content_prefetch.py` | Flow 5, Flow 11 (session content prefetch) |
+| `test_content_quality_pipeline.py` | Flow 5 (7-stage content quality pipeline) |
+| `test_learning_document_integrator.py` | Flow 5 (document integration stage) |
+| `test_goal_oriented_knowledge_explorer.py` | Flow 5 (knowledge exploration stage) |
+| `test_plan_feedback_simulator.py` | Flow 8 (embedded plan feedback simulation) |
+| `test_fslsm_adaptation_policy.py` | Flow 6 (FSLSM adaptation policy) |
+| `test_fslsm_sign_flip_reset_endpoints.py` | Flow 6 (FSLSM sign flip and reset) |
+| `test_goal_context_plumbing.py` | Flow 2, Flow 6 (goal context passing) |
+| `test_goal_resources.py` | Flow 2 (goal resource endpoints) |
+| `test_content_generation_model_routing.py` | Flow 5 (model routing in content gen) |
+| `test_frontend_state_goal_selection.py` | Flow 10 (frontend goal selection state) |
+| `test_solo_taxonomy.py` | Flow 12 (SOLO taxonomy classifications) |
 
 ### Running All Tests
 
@@ -780,7 +799,7 @@ python -m pytest backend/tests/test_fslsm_update.py backend/tests/test_solo_eval
 
 ### Notes for the Team
 
-1. **API endpoint tests** (`test_auth_api.py`, `test_onboarding_api.py`, `test_user_state.py` API section) require the full backend dependency stack (langchain, etc.) because they import `from main import app`. Run these in the dev environment with all backend dependencies installed.
+1. **API endpoint tests** (`test_auth_api.py`, `test_onboarding_api.py`) require the full backend dependency stack (langchain, etc.) because they import `from main import app`. Run these in the dev environment with all backend dependencies installed.
 
 2. **LLM-dependent endpoint tests** (`test_onboarding_api.py`) use **mocked LLM functions** — they do NOT call real LLM APIs. This means they test the endpoint contract (request/response shapes, error handling, store persistence) without needing API keys.
 

@@ -28,7 +28,7 @@ from evals.config import VERSIONS, DATASETS_DIR, RESULTS_DIR
 from evals.eval_skill_gap import run_eval_skill_gap, summarise as summarise_skill_gap
 from evals.eval_plan import run_eval_plan, summarise as summarise_plan
 from evals.eval_content import run_eval_content, summarise as summarise_content
-from evals.eval_api_perf import run_eval_api_perf, run_eval_rag_drafts
+from evals.eval_api_perf import run_eval_api_perf
 
 
 def load_dataset(scenario_filter: list[str] | None = None) -> dict:
@@ -337,29 +337,6 @@ def main():
         )
         rag_cases = build_rag_cases(dataset)
         rag_checkpoint = load_rag_checkpoint(args.perf_cache_path)
-        enhanced_drafts = rag_checkpoint.get("enhanced", {}).get("rag_drafts", {}) if rag_checkpoint else {}
-        missing_cases = [
-            c for c in rag_cases
-            if f"{c['goal_id']}_{c['knowledge_point']}" not in enhanced_drafts
-        ]
-        if missing_cases:
-            print(f"RAG checkpoint missing {len(missing_cases)} draft(s); generating pipeline-backed drafts...")
-            draft_cases = [
-                {
-                    "goal_id": c["goal_id"],
-                    "learning_goal": c["learning_goal"],
-                    "knowledge_point": c["knowledge_point"],
-                }
-                for c in missing_cases
-            ]
-            run_eval_rag_drafts(
-                draft_cases,
-                dataset,
-                cache_path=args.perf_cache_path,
-                resume=True,
-            )
-            rag_checkpoint = load_rag_checkpoint(args.perf_cache_path)
-
         if not rag_checkpoint:
             raise RuntimeError(
                 f"RAG phase requires api_perf checkpoint with rag_drafts at: {args.perf_cache_path}"

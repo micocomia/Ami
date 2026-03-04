@@ -1,6 +1,6 @@
 import streamlit as st
 
-from config import backend_endpoint
+from config import backend_endpoint, backend_public_endpoint
 
 
 def render_debug_sidebar():
@@ -14,7 +14,12 @@ def render_debug_sidebar():
                 value=st.session_state["debug_api"],
                 help="Shows endpoint/payload preview and enables deeper error visibility.",
             )
-            st.write("Backend endpoint:", backend_endpoint)
+            st.write("Backend endpoint (internal):", st.session_state.get("backend_endpoint", backend_endpoint))
+            st.write(
+                "Backend endpoint (public):",
+                st.session_state.get("backend_public_endpoint", backend_public_endpoint),
+            )
+            st.write("Last media URL:", st.session_state.get("last_media_url"))
             st.write("UserId:", st.session_state.get("userId"))
 
             goal = st.session_state.get("to_add_goal")

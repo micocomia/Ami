@@ -1,4 +1,6 @@
 import os
+import logging
+import copy
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -6,48 +8,91 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 os.environ.setdefault("USER_AGENT", "Ami/1.0 (educational-platform)")
 
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+# Add to root so all module-level loggers (propagate=True by default) flow here.
+# Uvicorn's own loggers have propagate=False so they are unaffected — no double-logging.
+logging.root.addHandler(_handler)
+logging.root.setLevel(logging.INFO)
+# Allow DEBUG from our own code specifically.
+logger = logging.getLogger("ami")
+logger.setLevel(logging.DEBUG)
+
 import ast
 import json
+import threading
 import time
 import uvicorn
-import hydra
-from omegaconf import DictConfig, OmegaConf
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header
 from io import BytesIO
 import pdfplumber
 from base.llm_factory import LLMFactory
-from base.searcher_factory import SearchRunner
 from base.search_rag import SearchRagManager
 from fastapi.responses import JSONResponse
 from modules.skill_gap import *
 from modules.learner_profiler import *
+from modules.learner_profiler.utils import fslsm_adaptation
+from modules.learner_profiler.utils.profile_edit_inputs import extract_slider_override_dims
 from modules.learning_plan_generator import *
-from modules.learning_plan_generator.agents.learning_path_scheduler import (
+from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
     schedule_learning_path_agentic,
-    _evaluate_plan_quality,
 )
-from modules.tools.learner_simulation_tool import create_simulate_feedback_tool
+from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
 from modules.content_generator import *
-from modules.learner_simulator import simulate_content_feedback_with_llm
+from modules.content_generator.agents.content_feedback_simulator import simulate_content_feedback_with_llm
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
+from modules.ai_chatbot_tutor.utils import safe_update_learning_preferences
 from api_schemas import *
 from config import load_config
+from services import ContentPrefetchService
 from utils import store
 from utils import auth_store, auth_jwt
+from utils.content_view import build_learning_content_view_model
+from utils.motivational_messages import pick_motivational_message
 
 
 app_config = load_config(config_name="main")
 search_rag_manager = SearchRagManager.from_config(app_config)
 
 app = FastAPI()
+
+from fastapi import Request
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        # Recover the original exception via Python's implicit exception chaining.
+        # When an endpoint does `except Exception as e: raise HTTPException(...)`,
+        # the original exception is stored on exc.__context__ with its traceback intact.
+        original = exc.__cause__ or exc.__context__
+        if original and original.__traceback__:
+            logger.error(
+                "500 Internal Server Error on %s %s\n%s",
+                request.method, request.url.path, exc.detail,
+                exc_info=(type(original), original, original.__traceback__),
+            )
+        else:
+            logger.error(
+                "500 Internal Server Error on %s %s: %s",
+                request.method, request.url.path, exc.detail,
+            )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
 from fastapi.staticfiles import StaticFiles
-import os
-os.makedirs("data/audio", exist_ok=True)
-app.mount("/static/audio", StaticFiles(directory="data/audio"), name="audio")
-from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
-from datetime import datetime
+_BACKEND_ROOT = Path(__file__).resolve().parent
+_AUDIO_DIR = _BACKEND_ROOT / "data" / "audio"
+_DIAGRAMS_DIR = _BACKEND_ROOT / "data" / "diagrams"
+_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/audio", StaticFiles(directory=str(_AUDIO_DIR)), name="audio")
+_DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
+from pydantic import BaseModel, ValidationError
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
 
 
 @app.on_event("startup")
@@ -58,6 +103,420 @@ def _load_stores():
         search_rag_manager.verified_content_manager.sync_verified_content(
             app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
         )
+
+
+def _parse_jsonish(value: Any, default: Any = None):
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:
+            try:
+                return ast.literal_eval(text)
+            except Exception:
+                return default
+    return value
+
+
+def _compute_mastery_rate(profile: dict) -> float:
+    if not isinstance(profile, dict):
+        return 0.0
+    cognitive = profile.get("cognitive_status", {})
+    mastered = cognitive.get("mastered_skills", [])
+    in_progress = cognitive.get("in_progress_skills", [])
+    total = len(mastered) + len(in_progress)
+    return round(len(mastered) / total, 4) if total > 0 else 0.0
+
+
+def _refresh_goal_profile(user_id: str, goal_id: int) -> dict:
+    merged = store.merge_shared_profile_fields(user_id, goal_id)
+    return merged or store.get_profile(user_id, goal_id) or {}
+
+
+def _goal_or_404(user_id: str, goal_id: int) -> dict:
+    goal = store.get_goal(user_id, goal_id)
+    if goal is None or goal.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return goal
+
+
+def _goal_aggregate_or_404(user_id: str, goal_id: int) -> dict:
+    goal = store.get_goal_aggregate(user_id, goal_id)
+    if goal is None or goal.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return goal
+
+
+def _parse_iso_ts(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            return datetime.fromisoformat(value).timestamp()
+        return float(value)
+    except Exception:
+        return None
+
+
+def _iso_from_ts(value: float) -> str:
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _normalize_session_activity_record(activity: Optional[dict], idle_timeout_secs: int) -> dict:
+    record = copy.deepcopy(activity) if isinstance(activity, dict) else {}
+    record.setdefault("user_id", None)
+    record.setdefault("goal_id", None)
+    record.setdefault("session_index", None)
+    record.setdefault("trigger_events", [])
+    record.setdefault("heartbeats", [])
+    record.setdefault("last_activity_at", None)
+
+    intervals = record.get("intervals")
+    if not isinstance(intervals, list):
+        intervals = []
+
+    # Backward compatibility for old single-span records.
+    legacy_start = record.get("start_time")
+    legacy_end = record.get("end_time")
+    if not intervals and legacy_start is not None:
+        intervals = [{"start_time": legacy_start, "end_time": legacy_end}]
+
+    normalized_intervals = []
+    for interval in intervals:
+        if not isinstance(interval, dict):
+            continue
+        start = interval.get("start_time")
+        if start is None:
+            continue
+        normalized_intervals.append({
+            "start_time": start,
+            "end_time": interval.get("end_time"),
+        })
+
+    record["intervals"] = normalized_intervals
+    if record["last_activity_at"] is None and record["heartbeats"]:
+        record["last_activity_at"] = record["heartbeats"][-1]
+    if record["last_activity_at"] is None and normalized_intervals:
+        record["last_activity_at"] = normalized_intervals[-1].get("end_time") or normalized_intervals[-1].get("start_time")
+
+    if normalized_intervals:
+        record["start_time"] = normalized_intervals[0].get("start_time")
+        record["end_time"] = normalized_intervals[-1].get("end_time")
+    else:
+        record["start_time"] = None
+        record["end_time"] = None
+
+    return record
+
+
+def _close_open_interval(record: dict, requested_end_time: Optional[str], idle_timeout_secs: int) -> dict:
+    intervals = record.setdefault("intervals", [])
+    if not intervals:
+        return record
+    current = intervals[-1]
+    if current.get("end_time") is not None:
+        return record
+
+    requested_end_ts = _parse_iso_ts(requested_end_time) if requested_end_time else None
+    last_activity_ts = _parse_iso_ts(record.get("last_activity_at"))
+    end_ts = requested_end_ts if requested_end_ts is not None else last_activity_ts
+    if requested_end_ts is not None and last_activity_ts is not None and requested_end_ts - last_activity_ts > idle_timeout_secs:
+        end_ts = last_activity_ts
+    if end_ts is None:
+        end_ts = _parse_iso_ts(current.get("start_time"))
+    current["end_time"] = _iso_from_ts(end_ts)
+    record["end_time"] = current["end_time"]
+    return record
+
+
+def _sum_activity_duration_secs(activity: Optional[dict], idle_timeout_secs: int) -> float:
+    record = _normalize_session_activity_record(activity, idle_timeout_secs)
+    total = 0.0
+    for interval in record.get("intervals", []):
+        start_ts = _parse_iso_ts(interval.get("start_time"))
+        end_ts = _parse_iso_ts(interval.get("end_time"))
+        if start_ts is None or end_ts is None:
+            continue
+        total += max(end_ts - start_ts, 0.0)
+    return total
+
+
+_FSLSM_DIM_KEYS: Tuple[str, ...] = fslsm_adaptation.FSLSM_DIM_KEYS
+_ADAPTATION_COOLDOWN_SECS = 300
+_ADAPTATION_SNAPSHOT_TTL_SECS = 24 * 60 * 60
+_ADAPTATION_DAILY_CAP = 0.20
+_ADAPTATION_HYSTERESIS = 0.02
+_adaptation_lock_guard = threading.Lock()
+_adaptation_goal_locks: Dict[str, threading.Lock] = {}
+
+
+def _get_adaptation_goal_lock(user_id: str, goal_id: int) -> threading.Lock:
+    key = f"{user_id}:{goal_id}"
+    with _adaptation_lock_guard:
+        lock = _adaptation_goal_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _adaptation_goal_locks[key] = lock
+    return lock
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _build_learning_content_payload(
+    llm: Any,
+    *,
+    learner_profile: Any,
+    learning_path: Any,
+    learning_session: Any,
+    use_search: bool,
+    allow_parallel: bool,
+    with_quiz: bool,
+    goal_context: Any,
+    method_name: str = "ami",
+) -> Dict[str, Any]:
+    learning_content = generate_learning_content_with_llm(
+        llm,
+        learner_profile,
+        learning_path,
+        learning_session,
+        allow_parallel=allow_parallel,
+        with_quiz=with_quiz,
+        use_search=use_search,
+        goal_context=goal_context,
+        quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
+        method_name=method_name,
+        search_rag_manager=search_rag_manager,
+    )
+    learning_content["view_model"] = build_learning_content_view_model(
+        learning_content.get("document", ""),
+        learning_content.get("sources_used", []),
+        content_format=learning_content.get("content_format", "standard"),
+        audio_mode=learning_content.get("audio_mode"),
+    )
+    return learning_content
+
+
+def _extract_fslsm_dims(profile: Dict[str, Any]) -> Dict[str, float]:
+    return fslsm_adaptation.extract_fslsm_dims(profile)
+
+
+def _default_adaptation_state() -> Dict[str, Any]:
+    return fslsm_adaptation.default_adaptation_state()
+
+
+def _normalize_adaptation_state(goal: Dict[str, Any]) -> Dict[str, Any]:
+    return fslsm_adaptation.normalize_adaptation_state(goal)
+
+
+def _path_version_hash(goal: Dict[str, Any]) -> str:
+    return fslsm_adaptation.path_version_hash(goal)
+
+
+def _current_path_hash(user_id: str, goal_id: int) -> str:
+    return _path_version_hash(store.get_goal(user_id, goal_id) or {})
+
+
+def _compute_band_state(
+    dims: Dict[str, float],
+    prev_band_state: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    return fslsm_adaptation.compute_band_state(
+        dims,
+        prev_band_state=prev_band_state,
+        hysteresis=_ADAPTATION_HYSTERESIS,
+    )
+
+
+def _build_mastery_results_for_plan(learning_path: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return fslsm_adaptation.build_mastery_results_for_plan(
+        learning_path,
+        mastery_threshold_default=APP_CONFIG["mastery_threshold_default"],
+    )
+
+
+def _any_severe_mastery_failure(mastery_results: List[Dict[str, Any]]) -> bool:
+    return fslsm_adaptation.any_severe_mastery_failure(
+        mastery_results,
+        mastery_threshold_default=APP_CONFIG["mastery_threshold_default"],
+    )
+
+
+def _build_adaptation_fingerprint(
+    *,
+    goal_id: int,
+    band_state_by_dim: Dict[str, str],
+    evidence_windows: Dict[str, Any],
+    mode: str,
+    path_version: str,
+) -> str:
+    return fslsm_adaptation.build_adaptation_fingerprint(
+        goal_id=goal_id,
+        band_state_by_dim=band_state_by_dim,
+        evidence_windows=evidence_windows,
+        mode=mode,
+        path_version=path_version,
+    )
+
+
+def _session_signal_keys(
+    session: Dict[str, Any],
+    learning_content: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    return fslsm_adaptation.session_signal_keys(session, learning_content)
+
+
+def _record_snapshot_timestamp(
+    user_id: str,
+    goal_id: int,
+    goal: Optional[Dict[str, Any]] = None,
+) -> None:
+    goal_obj = goal or store.get_goal(user_id, goal_id)
+    if not isinstance(goal_obj, dict):
+        return
+    state = _normalize_adaptation_state(goal_obj)
+    state["snapshot_saved_at"] = _now_iso()
+    store.patch_goal(user_id, goal_id, {"adaptation_state": state})
+
+
+def _get_snapshot_with_ttl(
+    user_id: str,
+    goal_id: int,
+    goal: Dict[str, Any],
+    adaptation_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    snapshot = store.get_profile_snapshot(user_id, goal_id)
+    if not isinstance(snapshot, dict):
+        return None
+    saved_at = adaptation_state.get("snapshot_saved_at")
+    saved_ts = _parse_iso_ts(saved_at)
+    if saved_ts is None:
+        return snapshot
+    if datetime.now(timezone.utc).timestamp() - saved_ts <= _ADAPTATION_SNAPSHOT_TTL_SECS:
+        return snapshot
+    store.delete_profile_snapshot(user_id, goal_id)
+    adaptation_state["snapshot_saved_at"] = None
+    store.patch_goal(user_id, goal_id, {"adaptation_state": adaptation_state})
+    return None
+
+
+def _append_evidence(
+    evidence_windows: Dict[str, Any],
+    key: str,
+    *,
+    severe_failure: bool,
+    strong_success: bool,
+) -> None:
+    fslsm_adaptation.append_evidence(
+        evidence_windows,
+        key,
+        severe_failure=severe_failure,
+        strong_success=strong_success,
+    )
+
+
+def _update_fslsm_from_evidence(
+    profile: Dict[str, Any],
+    adaptation_state: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, float]]:
+    return fslsm_adaptation.update_fslsm_from_evidence(
+        profile,
+        adaptation_state,
+        daily_cap=_ADAPTATION_DAILY_CAP,
+    )
+
+
+def _reset_adaptation_on_profile_sign_flip(
+    user_id: str,
+    goal_id: int,
+    old_profile: Dict[str, Any],
+    new_profile: Dict[str, Any],
+) -> None:
+    with _get_adaptation_goal_lock(user_id, goal_id):
+        goal = store.get_goal(user_id, goal_id)
+        if not isinstance(goal, dict):
+            return
+        adaptation_state = _normalize_adaptation_state(goal)
+        flipped_dims = fslsm_adaptation.clear_opposite_evidence_on_sign_flip(
+            old_profile if isinstance(old_profile, dict) else {},
+            new_profile if isinstance(new_profile, dict) else {},
+            adaptation_state,
+        )
+        if not flipped_dims:
+            return
+        adaptation_state["updated_at"] = _now_iso()
+        store.patch_goal(user_id, goal_id, {"adaptation_state": adaptation_state})
+
+
+def _build_adaptation_signal(
+    goal: Dict[str, Any],
+    profile: Dict[str, Any],
+    adaptation_state: Dict[str, Any],
+    snapshot_profile: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, Optional[str], List[str], Dict[str, str]]:
+    return fslsm_adaptation.build_adaptation_signal(
+        goal,
+        profile,
+        adaptation_state,
+        mastery_threshold_default=APP_CONFIG["mastery_threshold_default"],
+        snapshot_profile=snapshot_profile,
+        hysteresis=_ADAPTATION_HYSTERESIS,
+    )
+
+
+def _build_goal_runtime_state(user_id: str, goal_id: int) -> dict:
+    goal = _goal_or_404(user_id, goal_id)
+    profile = store.get_profile(user_id, goal_id) or {}
+    adaptation_state = _normalize_adaptation_state(goal)
+    snapshot_profile = _get_snapshot_with_ttl(user_id, goal_id, goal, adaptation_state)
+    sessions = []
+    learning_path = goal.get("learning_path", [])
+    for idx, session in enumerate(learning_path):
+        if not isinstance(session, dict):
+            continue
+        navigation_mode = session.get("navigation_mode", "linear")
+        if navigation_mode == "free" or idx == 0:
+            is_locked = False
+        else:
+            prev = learning_path[idx - 1] if idx - 1 < len(learning_path) else {}
+            is_locked = not bool(prev.get("is_mastered", False))
+        is_mastered = bool(session.get("is_mastered", False))
+        can_complete = True
+        completion_block_reason = None
+        if navigation_mode == "linear" and not is_mastered:
+            can_complete = False
+            completion_block_reason = "session_not_mastered"
+        sessions.append({
+            "session_index": idx,
+            "session_id": session.get("id", ""),
+            "is_locked": is_locked,
+            "can_open": not is_locked,
+            "can_complete": can_complete,
+            "completion_block_reason": completion_block_reason,
+            "if_learned": bool(session.get("if_learned", False)),
+            "is_mastered": is_mastered,
+            "mastery_score": session.get("mastery_score"),
+            "mastery_threshold": session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"]),
+            "navigation_mode": navigation_mode,
+        })
+    adaptation_suggested, adaptation_message, sources, _current_band_state = _build_adaptation_signal(
+        goal,
+        profile,
+        adaptation_state,
+        snapshot_profile=snapshot_profile,
+    )
+    return {
+        "goal_id": goal_id,
+        "adaptation": {
+            "suggested": adaptation_suggested,
+            "message": adaptation_message,
+            "sources": sources,
+        },
+        "sessions": sessions,
+    }
 
 class BehaviorEvent(BaseModel):
     user_id: str
@@ -218,54 +677,362 @@ async def get_events(user_id: str):
     return {"user_id": user_id, "events": store.get_events(user_id)}
 
 
-@app.get("/user-state/{user_id}")
-async def get_user_state(user_id: str):
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-    return {"state": state}
-
-
-@app.put("/user-state/{user_id}")
-async def put_user_state(user_id: str, body: UserStateRequest):
-    store.put_user_state(user_id, body.state)
+@app.delete("/user-data/{user_id}")
+async def delete_user_data(user_id: str):
+    """Delete all non-auth data for a user (profiles, events, state, snapshots).
+    Used by Restart Onboarding so mastered skills and persona info are fully cleared."""
+    store.delete_all_user_data(user_id)
     return {"ok": True}
 
 
-@app.delete("/user-state/{user_id}")
-async def delete_user_state(user_id: str):
-    store.delete_user_state(user_id)
+@app.get("/goals/{user_id}")
+async def list_goals(user_id: str):
+    return {"goals": store.list_goal_aggregates(user_id)}
+
+
+@app.post("/goals/{user_id}")
+async def create_goal(user_id: str, request: GoalCreateRequest):
+    payload = request.model_dump()
+    learner_profile = payload.pop("learner_profile", None)
+    goal = store.create_goal(user_id, payload)
+    if isinstance(learner_profile, dict) and learner_profile:
+        store.upsert_profile(user_id, goal["id"], learner_profile)
+    return store.get_goal_aggregate(user_id, goal["id"])
+
+
+@app.patch("/goals/{user_id}/{goal_id}")
+async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
+    payload = {k: v for k, v in request.model_dump().items() if v is not None}
+    goal_before = store.get_goal(user_id, goal_id)
+    if goal_before is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    path_hash_before = _path_version_hash(goal_before)
+    goal = store.patch_goal(user_id, goal_id, payload)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    if (
+        PREFETCH_SERVICE.prefetch_enabled()
+        and "learning_path" in payload
+        and _path_version_hash(goal) != path_hash_before
+    ):
+        PREFETCH_SERVICE.enqueue_for_goal(
+            user_id=user_id,
+            goal_id=goal_id,
+            trigger_source="goal_patch",
+            start_after=-1,
+            apply_cooldown=False,
+        )
+    return store.get_goal_aggregate(user_id, goal_id)
+
+
+@app.delete("/goals/{user_id}/{goal_id}")
+async def soft_delete_goal(user_id: str, goal_id: int):
+    goal = store.delete_goal(user_id, goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
     return {"ok": True}
+
+
+@app.get("/goal-runtime-state/{user_id}")
+async def goal_runtime_state(user_id: str, goal_id: int):
+    return _build_goal_runtime_state(user_id, goal_id)
+
+
+@app.get("/learning-content/{user_id}/{goal_id}/{session_index}")
+async def get_learning_content(user_id: str, goal_id: int, session_index: int, no_wait: bool = False):
+    started = time.perf_counter()
+    path_hash = PREFETCH_SERVICE.current_path_hash(user_id, goal_id)
+    record = store.get_learning_content(user_id, goal_id, session_index)
+    if record:
+        PREFETCH_SERVICE.log_content_event(
+            "get_content",
+            user_id=user_id,
+            goal_id=goal_id,
+            session_index=session_index,
+            trigger_source="api_get_learning_content",
+            status="cache_hit",
+            path_hash=path_hash,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
+    if not record:
+        if PREFETCH_SERVICE.prefetch_enabled() and not bool(no_wait):
+            PREFETCH_SERVICE.wait_for_inflight_content(
+                user_id=user_id,
+                goal_id=goal_id,
+                session_index=session_index,
+                timeout_secs=PREFETCH_SERVICE.prefetch_short_wait_secs(),
+            )
+            record = store.get_learning_content(user_id, goal_id, session_index)
+            if record:
+                PREFETCH_SERVICE.log_content_event(
+                    "get_content",
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    session_index=session_index,
+                    trigger_source="api_get_learning_content",
+                    status="get_wait_hit",
+                    path_hash=path_hash,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                )
+    if not record:
+        PREFETCH_SERVICE.log_content_event(
+            "get_content",
+            user_id=user_id,
+            goal_id=goal_id,
+            session_index=session_index,
+            trigger_source="api_get_learning_content",
+            status="get_miss",
+            path_hash=path_hash,
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
+        raise HTTPException(status_code=404, detail="Learning content not found")
+    return record.get("learning_content", {})
+
+
+@app.delete("/learning-content/{user_id}/{goal_id}/{session_index}")
+async def delete_learning_content(user_id: str, goal_id: int, session_index: int):
+    store.delete_learning_content(user_id, goal_id, session_index)
+    return {"ok": True}
+
+
+@app.post("/session-activity")
+async def session_activity(request: SessionActivityRequest):
+    if request.event_type not in {"start", "heartbeat", "end"}:
+        raise HTTPException(status_code=400, detail="Unsupported event_type")
+
+    event_time = request.event_time or datetime.now(timezone.utc).isoformat()
+    interval = APP_CONFIG["motivational_trigger_interval_secs"]
+    activity = _normalize_session_activity_record(
+        store.get_session_activity(request.user_id, request.goal_id, request.session_index) or {
+        "user_id": request.user_id,
+        "goal_id": request.goal_id,
+        "session_index": request.session_index,
+        "start_time": None,
+        "end_time": None,
+        "intervals": [],
+        "heartbeats": [],
+        "trigger_events": [],
+        "last_activity_at": None,
+    },
+        interval,
+    )
+
+    trigger = {"show": False, "kind": None, "message": None}
+
+    if request.event_type == "start":
+        last_activity_ts = _parse_iso_ts(activity.get("last_activity_at"))
+        current_ts = _parse_iso_ts(event_time)
+        intervals = activity.setdefault("intervals", [])
+        has_open_interval = bool(intervals and intervals[-1].get("end_time") is None)
+        if has_open_interval and last_activity_ts is not None and current_ts is not None and (current_ts - last_activity_ts) > interval:
+            _close_open_interval(activity, activity.get("last_activity_at"), interval)
+            has_open_interval = False
+        if not has_open_interval:
+            intervals.append({"start_time": event_time, "end_time": None})
+        activity["start_time"] = activity.get("start_time") or event_time
+        activity["last_activity_at"] = event_time
+        activity.setdefault("heartbeats", []).append(event_time)
+    elif request.event_type == "heartbeat":
+        heartbeats = activity.setdefault("heartbeats", [])
+        activity["last_activity_at"] = event_time
+        should_append = True
+        if heartbeats:
+            try:
+                last = datetime.fromisoformat(heartbeats[-1]).timestamp()
+                curr = datetime.fromisoformat(event_time).timestamp()
+                should_append = (curr - last) >= interval
+            except Exception:
+                should_append = True
+        if should_append:
+            heartbeats.append(event_time)
+            trigger_count = len(activity.setdefault("trigger_events", []))
+            kind = "posture" if trigger_count % 2 == 0 else "encouragement"
+            fslsm_dims = _extract_fslsm_dims(
+                store.get_profile(request.user_id, request.goal_id) or {}
+            )
+            message = pick_motivational_message(
+                kind, fslsm_dims, trigger_index=trigger_count // 2
+            )
+            activity["trigger_events"].append({"kind": kind, "time": event_time})
+            trigger = {"show": True, "kind": kind, "message": message}
+    else:
+        _close_open_interval(activity, event_time, interval)
+
+    if activity.get("intervals"):
+        activity["start_time"] = activity["intervals"][0].get("start_time")
+        activity["end_time"] = activity["intervals"][-1].get("end_time")
+    store.upsert_session_activity(request.user_id, request.goal_id, request.session_index, activity)
+    if request.event_type == "start":
+        goal_for_prefetch = store.get_goal(request.user_id, request.goal_id) or {}
+        next_idx = PREFETCH_SERVICE.first_unlearned_session_index(
+            goal_for_prefetch.get("learning_path", []),
+            start_after=request.session_index,
+        )
+        PREFETCH_SERVICE.log_content_event(
+            "session_start_target",
+            user_id=request.user_id,
+            goal_id=request.goal_id,
+            session_index=int(next_idx) if next_idx is not None else -1,
+            trigger_source="session_start",
+            status="resolved_next_session" if next_idx is not None else "no_candidate",
+            path_hash=_path_version_hash(goal_for_prefetch),
+            duration_ms=0.0,
+            current_session_index=request.session_index,
+        )
+        if next_idx is not None:
+            PREFETCH_SERVICE.enqueue_for_session(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=next_idx,
+                trigger_source="session_start",
+                apply_cooldown=True,
+            )
+    return {"ok": True, "trigger": trigger}
+
+
+@app.post("/complete-session")
+async def complete_session(request: CompleteSessionRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    goal = _goal_or_404(request.user_id, request.goal_id)
+    learning_path = goal.get("learning_path", [])
+    if request.session_index < 0 or request.session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = learning_path[request.session_index]
+    session["if_learned"] = True
+    learning_path[request.session_index] = session
+    store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
+
+    profile = store.get_profile(request.user_id, request.goal_id) or {}
+    try:
+        profile = update_cognitive_status_with_llm(llm, profile, session)
+    except Exception:
+        profile = update_learner_profile_with_llm(
+            llm,
+            profile,
+            "Session completed. Update cognitive status only. Do NOT change learning_preferences or behavioral_patterns.",
+            "",
+            session,
+        )
+    store.upsert_profile(request.user_id, request.goal_id, profile)
+    merged = _refresh_goal_profile(request.user_id, request.goal_id)
+    store.append_mastery_history(request.user_id, request.goal_id, _compute_mastery_rate(merged))
+    await session_activity(SessionActivityRequest(
+        user_id=request.user_id,
+        goal_id=request.goal_id,
+        session_index=request.session_index,
+        event_type="end",
+        event_time=request.session_end_time,
+    ))
+    return {
+        "ok": True,
+        "goal": _goal_aggregate_or_404(request.user_id, request.goal_id),
+        "learner_profile": merged,
+        "updated_session": session,
+        "goal_runtime_state": _build_goal_runtime_state(request.user_id, request.goal_id),
+        "profile_sync_applied": True,
+    }
+
+
+@app.post("/submit-content-feedback")
+async def submit_content_feedback(request: SubmitContentFeedbackRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    feedback = _parse_jsonish(request.feedback, request.feedback)
+    merged, profile_updated = safe_update_learning_preferences(
+        llm,
+        learner_interactions=feedback,
+        learner_information="",
+        user_id=request.user_id,
+        goal_id=request.goal_id,
+        get_profile_fn=store.get_profile,
+        save_snapshot_fn=store.save_profile_snapshot,
+        record_snapshot_timestamp_fn=_record_snapshot_timestamp,
+        update_learning_preferences_fn=update_learning_preferences_with_llm,
+        reset_adaptation_on_sign_flip_fn=_reset_adaptation_on_profile_sign_flip,
+        upsert_profile_fn=store.upsert_profile,
+        refresh_goal_profile_fn=_refresh_goal_profile,
+    )
+    return {
+        "ok": True,
+        "goal": _goal_aggregate_or_404(request.user_id, request.goal_id),
+        "learner_profile": merged,
+        "profile_updated": profile_updated,
+        "goal_runtime_state": _build_goal_runtime_state(request.user_id, request.goal_id),
+        "profile_sync_applied": True,
+    }
+
+
+@app.get("/dashboard-metrics/{user_id}")
+async def dashboard_metrics(user_id: str, goal_id: int):
+    goal = _goal_aggregate_or_404(user_id, goal_id)
+    profile = goal.get("learner_profile", {})
+    metrics = await get_behavioral_metrics(user_id, goal_id=goal_id)
+    skill_levels = APP_CONFIG["skill_levels"]
+    level_map = {name: idx for idx, name in enumerate(skill_levels)}
+    mastered = profile.get("cognitive_status", {}).get("mastered_skills", [])
+    in_progress = profile.get("cognitive_status", {}).get("in_progress_skills", [])
+    skills = [
+        {
+            "name": skill.get("name", ""),
+            "required_level": skill.get("proficiency_level", "unlearned"),
+            "current_level": skill.get("proficiency_level", "unlearned"),
+        }
+        for skill in mastered
+    ] + [
+        {
+            "name": skill.get("name", ""),
+            "required_level": skill.get("required_proficiency_level", "unlearned"),
+            "current_level": skill.get("current_proficiency_level", "unlearned"),
+        }
+        for skill in in_progress
+    ]
+    session_series = []
+    idle_timeout = APP_CONFIG["motivational_trigger_interval_secs"]
+    for idx, session in enumerate(goal.get("learning_path", [])):
+        activity = store.get_session_activity(user_id, goal_id, idx) or {}
+        time_spent_min = _sum_activity_duration_secs(activity, idle_timeout) / 60.0
+        session_series.append({"session_id": session.get("id", f"session-{idx}"), "time_spent_min": time_spent_min})
+    history = store.get_mastery_history(user_id, goal_id)
+    mastery_series = [{"sample_index": idx, "mastery_rate": item.get("mastery_rate", 0.0)} for idx, item in enumerate(history)]
+    return {
+        "goal_id": goal_id,
+        "overall_progress": profile.get("cognitive_status", {}).get("overall_progress", 0.0),
+        "skill_radar": {
+            "labels": [skill["name"] for skill in skills],
+            "current_levels": [level_map.get(skill["current_level"], 0) for skill in skills],
+            "required_levels": [level_map.get(skill["required_level"], 0) for skill in skills],
+            "skill_levels": skill_levels,
+        },
+        "session_time_series": session_series,
+        "mastery_time_series": mastery_series,
+        "behavioral_metrics": metrics,
+    }
 
 
 @app.get("/behavioral-metrics/{user_id}")
 async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
+    goals = store.get_all_goals_for_user(user_id)
+    if not goals:
+        raise HTTPException(status_code=404, detail="No goals found for this user_id")
 
-    session_times = state.get("session_learning_times", {})
-    mastery_history = state.get("learned_skills_history", {})
-    goals = state.get("goals", [])
-
-    # Filter sessions for the requested goal (keys are "{goal_id}-{session_id}")
-    prefix = f"{goal_id}-" if goal_id is not None else None
     completed = []
     total_triggers = 0
-    for key, times in session_times.items():
-        if not isinstance(times, dict):
+    idle_timeout = APP_CONFIG["motivational_trigger_interval_secs"]
+    for goal in goals:
+        gid = goal.get("id")
+        if goal_id is not None and gid != goal_id:
             continue
-        if prefix and not str(key).startswith(prefix):
-            continue
-        start = times.get("start_time")
-        end = times.get("end_time")
-        if start is not None and end is not None:
-            completed.append(max(end - start, 0.0))
-        triggers = times.get("trigger_time_list", [])
-        if len(triggers) > 1:
-            total_triggers += len(triggers) - 1
+        for idx, _session in enumerate(goal.get("learning_path", [])):
+            times = store.get_session_activity(user_id, gid, idx)
+            if not isinstance(times, dict):
+                continue
+            duration = _sum_activity_duration_secs(times, idle_timeout)
+            if duration > 0:
+                completed.append(duration)
+            triggers = times.get("trigger_events", [])
+            if isinstance(triggers, list):
+                total_triggers += len(triggers)
 
-    # Session completion from learning_path
     total_in_path = 0
     sessions_learned = 0
     if goal_id is not None:
@@ -276,12 +1043,8 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
                 sessions_learned = sum(1 for s in path if isinstance(s, dict) and s.get("if_learned"))
                 break
 
-    # Mastery history (keys may be int or str depending on serialization)
-    history = []
-    if isinstance(mastery_history, dict) and goal_id is not None:
-        history = mastery_history.get(str(goal_id), mastery_history.get(goal_id, []))
-    if not isinstance(history, list):
-        history = []
+    history = store.get_mastery_history(user_id, goal_id) if goal_id is not None else []
+    history_rates = [float(item.get("mastery_rate", 0.0)) for item in history if isinstance(item, dict)]
 
     total_duration = sum(completed)
     avg_duration = total_duration / len(completed) if completed else 0.0
@@ -295,29 +1058,22 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
         "avg_session_duration_sec": round(avg_duration, 1),
         "total_learning_time_sec": round(total_duration, 1),
         "motivational_triggers_count": total_triggers,
-        "mastery_history": history,
-        "latest_mastery_rate": history[-1] if history else None,
+        "mastery_history": history_rates,
+        "latest_mastery_rate": history_rates[-1] if history_rates else None,
     }
 
 
 @app.post("/evaluate-mastery")
 async def evaluate_mastery(request: MasteryEvaluationRequest):
     """Evaluate quiz answers, compute score, and determine mastery status."""
-    from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
+    from utils.quiz_scorer import (
+        compute_quiz_score,
+        get_mastery_threshold_for_session,
+        is_strong_success,
+    )
     from utils.solo_evaluator import evaluate_free_text_response, evaluate_short_answer_response
 
-    state = store.get_user_state(request.user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == request.goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(request.user_id, request.goal_id)
 
     learning_path = goal.get("learning_path", [])
     if request.session_index < 0 or request.session_index >= len(learning_path):
@@ -326,10 +1082,8 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     session = learning_path[request.session_index]
 
     # Retrieve cached quiz data
-    session_uid = f"{request.goal_id}-{request.session_index}"
-    doc_caches = state.get("document_caches", {})
-    cached = doc_caches.get(session_uid, {})
-    quiz_data = cached.get("quizzes")
+    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index) or {}
+    quiz_data = (cached.get("learning_content") or {}).get("quizzes")
     if not quiz_data:
         raise HTTPException(status_code=404, detail="No quiz data found for this session")
 
@@ -403,14 +1157,41 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
 
     is_mastered = score_pct >= threshold
 
-    # Update session in state
+    # Update session in goal store
     session["mastery_score"] = round(score_pct, 1)
     session["is_mastered"] = is_mastered
     session["mastery_threshold"] = threshold
-    store.put_user_state(request.user_id, state)
+    learning_path[request.session_index] = session
+    goal_after_score = store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path}) or _goal_or_404(request.user_id, request.goal_id)
+    adaptation_state = _normalize_adaptation_state(goal_after_score)
+    profile = store.get_profile(request.user_id, request.goal_id) or {}
+    severe_failure = (not is_mastered) and (score_pct < threshold * 0.8)
+    strong_success = is_strong_success(score_pct, threshold, margin=10.0, max_score=100.0)
+    learning_content_payload = (cached.get("learning_content") if isinstance(cached, dict) else {}) or {}
+    signal_keys = _session_signal_keys(session, learning_content_payload)
+    for key in signal_keys:
+        _append_evidence(
+            adaptation_state.setdefault("evidence_windows", {}),
+            key,
+            severe_failure=severe_failure,
+            strong_success=strong_success,
+        )
 
-    # Flag adaptation suggestion if score is significantly below threshold
-    plan_adaptation_suggested = (not is_mastered) and (score_pct < threshold * 0.8)
+    updated_profile, fslsm_adjustments = _update_fslsm_from_evidence(profile, adaptation_state)
+    if any(abs(val) > 1e-9 for val in fslsm_adjustments.values()):
+        store.upsert_profile(request.user_id, request.goal_id, updated_profile)
+        profile = updated_profile
+
+    adaptation_state["updated_at"] = _now_iso()
+    goal_after_score = store.patch_goal(
+        request.user_id,
+        request.goal_id,
+        {"adaptation_state": adaptation_state},
+    ) or _goal_or_404(request.user_id, request.goal_id)
+    store.append_mastery_history(request.user_id, request.goal_id, _compute_mastery_rate(profile))
+
+    runtime_adaptation = _build_goal_runtime_state(request.user_id, request.goal_id).get("adaptation", {})
+    plan_adaptation_suggested = bool(runtime_adaptation.get("suggested", False))
 
     response: Dict[str, Any] = {
         "score_percentage": round(score_pct, 1),
@@ -420,6 +1201,7 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
         "total_count": total,
         "session_id": session.get("id", ""),
         "plan_adaptation_suggested": plan_adaptation_suggested,
+        "fslsm_adjustments": fslsm_adjustments,
     }
     if short_answer_feedback:
         response["short_answer_feedback"] = short_answer_feedback
@@ -433,18 +1215,7 @@ async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
     """Return the question type counts for a session based on its proficiency level."""
     from utils.quiz_scorer import get_quiz_mix_for_session
 
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(user_id, goal_id)
 
     learning_path = goal.get("learning_path", [])
     if session_index < 0 or session_index >= len(learning_path):
@@ -458,18 +1229,7 @@ async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
 @app.get("/session-mastery-status/{user_id}")
 async def session_mastery_status(user_id: str, goal_id: int):
     """Return mastery status for all sessions in a goal."""
-    state = store.get_user_state(user_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="No state found for this user_id")
-
-    goals = state.get("goals", [])
-    goal = None
-    for g in goals:
-        if isinstance(g, dict) and g.get("id") == goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    goal = _goal_or_404(user_id, goal_id)
 
     result = []
     for session in goal.get("learning_path", []):
@@ -488,136 +1248,272 @@ class AdaptLearningPathRequest(BaseRequest):
     """Request for adaptive plan regeneration."""
     user_id: str
     goal_id: int
-    new_learner_profile: str
+    new_learner_profile: Optional[str] = None
+    force: bool = False
 
 
 @app.post("/adapt-learning-path")
 async def adapt_learning_path(request: AdaptLearningPathRequest):
     """Detect preference/mastery changes and adapt the learning path accordingly."""
-    from modules.tools.plan_regeneration_tool import (
+    from modules.learning_plan_generator.utils.plan_regeneration import (
         compute_fslsm_deltas,
         decide_regeneration,
+        RegenerationDecision,
     )
 
     llm = get_llm(request.model_provider, request.model_name)
+    fingerprint: Optional[str] = None
 
     try:
-        new_profile = request.new_learner_profile
-        if isinstance(new_profile, str) and new_profile.strip():
-            new_profile = ast.literal_eval(new_profile)
-        if not isinstance(new_profile, dict):
-            new_profile = {}
+        with _get_adaptation_goal_lock(request.user_id, request.goal_id):
+            goal = _goal_or_404(request.user_id, request.goal_id)
+            adaptation_state = _normalize_adaptation_state(goal)
+            profile_from_store = store.get_profile(request.user_id, request.goal_id) or {}
+            mode = "auto"
+            effective_profile = profile_from_store
+            if isinstance(request.new_learner_profile, str) and request.new_learner_profile.strip():
+                mode = "explicit"
+                try:
+                    parsed_profile = ast.literal_eval(request.new_learner_profile)
+                except Exception:
+                    parsed_profile = {}
+                if isinstance(parsed_profile, dict) and parsed_profile:
+                    effective_profile = parsed_profile
+                    store.upsert_profile(request.user_id, request.goal_id, effective_profile)
 
-        # Load current state and previous profile
-        state = store.get_user_state(request.user_id)
-        if state is None:
-            raise HTTPException(status_code=404, detail="No state found for this user_id")
+            snapshot_profile = _get_snapshot_with_ttl(
+                request.user_id,
+                request.goal_id,
+                goal,
+                adaptation_state,
+            )
+            old_profile = snapshot_profile or profile_from_store
+            old_fslsm = _extract_fslsm_dims(old_profile)
+            new_fslsm = _extract_fslsm_dims(effective_profile)
 
-        goals = state.get("goals", [])
-        goal = None
-        for g in goals:
-            if isinstance(g, dict) and g.get("id") == request.goal_id:
-                goal = g
-                break
-        if goal is None:
-            raise HTTPException(status_code=404, detail="Goal not found")
+            current_plan = {"learning_path": goal.get("learning_path", [])}
+            mastery_results = _build_mastery_results_for_plan(current_plan.get("learning_path", []))
+            prev_band_state = adaptation_state.get("last_band_state_by_dim", {})
+            if not isinstance(prev_band_state, dict):
+                prev_band_state = {}
+            if isinstance(snapshot_profile, dict):
+                old_band_state = _compute_band_state(old_fslsm, prev_band_state)
+                current_band_state = _compute_band_state(new_fslsm, old_band_state)
+                changed_dims = [
+                    dim for dim in _FSLSM_DIM_KEYS
+                    if old_band_state.get(dim) and old_band_state.get(dim) != current_band_state.get(dim)
+                ]
+            else:
+                current_band_state = _compute_band_state(new_fslsm, prev_band_state)
+                changed_dims = [
+                    dim for dim in _FSLSM_DIM_KEYS
+                    if prev_band_state.get(dim) and prev_band_state.get(dim) != current_band_state.get(dim)
+                ]
+            trigger_sources: List[str] = []
+            if _any_severe_mastery_failure(mastery_results):
+                trigger_sources.append("mastery")
+            if changed_dims:
+                trigger_sources.append("preference_band_transition")
+            if request.force:
+                trigger_sources.append("force")
 
-        current_plan = {"learning_path": goal.get("learning_path", [])}
-        # old_profile: use snapshot (pre-update) if available; fall back to current store
-        old_profile = store.get_profile_snapshot(request.user_id, request.goal_id) or \
-                      store.get_profile(request.user_id, request.goal_id) or {}
-
-        # Extract FSLSM dimensions
-        old_fslsm = (
-            old_profile
-            .get("learning_preferences", {})
-            .get("fslsm_dimensions", {})
-        )
-        new_fslsm = (
-            new_profile
-            .get("learning_preferences", {})
-            .get("fslsm_dimensions", {})
-        )
-
-        # Gather mastery results from the learning path
-        mastery_results = []
-        for i, session in enumerate(current_plan.get("learning_path", [])):
-            if session.get("mastery_score") is not None:
-                mastery_results.append({
-                    "session_index": i,
-                    "session_id": session.get("id", ""),
-                    "score": session.get("mastery_score"),
-                    "is_mastered": session.get("is_mastered", False),
-                    "threshold": session.get("mastery_threshold", APP_CONFIG["mastery_threshold_default"]),
-                })
-
-        # Deterministic decision
-        decision = decide_regeneration(
-            current_plan, old_fslsm, new_fslsm, mastery_results,
-        )
-
-        result_plan = current_plan
-        agent_metadata = {
-            "decision": decision.model_dump(),
-            "fslsm_deltas": compute_fslsm_deltas(old_fslsm, new_fslsm),
-            "mastery_results": mastery_results,
-        }
-
-        if decision.action == "keep":
-            store.delete_profile_snapshot(request.user_id, request.goal_id)
-            return {**result_plan, "agent_metadata": agent_metadata}
-
-        if decision.action == "adjust_future":
-            # Reschedule only future sessions
-            result_plan = reschedule_learning_path_with_llm(
-                llm,
-                current_plan.get("learning_path", []),
-                new_profile,
-                other_feedback=f"Adaptation reason: {decision.reason}",
+            fingerprint = _build_adaptation_fingerprint(
+                goal_id=request.goal_id,
+                band_state_by_dim=current_band_state,
+                evidence_windows=adaptation_state.get("evidence_windows", {}),
+                mode=mode,
+                path_version=_path_version_hash(goal),
             )
 
-        elif decision.action == "regenerate":
-            # Full agentic regeneration preserving learned sessions
-            plan, regen_metadata = schedule_learning_path_agentic(
-                llm, new_profile,
-            )
-            # Preserve learned sessions from original plan
-            learned = [
-                s for s in current_plan.get("learning_path", [])
-                if s.get("if_learned", False)
-            ]
-            new_sessions = [
-                s for s in plan.get("learning_path", [])
-                if not s.get("if_learned", False)
-            ]
-            # Renumber new session IDs to avoid collisions with learned sessions
-            learned_ids = {s.get("id") for s in learned}
-            offset = len(learned)
-            for i, s in enumerate(new_sessions):
-                new_id = f"Session {offset + i + 1}"
-                # Avoid collisions if IDs happen to overlap
-                while new_id in learned_ids:
-                    offset += 1
+            if (
+                not request.force
+                and adaptation_state.get("last_applied_fingerprint") == fingerprint
+            ):
+                adaptation_state["last_result"] = "noop"
+                adaptation_state["last_reason"] = "Duplicate adaptation fingerprint."
+                adaptation_state["last_band_state_by_dim"] = current_band_state
+                store.patch_goal(request.user_id, request.goal_id, {"adaptation_state": adaptation_state})
+                return {
+                    **current_plan,
+                    "agent_metadata": {},
+                    "adaptation": {
+                        "status": "noop_duplicate",
+                        "applied": False,
+                        "reason": adaptation_state["last_reason"],
+                        "trigger_sources": trigger_sources,
+                        "fingerprint": fingerprint,
+                        "cooldown_remaining_secs": 0,
+                    },
+                }
+
+            if (
+                not request.force
+                and adaptation_state.get("last_failed_fingerprint") == fingerprint
+            ):
+                failed_at = _parse_iso_ts(adaptation_state.get("last_failed_at"))
+                now_ts = datetime.now(timezone.utc).timestamp()
+                if failed_at is not None and now_ts - failed_at < _ADAPTATION_COOLDOWN_SECS:
+                    remaining = int(_ADAPTATION_COOLDOWN_SECS - (now_ts - failed_at))
+                    return {
+                        **current_plan,
+                        "agent_metadata": {},
+                        "adaptation": {
+                            "status": "cooldown",
+                            "applied": False,
+                            "reason": "Recent adaptation failure is in cooldown.",
+                            "trigger_sources": trigger_sources,
+                            "fingerprint": fingerprint,
+                            "cooldown_remaining_secs": max(remaining, 0),
+                        },
+                    }
+
+            if not trigger_sources:
+                adaptation_state["last_applied_fingerprint"] = fingerprint
+                adaptation_state["last_result"] = "noop"
+                adaptation_state["last_reason"] = "No adaptation trigger sources detected."
+                adaptation_state["last_band_state_by_dim"] = current_band_state
+                adaptation_state["snapshot_saved_at"] = None
+                store.patch_goal(request.user_id, request.goal_id, {"adaptation_state": adaptation_state})
+                store.delete_profile_snapshot(request.user_id, request.goal_id)
+                return {
+                    **current_plan,
+                    "agent_metadata": {},
+                    "adaptation": {
+                        "status": "noop",
+                        "applied": False,
+                        "reason": adaptation_state["last_reason"],
+                        "trigger_sources": [],
+                        "fingerprint": fingerprint,
+                        "cooldown_remaining_secs": 0,
+                    },
+                }
+
+            decision = decide_regeneration(current_plan, old_fslsm, new_fslsm, mastery_results)
+            if decision.action == "keep" and ("preference_band_transition" in trigger_sources or request.force):
+                future_indices = [
+                    i for i, session in enumerate(current_plan.get("learning_path", []))
+                    if not bool((session or {}).get("if_learned", False))
+                ]
+                decision = RegenerationDecision(
+                    action="adjust_future",
+                    reason="FSLSM band transition detected. Adjusting future sessions.",
+                    affected_sessions=future_indices,
+                )
+
+            result_plan = current_plan
+            agent_metadata = {
+                "decision": decision.model_dump(),
+                "fslsm_deltas": compute_fslsm_deltas(old_fslsm, new_fslsm),
+                "mastery_results": mastery_results,
+                "trigger_sources": trigger_sources,
+                "changed_band_dimensions": changed_dims,
+            }
+
+            if decision.action == "adjust_future":
+                result_plan = reschedule_learning_path_with_llm(
+                    llm,
+                    current_plan.get("learning_path", []),
+                    effective_profile,
+                    other_feedback=f"Adaptation reason: {decision.reason}",
+                )
+            elif decision.action == "regenerate":
+                plan, regen_metadata = schedule_learning_path_agentic(
+                    llm,
+                    effective_profile,
+                )
+                learned = [
+                    session for session in current_plan.get("learning_path", [])
+                    if session.get("if_learned", False)
+                ]
+                new_sessions = [
+                    session for session in plan.get("learning_path", [])
+                    if not session.get("if_learned", False)
+                ]
+                learned_ids = {session.get("id") for session in learned}
+                offset = len(learned)
+                for i, session in enumerate(new_sessions):
                     new_id = f"Session {offset + i + 1}"
-                s["id"] = new_id
-            result_plan = {"learning_path": learned + new_sessions}
-            agent_metadata.update(regen_metadata)
+                    while new_id in learned_ids:
+                        offset += 1
+                        new_id = f"Session {offset + i + 1}"
+                    session["id"] = new_id
+                result_plan = {"learning_path": learned + new_sessions}
+                agent_metadata.update(regen_metadata)
 
-        # Run a single evaluation pass on the adapted plan
-        sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
-        sim_feedback = sim_tool.invoke({
-            "learning_path": result_plan.get("learning_path", []),
-            "learner_profile": new_profile,
-        })
-        agent_metadata["evaluation_feedback"] = sim_feedback
-        agent_metadata["evaluation"] = _evaluate_plan_quality(sim_feedback)
+            sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
+            sim_feedback = sim_tool.invoke({
+                "learning_path": result_plan.get("learning_path", []),
+                "learner_profile": effective_profile,
+            })
+            agent_metadata["evaluation_feedback"] = sim_feedback
+            if not isinstance(sim_feedback, dict):
+                sim_feedback = {}
+            agent_metadata["evaluation"] = {
+                "pass": sim_feedback.get("is_acceptable", True),
+                "issues": sim_feedback.get("issues", []),
+                "feedback_summary": sim_feedback.get("feedback", {}),
+            }
 
-        store.delete_profile_snapshot(request.user_id, request.goal_id)
-        return {**result_plan, "agent_metadata": agent_metadata}
+            adaptation_state["last_applied_fingerprint"] = fingerprint
+            adaptation_state["last_result"] = "applied"
+            adaptation_state["last_reason"] = decision.reason
+            adaptation_state["last_band_state_by_dim"] = current_band_state
+            adaptation_state["snapshot_saved_at"] = None
+            adaptation_state["last_failed_fingerprint"] = None
+            adaptation_state["last_failed_at"] = None
+            changed_future_indices = PREFETCH_SERVICE.changed_unlearned_indices(
+                current_plan.get("learning_path", []),
+                result_plan.get("learning_path", []),
+            )
+            store.patch_goal(
+                request.user_id,
+                request.goal_id,
+                {
+                    "learning_path": result_plan.get("learning_path", []),
+                    "plan_agent_metadata": agent_metadata,
+                    "adaptation_state": adaptation_state,
+                },
+            )
+            PREFETCH_SERVICE.invalidate_learning_content_indices(
+                request.user_id,
+                request.goal_id,
+                changed_future_indices,
+            )
+            PREFETCH_SERVICE.enqueue_for_goal(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                trigger_source="adapt_applied",
+                start_after=-1,
+                apply_cooldown=False,
+            )
+            store.delete_profile_snapshot(request.user_id, request.goal_id)
+            return {
+                **result_plan,
+                "agent_metadata": agent_metadata,
+                "adaptation": {
+                    "status": "applied",
+                    "applied": True,
+                    "reason": decision.reason,
+                    "trigger_sources": trigger_sources,
+                    "fingerprint": fingerprint,
+                    "cooldown_remaining_secs": 0,
+                },
+            }
 
     except HTTPException:
         raise
     except Exception as e:
+        if fingerprint:
+            try:
+                goal = _goal_or_404(request.user_id, request.goal_id)
+                state = _normalize_adaptation_state(goal)
+                state["last_failed_fingerprint"] = fingerprint
+                state["last_failed_at"] = _now_iso()
+                state["last_result"] = "failed"
+                state["last_reason"] = str(e)
+                store.patch_goal(request.user_id, request.goal_id, {"adaptation_state": state})
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -733,13 +1629,19 @@ async def get_personas():
     return {"personas": PERSONAS}
 
 
+_prefetch_cfg = app_config.get("prefetch", {}) if hasattr(app_config, "get") else {}
 APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
     "default_llm_type": "gpt4o",
-    "default_method_name": "genmentor",
+    "default_method_name": "ami",
     "motivational_trigger_interval_secs": 180,
     "max_refinement_iterations": 5,
+    "prefetch_enabled": bool(_prefetch_cfg.get("enabled", True)),
+    "prefetch_wait_short_secs": int(_prefetch_cfg.get("wait_short_secs", 8)),
+    "prefetch_wait_long_secs": int(_prefetch_cfg.get("wait_long_secs", 130)),
+    "prefetch_cooldown_secs": int(_prefetch_cfg.get("cooldown_secs", 20)),
+    "prefetch_max_workers": int(_prefetch_cfg.get("max_workers", 2)),
     "mastery_threshold_default": 70,
     "mastery_threshold_by_proficiency": {
         "beginner": 60,
@@ -778,6 +1680,10 @@ APP_CONFIG = {
         },
     },
     "fslsm_activation_threshold": 0.7,
+    "adaptation_hysteresis_margin": 0.02,
+    "adaptation_retry_cooldown_secs": 300,
+    "adaptation_snapshot_ttl_secs": 86400,
+    "adaptation_daily_movement_cap": 0.20,
     "fslsm_thresholds": {
         "perception": {
             "low_threshold": -0.7,
@@ -810,6 +1716,16 @@ APP_CONFIG = {
     },
 }
 
+PREFETCH_SERVICE = ContentPrefetchService(
+    app_config=APP_CONFIG,
+    logger=logger,
+    store=store,
+    get_llm=get_llm,
+    build_learning_content_payload=_build_learning_content_payload,
+    path_hash_fn=_path_version_hash,
+    current_path_hash_fn=_current_path_hash,
+)
+
 
 @app.get("/config")
 async def get_app_config():
@@ -828,18 +1744,6 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-@app.get("/list-llm-models")
-async def list_llm_models():
-    try:
-        return {"models": [
-            {
-                "model_name": app_config.llm.model_name, 
-                "model_provider": app_config.llm.provider
-            }
-        ]}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": str(e)})
-
 @app.post("/chat-with-tutor")
 async def chat_with_autor(request: ChatWithAutorRequest):
     llm = get_llm(request.model_provider, request.model_name)
@@ -849,14 +1753,75 @@ async def chat_with_autor(request: ChatWithAutorRequest):
             converted_messages = ast.literal_eval(request.messages)
         else:
             return JSONResponse(status_code=400, content={"detail": "messages must be a JSON array string"})
-        response = chat_with_tutor_with_llm(
+
+        def _safe_tutor_preference_update(
+            *,
+            user_id: str,
+            goal_id: int,
+            latest_user_message: str,
+            learner_information: str = "",
+            signals: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
+            interactions = {
+                "source": "ai_tutor_chat",
+                "additional_comments": latest_user_message,
+                "signals": signals or {},
+            }
+            updated_profile, profile_updated = safe_update_learning_preferences(
+                llm,
+                learner_interactions=interactions,
+                learner_information=learner_information or "",
+                user_id=user_id,
+                goal_id=goal_id,
+                max_fslsm_delta=0.05,
+                get_profile_fn=store.get_profile,
+                save_snapshot_fn=store.save_profile_snapshot,
+                record_snapshot_timestamp_fn=_record_snapshot_timestamp,
+                update_learning_preferences_fn=update_learning_preferences_with_llm,
+                reset_adaptation_on_sign_flip_fn=_reset_adaptation_on_profile_sign_flip,
+                upsert_profile_fn=store.upsert_profile,
+                # Avoid cross-goal merge overwriting this turn's freshly-updated
+                # preference signal before we return metadata to the caller.
+                refresh_goal_profile_fn=lambda uid, gid: store.get_profile(uid, gid) or {},
+            )
+            return {
+                "profile_updated": profile_updated,
+                "updated_learner_profile": updated_profile if profile_updated else None,
+                "reason": "Profile updated from strong tutor preference signal." if profile_updated else "No persisted preference change.",
+            }
+
+        result = chat_with_tutor_with_llm(
             llm,
             converted_messages,
             learner_profile,
             search_rag_manager=search_rag_manager,
-            use_search=True,
+            safe_preference_update_fn=_safe_tutor_preference_update,
+            use_search=request.use_search if request.use_search is not None else True,
+            top_k=request.top_k or 5,
+            user_id=request.user_id,
+            goal_id=request.goal_id,
+            session_index=request.session_index,
+            use_vector_retrieval=request.use_vector_retrieval,
+            use_web_search=request.use_web_search,
+            use_media_search=request.use_media_search,
+            allow_preference_updates=(
+                request.allow_preference_updates
+                if request.allow_preference_updates is not None
+                else True
+            ),
+            learner_information=request.learner_information or "",
+            return_metadata=bool(request.return_metadata),
         )
-        return {"response": response}
+        if isinstance(result, dict):
+            response_payload = {
+                "response": result.get("response", ""),
+                "profile_updated": bool(result.get("profile_updated", False)),
+            }
+            updated_profile = result.get("updated_learner_profile")
+            if isinstance(updated_profile, dict):
+                response_payload["updated_learner_profile"] = updated_profile
+            return response_payload
+        return {"response": result}
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
@@ -970,50 +1935,6 @@ async def audit_content_bias(request: ContentBiasAuditRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/update-learner-profile")
-async def update_learner_profile(request: LearnerProfileUpdateRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learner_interactions = request.learner_interactions
-    learner_information = request.learner_information
-    session_information = request.session_information
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            try:
-                learner_profile = ast.literal_eval(learner_profile)
-            except Exception:
-                learner_profile = {"raw": learner_profile}
-        if isinstance(learner_interactions, str) and learner_interactions.strip():
-            try:
-                learner_interactions = ast.literal_eval(learner_interactions)
-            except Exception:
-                learner_interactions = {"raw": learner_interactions}
-        if isinstance(learner_information, str) and learner_information.strip():
-            try:
-                learner_information = ast.literal_eval(learner_information)
-            except Exception:
-                learner_information = {"raw": learner_information}
-        if isinstance(session_information, str) and session_information.strip():
-            try:
-                session_information = ast.literal_eval(session_information)
-            except Exception:
-                pass
-        # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
-        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
-            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
-        learner_profile = update_learner_profile_with_llm(
-            llm,
-            learner_profile,
-            learner_interactions,
-            learner_information,
-            session_information,
-        )
-        if request.user_id is not None and request.goal_id is not None:
-            store.upsert_profile(request.user_id, request.goal_id, learner_profile)
-        return {"learner_profile": learner_profile}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/update-cognitive-status")
 async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
     import traceback as _tb
@@ -1078,18 +1999,104 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
                 learner_information = ast.literal_eval(learner_information)
             except Exception:
                 learner_information = {"raw": learner_information}
+        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
+        old_profile_for_reset = copy.deepcopy(input_profile)
         # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
-        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
-            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
-        learner_profile = update_learning_preferences_with_llm(
-            llm,
-            learner_profile,
-            learner_interactions,
-            learner_information,
-        )
         if request.user_id is not None and request.goal_id is not None:
+            stored_profile = store.get_profile(request.user_id, request.goal_id)
+            if isinstance(stored_profile, dict):
+                input_profile = copy.deepcopy(stored_profile)
+                old_profile_for_reset = copy.deepcopy(stored_profile)
+            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
+            _record_snapshot_timestamp(request.user_id, request.goal_id)
+        slider_override_dims = extract_slider_override_dims(
+            learner_interactions,
+            fallback_dims=(
+                input_profile.get("learning_preferences", {}).get("fslsm_dimensions", {})
+                if isinstance(input_profile, dict)
+                else {}
+            ),
+        )
+        if slider_override_dims:
+            learner_profile = copy.deepcopy(input_profile if isinstance(input_profile, dict) else {})
+            prefs = learner_profile.setdefault("learning_preferences", {})
+            if not isinstance(prefs, dict):
+                prefs = {}
+                learner_profile["learning_preferences"] = prefs
+            prefs["fslsm_dimensions"] = slider_override_dims
+        else:
+            learner_profile = update_learning_preferences_with_llm(
+                llm,
+                input_profile,
+                learner_interactions,
+                learner_information,
+            )
+        if request.user_id is not None and request.goal_id is not None:
+            _reset_adaptation_on_profile_sign_flip(
+                request.user_id,
+                request.goal_id,
+                old_profile_for_reset,
+                learner_profile if isinstance(learner_profile, dict) else {},
+            )
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
         return {"learner_profile": learner_profile}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/update-learner-information")
+async def update_learner_information(request: LearnerInformationUpdateRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    edited_learner_information = request.edited_learner_information
+    resume_text = request.resume_text
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = ast.literal_eval(learner_profile)
+            except Exception:
+                learner_profile = {"raw": learner_profile}
+        if isinstance(edited_learner_information, str):
+            edited_learner_information = edited_learner_information.strip()
+        if isinstance(resume_text, str):
+            resume_text = resume_text.strip()
+
+        input_profile = learner_profile if isinstance(learner_profile, dict) else {}
+        old_profile_for_reset = copy.deepcopy(input_profile)
+
+        if request.user_id is not None and request.goal_id is not None:
+            stored_profile = store.get_profile(request.user_id, request.goal_id)
+            if isinstance(stored_profile, dict):
+                input_profile = copy.deepcopy(stored_profile)
+                old_profile_for_reset = copy.deepcopy(stored_profile)
+            store.save_profile_snapshot(request.user_id, request.goal_id, old_profile_for_reset)
+            _record_snapshot_timestamp(request.user_id, request.goal_id)
+
+        updated_profile = update_learner_information_with_llm(
+            llm,
+            input_profile,
+            edited_learner_information=edited_learner_information or "",
+            resume_text=resume_text or "",
+        )
+        if not isinstance(updated_profile, dict):
+            updated_profile = copy.deepcopy(input_profile if isinstance(input_profile, dict) else {})
+
+        if request.user_id is not None and request.goal_id is not None:
+            _reset_adaptation_on_profile_sign_flip(
+                request.user_id,
+                request.goal_id,
+                old_profile_for_reset,
+                updated_profile if isinstance(updated_profile, dict) else {},
+            )
+            store.upsert_profile(request.user_id, request.goal_id, updated_profile)
+            store.propagate_learner_information_to_all_goals(
+                request.user_id,
+                updated_profile.get("learner_information", ""),
+            )
+            persisted = store.get_profile(request.user_id, request.goal_id) or updated_profile
+            return {"learner_profile": persisted}
+
+        return {"learner_profile": updated_profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1108,32 +2115,8 @@ async def schedule_learning_path(request: LearningPathSchedulingRequest):
             llm, learner_profile, session_count,
         )
         return learning_path
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/reschedule-learning-path")
-async def reschedule_learning_path(request: LearningPathReschedulingRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    session_count = request.session_count
-    other_feedback = request.other_feedback
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            learner_profile = ast.literal_eval(learner_profile)
-        if not isinstance(learner_profile, dict):
-            learner_profile = {}
-        if isinstance(learning_path, str) and learning_path.strip():
-            learning_path = ast.literal_eval(learning_path)
-        if isinstance(other_feedback, str) and other_feedback.strip():
-            try:
-                other_feedback = ast.literal_eval(other_feedback)
-            except Exception:
-                pass
-        learning_path_result = reschedule_learning_path_with_llm(
-            llm, learning_path, learner_profile, session_count, other_feedback,
-        )
-        return learning_path_result
+    except (ValidationError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1162,223 +2145,248 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
             **plan,
             "agent_metadata": agent_metadata,
         }
+    except (ValidationError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/explore-knowledge-points")
-async def explore_knowledge_points(request: KnowledgePointExplorationRequest):
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    if isinstance(learner_profile, str) and learner_profile.strip():
-        learner_profile = ast.literal_eval(learner_profile)
-    if isinstance(learning_path, str) and learning_path.strip():
-        learning_path = ast.literal_eval(learning_path)
-    if isinstance(learning_session, str) and learning_session.strip():
-        learning_session = ast.literal_eval(learning_session)
-    try:
-        knowledge_points = explore_knowledge_points_with_llm(llm, learner_profile, learning_path, learning_session)
-        return knowledge_points
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/generate-learning-content")
+async def generate_learning_content(request: LearningContentGenerationRequest):
+    if request.method_name != "ami":
+        raise HTTPException(status_code=400, detail="Unsupported method_name. Expected 'ami'.")
 
-@app.post("/draft-knowledge-point")
-async def draft_knowledge_point(request: KnowledgePointDraftingRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
-    )
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    knowledge_point = request.knowledge_point
-    use_search = request.use_search
-    fslsm_input = _get_fslsm_input(learner_profile)
-    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
-    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
-    visual_hints = _visual_formatting_hints(fslsm_input)
-    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
-    try:
-        knowledge_draft = draft_knowledge_point_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_point,
-            use_search,
-            visual_formatting_hints=visual_hints,
-            processing_perception_hints=proc_perc_hints,
-            search_rag_manager=search_rag_manager,
-        )
-        return {"knowledge_draft": knowledge_draft}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/draft-knowledge-points")
-async def draft_knowledge_points(request: KnowledgePointsDraftingRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _processing_perception_hints, _visual_formatting_hints,
-    )
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    use_search = request.use_search
-    allow_parallel = request.allow_parallel
-    fslsm_input = _get_fslsm_input(learner_profile)
-    fslsm_processing = _get_fslsm_dim(learner_profile, "fslsm_processing")
-    fslsm_perception = _get_fslsm_dim(learner_profile, "fslsm_perception")
-    visual_hints = _visual_formatting_hints(fslsm_input)
-    proc_perc_hints = _processing_perception_hints(fslsm_processing, fslsm_perception)
-    try:
-        knowledge_drafts = draft_knowledge_points_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points,
-            allow_parallel, use_search,
-            visual_formatting_hints=visual_hints,
-            processing_perception_hints=proc_perc_hints,
-            search_rag_manager=search_rag_manager,
-        )
-        return {"knowledge_drafts": knowledge_drafts}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/integrate-learning-document")
-async def integrate_learning_document(request: LearningDocumentIntegrationRequest):
-    from modules.content_generator.agents.learning_content_creator import (
-        _get_fslsm_dim, _get_fslsm_input, _understanding_hints,
-        _FSLSM_STRONG, _FSLSM_MODERATE,
-    )
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_path = request.learning_path
-    learning_session = request.learning_session
-    knowledge_points = request.knowledge_points
-    knowledge_drafts = request.knowledge_drafts
-    output_markdown = request.output_markdown
-    fslsm_understanding = _get_fslsm_dim(learner_profile, "fslsm_understanding")
-    fslsm_input = _get_fslsm_input(learner_profile)
-    und_hints = _understanding_hints(fslsm_understanding)
-
-    # Audio-visual pipeline requires a rendered markdown string to operate on.
-    # When any adaptation applies, force output_markdown=True so the integrator
-    # returns a string rather than a raw document_structure dict.
-    needs_av = fslsm_input <= -_FSLSM_MODERATE or fslsm_input >= _FSLSM_MODERATE
-    effective_output_markdown = True if needs_av else output_markdown
-
-    # Find media resources for visual learners before integration
-    media_resources = []
-    if fslsm_input <= -_FSLSM_MODERATE:
-        from modules.content_generator.agents.media_resource_finder import find_media_resources
-        _search_runner = getattr(search_rag_manager, "search_runner", None)
-        if _search_runner is None:
-            try:
-                from config.loader import default_config
-                from base.searcher_factory import SearchRunner
-                _search_runner = SearchRunner.from_config(default_config)
-            except Exception:
-                pass
-        if _search_runner is not None:
-            max_videos = 2 if fslsm_input <= -_FSLSM_STRONG else 1
-            max_images = 2 if fslsm_input <= -_FSLSM_STRONG else 0
-            try:
-                media_resources = find_media_resources(
-                    _search_runner,
-                    knowledge_points,
-                    max_videos=max_videos,
-                    max_images=max_images,
-                )
-            except Exception:
-                media_resources = []
-
-    try:
-        learning_document = integrate_learning_document_with_llm(
-            llm, learner_profile, learning_path, learning_session, knowledge_points, knowledge_drafts,
-            effective_output_markdown,
-            understanding_hints=und_hints,
-            media_resources=media_resources if media_resources else None,
-        )
-
-        # Determine content format and apply audio-visual adaptations
-        content_format = "standard"
-        audio_url = None
-
-        if fslsm_input <= -_FSLSM_MODERATE:
-            content_format = "visual_enhanced"
-
-        if fslsm_input >= _FSLSM_MODERATE:
-            from modules.content_generator.agents.podcast_style_converter import convert_to_podcast_with_llm
-            mode = "full" if fslsm_input >= _FSLSM_STRONG else "rich_text"
-            learning_document = convert_to_podcast_with_llm(llm, learning_document, learner_profile, mode=mode)
-            content_format = "podcast"
-
-            if fslsm_input >= _FSLSM_STRONG:
-                from modules.content_generator.agents.tts_generator import generate_tts_audio
-                try:
-                    audio_url = generate_tts_audio(learning_document)
-                except Exception:
-                    audio_url = None
-
-        return {
-            "learning_document": learning_document,
-            "content_format": content_format,
-            "audio_url": audio_url,
-            # Tells the frontend whether learning_document is already a rendered
-            # markdown string (True) or still a raw document_structure dict (False).
-            "document_is_markdown": needs_av,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate-document-quizzes")
-async def generate_document_quizzes(request: KnowledgeQuizGenerationRequest):
-    llm = get_llm()
-    learner_profile = request.learner_profile
-    learning_document = request.learning_document
-    single_choice_count = request.single_choice_count
-    multiple_choice_count = request.multiple_choice_count
-    true_false_count = request.true_false_count
-    short_answer_count = request.short_answer_count
-    open_ended_count = request.open_ended_count
-    try:
-        document_quiz = generate_document_quizzes_with_llm(llm, learner_profile, learning_document, single_choice_count, multiple_choice_count, true_false_count, short_answer_count, open_ended_count)
-        return {"document_quiz": document_quiz}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/tailor-knowledge-content")
-async def tailor_knowledge_content(request: TailoredContentGenerationRequest):
-    llm = get_llm()
-    learning_path = request.learning_path
-    learner_profile = request.learner_profile
-    learning_session = request.learning_session
+    llm = get_llm(request.model_provider, request.model_name)
+    learning_path = _parse_jsonish(request.learning_path, request.learning_path)
+    learner_profile = _parse_jsonish(request.learner_profile, request.learner_profile)
+    learning_session = _parse_jsonish(request.learning_session, request.learning_session)
     use_search = request.use_search
     allow_parallel = request.allow_parallel
     with_quiz = request.with_quiz
+    goal_context = request.goal_context
+    cache_key: Optional[str] = None
+    owner_token: Optional[str] = None
+    path_hash_at_start: Optional[str] = None
+    session_guard_hash_at_start: Optional[str] = None
+    owner_terminal_status = "succeeded"
+    started = time.perf_counter()
+
     try:
-        tailored_content = create_learning_content_with_llm(
-            llm, learner_profile, learning_path, learning_session,
-            allow_parallel=allow_parallel, with_quiz=with_quiz, use_search=use_search,
-            quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
+        has_cache_identity = (
+            request.user_id is not None
+            and request.goal_id is not None
+            and request.session_index is not None
         )
-        return {"tailored_content": tailored_content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if has_cache_identity:
+            cache_key = PREFETCH_SERVICE.content_cache_key(request.user_id, request.goal_id, request.session_index)
+            path_hash_now = PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id)
+            session_guard_hash_at_start = PREFETCH_SERVICE.session_guard_hash_for_target(
+                request.user_id,
+                request.goal_id,
+                request.session_index,
+            )
+            cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+            if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="cache_hit",
+                    path_hash=path_hash_now,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                )
+                return cached["learning_content"]
+            if PREFETCH_SERVICE.prefetch_enabled():
+                if PREFETCH_SERVICE.singleflight_status(cache_key) == "running":
+                    PREFETCH_SERVICE.log_content_event(
+                        "generate_content",
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                        trigger_source="on_demand",
+                        status="join_wait",
+                        path_hash=path_hash_now,
+                        duration_ms=(time.perf_counter() - started) * 1000.0,
+                    )
+                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                    )
+                    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+                    if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                        PREFETCH_SERVICE.log_content_event(
+                            "generate_content",
+                            user_id=request.user_id,
+                            goal_id=request.goal_id,
+                            session_index=request.session_index,
+                            trigger_source="on_demand",
+                            status="join_hit",
+                            path_hash=path_hash_now,
+                            duration_ms=(time.perf_counter() - started) * 1000.0,
+                        )
+                        return cached["learning_content"]
 
-@app.post("/simulate-content-feedback")
-async def simulate_content_feedback(request: LearningContentFeedbackRequest):
-    llm = get_llm(request.model_provider, request.model_name)
-    learner_profile = request.learner_profile
-    learning_content = request.learning_content
-    try:
-        if isinstance(learner_profile, str) and learner_profile.strip():
-            learner_profile = ast.literal_eval(learner_profile)
-        if isinstance(learning_content, str) and learning_content.strip():
-            learning_content = ast.literal_eval(learning_content)
-        feedback = simulate_content_feedback_with_llm(llm, learner_profile, learning_content)
-        return {"feedback": feedback}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                while owner_token is None:
+                    path_hash_now = PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id)
+                    path_hash_at_start = path_hash_now
+                    session_guard_hash_at_start = PREFETCH_SERVICE.session_guard_hash_for_target(
+                        request.user_id,
+                        request.goal_id,
+                        request.session_index,
+                    )
+                    owner_token = PREFETCH_SERVICE.singleflight_try_start(
+                        cache_key,
+                        path_hash_at_start=path_hash_at_start,
+                        trigger_source="on_demand",
+                        session_guard_hash_at_start=session_guard_hash_at_start,
+                    )
+                    if owner_token is not None:
+                        break
+                    PREFETCH_SERVICE.log_content_event(
+                        "generate_content",
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                        trigger_source="on_demand",
+                        status="join_wait",
+                        path_hash=path_hash_now,
+                        duration_ms=(time.perf_counter() - started) * 1000.0,
+                    )
+                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                        user_id=request.user_id,
+                        goal_id=request.goal_id,
+                        session_index=request.session_index,
+                    )
+                    cached = store.get_learning_content(request.user_id, request.goal_id, request.session_index)
+                    if isinstance(cached, dict) and isinstance(cached.get("learning_content"), dict):
+                        PREFETCH_SERVICE.log_content_event(
+                            "generate_content",
+                            user_id=request.user_id,
+                            goal_id=request.goal_id,
+                            session_index=request.session_index,
+                            trigger_source="on_demand",
+                            status="join_hit",
+                            path_hash=path_hash_now,
+                            duration_ms=(time.perf_counter() - started) * 1000.0,
+                        )
+                        return cached["learning_content"]
+        if has_cache_identity:
+            PREFETCH_SERVICE.log_content_event(
+                "generate_content",
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=request.session_index,
+                trigger_source="on_demand",
+                status="fallback_generate",
+                path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
 
+        learning_content = _build_learning_content_payload(
+            llm,
+            learner_profile=learner_profile,
+            learning_path=learning_path,
+            learning_session=learning_session,
+            use_search=use_search,
+            allow_parallel=allow_parallel,
+            with_quiz=with_quiz,
+            goal_context=goal_context,
+            method_name=request.method_name,
+        )
+        if has_cache_identity:
+            stale, stale_reason, path_hash_current = PREFETCH_SERVICE.is_stale_for_target_session(
+                user_id=request.user_id,
+                goal_id=request.goal_id,
+                session_index=request.session_index,
+                session_guard_hash_at_start=session_guard_hash_at_start,
+            )
+            if stale:
+                owner_terminal_status = "discarded"
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="fallback_discarded",
+                    path_hash=path_hash_at_start or path_hash_current,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    stale_reason=stale_reason,
+                    path_hash_current=path_hash_current,
+                )
+            else:
+                store.upsert_learning_content(
+                    request.user_id,
+                    request.goal_id,
+                    request.session_index,
+                    learning_content,
+                )
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="fallback_saved",
+                    path_hash=path_hash_at_start or path_hash_current,
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    path_hash_current=path_hash_current,
+                )
+        return learning_content
+    except HTTPException as e:
+        if owner_token and cache_key:
+            owner_terminal_status = "failed"
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status="failed",
+                error=str(e),
+            )
+            if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="failed",
+                    path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    error=str(e),
+                )
+        raise
+    except Exception as e:
+        if owner_token and cache_key:
+            owner_terminal_status = "failed"
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status="failed",
+                error=str(e),
+            )
+            if request.user_id is not None and request.goal_id is not None and request.session_index is not None:
+                PREFETCH_SERVICE.log_content_event(
+                    "generate_content",
+                    user_id=request.user_id,
+                    goal_id=request.goal_id,
+                    session_index=request.session_index,
+                    trigger_source="on_demand",
+                    status="failed",
+                    path_hash=path_hash_at_start or PREFETCH_SERVICE.current_path_hash(request.user_id, request.goal_id),
+                    duration_ms=(time.perf_counter() - started) * 1000.0,
+                    error=str(e),
+                )
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if owner_token and cache_key:
+            PREFETCH_SERVICE.singleflight_finish(
+                cache_key,
+                owner_token=owner_token,
+                status=owner_terminal_status,
+            )
 
 if __name__ == "__main__":
     server_cfg = app_config.get("server", {})

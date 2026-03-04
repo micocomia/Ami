@@ -15,6 +15,14 @@ from modules.content_generator.prompts.search_enhanced_knowledge_drafter import 
     search_enhanced_knowledge_drafter_task_prompt,
 )
 from modules.content_generator.schemas import KnowledgeDraft
+from .knowledge_draft_evaluator import (
+    deterministic_knowledge_draft_audit,
+    evaluate_knowledge_draft_with_llm,
+)
+from modules.content_generator.utils import (
+    build_session_adaptation_contract,
+    format_session_adaptation_contract,
+)
 from config.loader import default_config
 
 
@@ -27,8 +35,18 @@ class KnowledgeDraftPayload(BaseModel):
     external_resources: str | None = ""
     visual_formatting_hints: str = ""
     processing_perception_hints: str = ""
+    session_adaptation_contract: Any = ""
+    goal_context: Optional[Mapping[str, Any]] = None
+    evaluator_feedback: str = ""
 
-    @field_validator("learner_profile", "learning_path", "learning_session", "knowledge_points", "knowledge_point")
+    @field_validator(
+        "learner_profile",
+        "learning_path",
+        "learning_session",
+        "knowledge_points",
+        "knowledge_point",
+        "session_adaptation_contract",
+    )
     @classmethod
     def coerce_jsonish(cls, v: Any) -> Any:
         if isinstance(v, BaseModel):
@@ -152,6 +170,46 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
                 return {}
         return {}
 
+    @staticmethod
+    def _normalize_lecture_numbers(value: Any) -> List[int]:
+        if value is None:
+            return []
+        if isinstance(value, int):
+            nums = [value]
+        elif isinstance(value, list):
+            nums = [x for x in value if isinstance(x, int)]
+        else:
+            return []
+        return sorted({n for n in nums if n > 0})
+
+    def _goal_retrieval_filters(self, value: Any) -> dict[str, Any]:
+        ctx = self._as_mapping(value)
+        # Use `or ""` before str() so that Python None is not converted to the
+        # string "None", which would be truthy and incorrectly activate RAG.
+        course_code = str(ctx.get("course_code") or "").strip() or None
+        content_category = str(ctx.get("content_category") or "").strip() or None
+        page_number = ctx.get("page_number")
+        if not isinstance(page_number, int) or page_number <= 0:
+            page_number = None
+        lecture_numbers = self._normalize_lecture_numbers(
+            ctx.get("lecture_numbers", ctx.get("lecture_number"))
+        )
+        has_retrieval_fields = any(
+            [
+                course_code,
+                lecture_numbers,
+                content_category,
+                page_number,
+            ]
+        )
+        return {
+            "course_code": course_code,
+            "content_category": content_category,
+            "page_number": page_number,
+            "lecture_numbers": lecture_numbers,
+            "has_retrieval_fields": has_retrieval_fields,
+        }
+
     def _build_query_bundle(self, data: dict[str, Any]) -> tuple[list[str], str]:
         session = self._as_mapping(data.get("learning_session"))
         profile = self._as_mapping(data.get("learner_profile"))
@@ -160,7 +218,8 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
 
         session_title = str(session.get("title", "")).strip()
         kp_name = str(knowledge_point.get("name", "")).strip()
-        kp_type = str(knowledge_point.get("type", "")).strip()
+        kp_role = str(knowledge_point.get("role", "")).strip()
+        kp_solo_level = str(knowledge_point.get("solo_level", "")).strip()
 
         goal_candidates = [
             str(profile.get("learning_goal", "")).strip(),
@@ -175,7 +234,9 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
         course_codes = self._extract_course_codes(session_title, kp_name, learning_goal)
         course_hint = " ".join(course_codes).strip()
 
-        base = " ".join(x for x in [session_title, kp_name, kp_type, learning_goal, course_hint] if x).strip()
+        base = " ".join(
+            x for x in [session_title, kp_name, kp_role, kp_solo_level, learning_goal, course_hint] if x
+        ).strip()
         queries = []
         for q in [
             base,
@@ -355,7 +416,8 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
         retrieval_queries: List[str] = []
         retrieval_query_primary = ""
         retrieval_intent_text = ""
-        if self.use_search and self.search_rag_manager is not None:
+        goal_filters = self._goal_retrieval_filters(data.get("goal_context"))
+        if self.use_search and self.search_rag_manager is not None and goal_filters["has_retrieval_fields"]:
             queries, intent_text = self._build_query_bundle(data)
             retrieval_queries = list(queries)
             retrieval_query_primary = queries[0] if queries else ""
@@ -365,25 +427,52 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
             # Retrieve more candidates than default, then rerank down to a cleaner final set.
             fetch_k = max(base_k * 3, 12)
             final_k = min(max(base_k, 4), 5)
-            course_codes = self._extract_course_codes(intent_text)
-            primary_course_code = course_codes[0] if course_codes else None
-            lecture_intent = "lecture" in intent_text.lower()
+            extracted_course_codes = self._extract_course_codes(intent_text)
+            if goal_filters["course_code"]:
+                course_codes = [goal_filters["course_code"]]
+            else:
+                course_codes = extracted_course_codes
+            primary_course_code = goal_filters["course_code"] or (course_codes[0] if course_codes else None)
+            lecture_numbers = goal_filters["lecture_numbers"]
+            content_category = goal_filters["content_category"]
+            page_number = goal_filters["page_number"]
+            lecture_intent = (
+                bool(lecture_numbers)
+                or (content_category or "").lower() == "lectures"
+                or ("lecture" in intent_text.lower())
+            )
 
             candidates = []
             seen = set()
             for q in queries:
-                if primary_course_code:
+                docs = []
+                if lecture_numbers:
+                    for lecture_number in lecture_numbers:
+                        docs.extend(
+                            self.search_rag_manager.invoke_hybrid_filtered(
+                                q,
+                                k=fetch_k,
+                                course_code=primary_course_code,
+                                content_category=content_category or ("Lectures" if lecture_intent else None),
+                                lecture_number=lecture_number,
+                                page_number=page_number,
+                                exclude_file_names=["syllabus.json"] if lecture_intent else None,
+                                require_lecture=lecture_intent,
+                                allow_web_fallback=False,
+                            )
+                        )
+                else:
                     docs = self.search_rag_manager.invoke_hybrid_filtered(
                         q,
                         k=fetch_k,
                         course_code=primary_course_code,
-                        content_category="Lectures" if lecture_intent else None,
-                        exclude_file_names=["syllabus.json"],
+                        content_category=content_category or ("Lectures" if lecture_intent else None),
+                        lecture_number=None,
+                        page_number=page_number,
+                        exclude_file_names=["syllabus.json"] if lecture_intent else None,
                         require_lecture=lecture_intent,
                         allow_web_fallback=False,
                     )
-                else:
-                    docs = self.search_rag_manager.invoke_hybrid(q, k=fetch_k)
                 for d in docs:
                     meta = d.metadata or {}
                     key = (
@@ -397,6 +486,25 @@ class SearchEnhancedKnowledgeDrafter(BaseAgent):
                         continue
                     seen.add(key)
                     candidates.append(d)
+
+            # If metadata-constrained retrieval is too restrictive, fall back to
+            # hybrid retrieval so we can still surface high-signal verified sources.
+            if not candidates:
+                for q in queries:
+                    fallback_docs = self.search_rag_manager.invoke_hybrid(q, k=fetch_k)
+                    for d in fallback_docs:
+                        meta = d.metadata or {}
+                        key = (
+                            str(meta.get("source_type", "")),
+                            str(meta.get("course_code", "")),
+                            str(meta.get("file_name", "")),
+                            str(meta.get("page_number", "")),
+                            d.page_content[:180],
+                        )
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        candidates.append(d)
 
             intent_tokens = self._tokenize(intent_text)
             filtered = [
@@ -486,21 +594,81 @@ def draft_knowledge_point_with_llm(
     use_search: bool = True,
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
+    lightweight_llm: Any = None,
+    max_revision_passes: int = 1,
+    run_quality_gate: bool = True,
+    evaluator_feedback: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
     """Draft a single knowledge point using the agent, optionally enriching with a SearchRagManager."""
     drafter = SearchEnhancedKnowledgeDrafter(llm, search_rag_manager=search_rag_manager, use_search=use_search)
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     payload = {
         "learner_profile": learner_profile,
         "learning_path": learning_path,
         "learning_session": learning_session,
         "knowledge_points": knowledge_points,
         "knowledge_point": knowledge_point,
+        "goal_context": goal_context,
         "visual_formatting_hints": visual_formatting_hints,
         "processing_perception_hints": processing_perception_hints,
+        "session_adaptation_contract": format_session_adaptation_contract(session_adaptation_contract),
+        "evaluator_feedback": str(evaluator_feedback or "").strip(),
     }
-    return drafter.draft(payload)
+
+    if not run_quality_gate:
+        result = drafter.draft(payload)
+        try:
+            from .diagram_renderer import render_diagrams_in_markdown
+            if result.get("content"):
+                result["content"] = render_diagrams_in_markdown(result["content"])
+        except Exception:
+            pass
+        return result
+
+    evaluator_model = lightweight_llm or llm
+    evaluation_history: List[dict[str, Any]] = []
+    result: dict[str, Any] = {}
+
+    for attempt in range(max(0, int(max_revision_passes)) + 1):
+        result = drafter.draft(payload)
+        # Post-process: render diagram code blocks to SVG static files
+        try:
+            from .diagram_renderer import render_diagrams_in_markdown
+            if result.get("content"):
+                result["content"] = render_diagrams_in_markdown(result["content"])
+        except Exception:
+            pass   # never break drafting due to diagram rendering failure
+
+        deterministic_eval = deterministic_knowledge_draft_audit(result)
+        evaluation = deterministic_eval
+        if deterministic_eval.get("is_acceptable", False):
+            try:
+                evaluation = evaluate_knowledge_draft_with_llm(
+                    evaluator_model,
+                    learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                    learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                    knowledge_point=knowledge_point if isinstance(knowledge_point, Mapping) else {},
+                    knowledge_draft=result,
+                    session_adaptation_contract=payload["session_adaptation_contract"],
+                )
+            except Exception:
+                evaluation = deterministic_eval
+
+        evaluation_history.append(evaluation)
+        if evaluation.get("is_acceptable", True) or attempt >= max_revision_passes:
+            break
+        payload["evaluator_feedback"] = str(evaluation.get("improvement_directives", "") or "").strip()
+
+    if evaluation_history:
+        result["draft_quality_evaluation"] = evaluation_history[-1]
+        if len(evaluation_history) > 1:
+            result["draft_quality_evaluation_history"] = evaluation_history
+    return result
 
 
 def draft_knowledge_points_with_llm(
@@ -514,14 +682,22 @@ def draft_knowledge_points_with_llm(
     max_workers: int = 8,
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
+    lightweight_llm: Any = None,
+    max_revision_passes: int = 1,
+    run_quality_gate: bool = True,
+    evaluator_feedback: str = "",
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
+    goal_context: Optional[Mapping[str, Any]] = None,
 ):
     """Draft multiple knowledge points in parallel or sequentially using the agent."""
     if isinstance(learning_session, str):
         learning_session = ast.literal_eval(learning_session)
     if isinstance(knowledge_points, str):
         knowledge_points = ast.literal_eval(knowledge_points)
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
     if search_rag_manager is None and use_search:
         search_rag_manager = SearchRagManager.from_config(default_config)
     def draft_one(kp):
@@ -532,9 +708,15 @@ def draft_knowledge_points_with_llm(
             learning_session,
             knowledge_points,
             kp,
+            goal_context=goal_context,
             use_search=use_search,
             visual_formatting_hints=visual_formatting_hints,
             processing_perception_hints=processing_perception_hints,
+            session_adaptation_contract=session_adaptation_contract,
+            lightweight_llm=lightweight_llm,
+            max_revision_passes=max_revision_passes,
+            run_quality_gate=run_quality_gate,
+            evaluator_feedback=evaluator_feedback,
             search_rag_manager=search_rag_manager,
         )
 

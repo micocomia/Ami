@@ -152,7 +152,8 @@ Also update learner_information to reflect newly mastered skills or significant 
 RULES:
 - You MUST preserve learning_preferences and behavioral_patterns EXACTLY as they are in the previous profile. Copy them verbatim.
 - Only update cognitive_status (overall_progress, mastered_skills, in_progress_skills).
-- If if_learned is True and the desired_outcome level meets or exceeds the required level, move the skill to mastered_skills.
+- If if_learned is True and the session's desired_outcome level for a skill EQUALS OR EXCEEDS that skill's required_proficiency_level in in_progress_skills, move the skill from in_progress_skills to mastered_skills.
+- If if_learned is True but the session's desired_outcome level for a skill is BELOW the skill's required_proficiency_level, update that skill's current_proficiency_level in in_progress_skills to the session's desired_outcome level. Do NOT move it to mastered_skills.
 - Recalculate overall_progress based on the updated skill statuses.
 - Update learner_information to briefly note any newly mastered skills or significant progress (e.g., append "Has now mastered Python Basics." if the learner just mastered that skill). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to cognitive progress.
 
@@ -180,3 +181,28 @@ RULES:
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
 adaptive_learner_profiler_task_prompt_update_preferences = adaptive_learner_profiler_task_prompt_update_preferences.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)
+
+adaptive_learner_profiler_task_prompt_update_information = """
+Task B-Information: Learner Information Update
+
+Update ONLY the learner_information section of the learner's profile based on user edits and optional resume text.
+
+- Learner's Previous Profile: {learner_profile}
+- Current Learner Information: {current_learner_information}
+- Edited Learner Information (text-primary): {edited_learner_information}
+- Resume Text (optional, enrichment only): {resume_text}
+- Primary Learner Information Baseline: {primary_learner_information}
+
+RULES:
+- You MUST preserve learning_goal, goal_display_name, cognitive_status, learning_preferences, and behavioral_patterns EXACTLY as they are in the previous profile.
+- Only update learner_information.
+- Treat edited_learner_information as the primary source of truth when provided.
+- Use resume_text only to enrich missing details or improve clarity; do not override explicit edited text intent.
+- If both edited_learner_information and resume_text are empty, keep learner_information unchanged.
+
+LEARNER_PROFILE_OUTPUT_FORMAT
+"""
+adaptive_learner_profiler_task_prompt_update_information = adaptive_learner_profiler_task_prompt_update_information.replace(
+    "LEARNER_PROFILE_OUTPUT_FORMAT",
+    learner_profile_output_format,
+)

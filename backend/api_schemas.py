@@ -6,13 +6,24 @@ from typing import Any, Dict, Optional
 class BaseRequest(BaseModel):
     model_provider: Optional[str] = None
     model_name: Optional[str] = None
-    method_name: str = "genmentor"
+    method_name: str = "ami"
 
 
 class ChatWithAutorRequest(BaseRequest):
 
     messages: str
     learner_profile: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+    session_index: Optional[int] = None
+    use_search: Optional[bool] = None
+    use_vector_retrieval: Optional[bool] = None
+    use_web_search: Optional[bool] = None
+    use_media_search: Optional[bool] = None
+    allow_preference_updates: Optional[bool] = None
+    top_k: Optional[int] = None
+    return_metadata: bool = False
+    learner_information: Optional[str] = None
 
 
 class LearningGoalRefinementRequest(BaseRequest):
@@ -37,16 +48,6 @@ class LearnerProfileInitializationWithInfoRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
-class LearnerProfileUpdateRequest(BaseRequest):
-
-    learner_profile: str
-    learner_interactions: str
-    learner_information: str = ""
-    session_information: str = ""
-    user_id: Optional[str] = None
-    goal_id: Optional[int] = None
-
-
 class CognitiveStatusUpdateRequest(BaseRequest):
 
     learner_profile: str
@@ -64,75 +65,22 @@ class LearningPreferencesUpdateRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class LearnerInformationUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    edited_learner_information: str = ""
+    resume_text: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class LearningPathSchedulingRequest(BaseRequest):
 
     learner_profile: str
     session_count: int
 
 
-class LearningPathReschedulingRequest(BaseRequest):
-    
-    learner_profile: str
-    learning_path: str
-    session_count: int = -1
-    other_feedback: str = ""
-
-
-class TailoredContentGenerationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-
-
-class KnowledgePerspectiveExplorationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-
-
-class KnowledgePerspectiveDraftingRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    knowledge_perspective: str
-    use_search: bool = True
-
-
-class KnowledgeDocumentIntegrationRequest(BaseRequest):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    drafts_of_perspectives: str
-
-
-class PointPerspectivesDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    knowledge_point: str
-    perspectives_of_knowledge_point: str
-    use_search: bool
-    allow_parallel: bool
- 
-
-class KnowledgeQuizGenerationRequest(BaseModel):
-
-    learner_profile: str
-    learning_document: str
-    single_choice_count: int = 3
-    multiple_choice_count: int = 0
-    true_false_count: int = 0
-    short_answer_count: int = 0
-    open_ended_count: int = 0
-
-
-class TailoredContentGenerationRequest(BaseModel):
+class LearningContentGenerationRequest(BaseRequest):
 
     learner_profile: str
     learning_path: str
@@ -140,49 +88,60 @@ class TailoredContentGenerationRequest(BaseModel):
     use_search: bool = True
     allow_parallel: bool = True
     with_quiz: bool = True
+    goal_context: Optional[Any] = None
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+    session_index: Optional[int] = None
 
 
-class KnowledgePointExplorationRequest(BaseModel):
-    
-    learner_profile: str
-    learning_path: str
-    learning_session: str
+class GoalCreateRequest(BaseModel):
+    learning_goal: str
+    skill_gaps: Any = []
+    goal_assessment: Optional[Any] = None
+    goal_context: Optional[Any] = None
+    retrieved_sources: Any = []
+    bias_audit: Optional[Any] = None
+    profile_fairness: Optional[Any] = None
+    learning_path: Any = []
+    plan_agent_metadata: Optional[Any] = None
+    learner_profile: Optional[Any] = None
+    is_completed: bool = False
+    is_deleted: bool = False
 
 
-class KnowledgePointDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: str
-    knowledge_point: str
-    use_search: bool
-
-
-class KnowledgePointsDraftingRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: str
-    use_search: bool
-    allow_parallel: bool
+class GoalUpdateRequest(BaseModel):
+    learning_goal: Optional[str] = None
+    skill_gaps: Optional[Any] = None
+    goal_assessment: Optional[Any] = None
+    goal_context: Optional[Any] = None
+    retrieved_sources: Optional[Any] = None
+    bias_audit: Optional[Any] = None
+    profile_fairness: Optional[Any] = None
+    learning_path: Optional[Any] = None
+    plan_agent_metadata: Optional[Any] = None
+    is_completed: Optional[bool] = None
+    is_deleted: Optional[bool] = None
 
 
-class LearningDocumentIntegrationRequest(BaseModel):
-
-    learner_profile: str
-    learning_path: str
-    learning_session: str
-    knowledge_points: str
-    knowledge_drafts: str
-    output_markdown: bool = False
+class SessionActivityRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+    event_type: str
+    event_time: Optional[str] = None
 
 
-class LearningContentFeedbackRequest(BaseRequest):
+class CompleteSessionRequest(BaseRequest):
+    user_id: str
+    goal_id: int
+    session_index: int
+    session_end_time: Optional[str] = None
 
-    learner_profile: str
-    learning_content: str
+
+class SubmitContentFeedbackRequest(BaseRequest):
+    user_id: str
+    goal_id: int
+    feedback: Any
 
 class BiasAuditRequest(BaseRequest):
 

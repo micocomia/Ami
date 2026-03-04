@@ -12,6 +12,7 @@ from .learning_document_integrator import (
 	LearningDocumentIntegrator,
 	IntegratedDocPayload,
 	integrate_learning_document_with_llm,
+	map_integrated_sections_to_draft_ids,
 	prepare_markdown_document,
 )
 from .learning_content_creator import (
@@ -31,6 +32,20 @@ from .media_resource_finder import find_media_resources
 from .podcast_style_converter import PodcastStyleConverter, convert_to_podcast_with_llm
 from .tts_generator import generate_tts_audio
 from .content_bias_auditor import ContentBiasAuditor, audit_content_bias_with_llm
+from .content_feedback_simulator import (
+	LearningContentFeedbackSimulator,
+	simulate_content_feedback_with_llm,
+)
+from .knowledge_draft_evaluator import (
+	KnowledgeDraftEvaluator,
+	deterministic_knowledge_draft_audit,
+	evaluate_knowledge_draft_batch_with_llm,
+	evaluate_knowledge_draft_with_llm,
+)
+from .integrated_document_evaluator import (
+	IntegratedDocumentEvaluator,
+	evaluate_integrated_document_with_llm,
+)
 
 __all__ = [
 	# Content creation pipeline
@@ -44,6 +59,7 @@ __all__ = [
 	"LearningDocumentIntegrator",
 	"IntegratedDocPayload",
 	"integrate_learning_document_with_llm",
+	"map_integrated_sections_to_draft_ids",
 	"prepare_markdown_document",
 	"DocumentQuizGenerator",
 	"DocumentQuizPayload",
@@ -61,4 +77,14 @@ __all__ = [
 	# Content bias auditor
 	"ContentBiasAuditor",
 	"audit_content_bias_with_llm",
+	# Content feedback simulator
+	"LearningContentFeedbackSimulator",
+	"simulate_content_feedback_with_llm",
+	# Knowledge draft evaluator
+	"KnowledgeDraftEvaluator",
+	"deterministic_knowledge_draft_audit",
+	"evaluate_knowledge_draft_batch_with_llm",
+	"evaluate_knowledge_draft_with_llm",
+	"IntegratedDocumentEvaluator",
+	"evaluate_integrated_document_with_llm",
 ]

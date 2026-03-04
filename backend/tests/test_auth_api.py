@@ -29,10 +29,16 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_DATA_DIR", data_dir)
     monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
     monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_USER_STATES_PATH", data_dir / "user_states.json")
+    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
+    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
+    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
+    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
     monkeypatch.setattr(store, "_profiles", {})
     monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_user_states", {})
+    monkeypatch.setattr(store, "_goals", {})
+    monkeypatch.setattr(store, "_learning_content_cache", {})
+    monkeypatch.setattr(store, "_session_activity", {})
+    monkeypatch.setattr(store, "_mastery_history", {})
 
 
 @pytest.fixture(autouse=True)
@@ -192,18 +198,18 @@ class TestDeleteAccountEndpoint:
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
 
-        # Create some user data (profiles, events, user state)
+        # Create some user data (profiles, events, goals)
         store.upsert_profile("alice", 0, {"goal": "Python"})
         store.upsert_profile("alice", 1, {"goal": "Rust"})
         store.append_event("alice", {"type": "page_view"})
-        store.put_user_state("alice", {"goals": []})
+        store.create_goal("alice", {"learning_goal": "Python"})
 
         client.delete("/auth/user", headers={"Authorization": f"Bearer {token}"})
 
         assert store.get_profile("alice", 0) is None
         assert store.get_profile("alice", 1) is None
         assert store.get_events("alice") == []
-        assert store.get_user_state("alice") is None
+        assert store.get_all_goals_for_user("alice") == []
 
     def test_delete_account_preserves_other_users_data(self, client):
         _register(client, "alice", "password123")
@@ -212,13 +218,13 @@ class TestDeleteAccountEndpoint:
 
         store.upsert_profile("alice", 0, {"goal": "Python"})
         store.upsert_profile("bob", 0, {"goal": "Go"})
-        store.put_user_state("bob", {"theme": "dark"})
+        store.create_goal("bob", {"learning_goal": "Go"})
 
         client.delete("/auth/user", headers={"Authorization": f"Bearer {alice_data['token']}"})
 
         # Bob's data should be untouched
         assert store.get_profile("bob", 0) == {"goal": "Go"}
-        assert store.get_user_state("bob") == {"theme": "dark"}
+        assert len(store.get_all_goals_for_user("bob")) == 1
         assert auth_store.get_user("bob") is not None
 
     def test_delete_account_with_invalid_token(self, client):
@@ -263,7 +269,7 @@ class TestFullAuthLifecycle:
 
         # 4. Create some user data
         store.upsert_profile("alice", 0, {"goal": "Learn Python"})
-        store.put_user_state("alice", {"if_complete_onboarding": True})
+        store.create_goal("alice", {"learning_goal": "Learn Python"})
 
         # 5. Delete account
         resp = client.delete("/auth/user", headers={"Authorization": f"Bearer {login_token}"})
@@ -272,7 +278,7 @@ class TestFullAuthLifecycle:
         # 6. Verify account is gone
         assert auth_store.get_user("alice") is None
         assert store.get_profile("alice", 0) is None
-        assert store.get_user_state("alice") is None
+        assert store.get_all_goals_for_user("alice") == []
 
         # 7. Login should fail
         status, _ = _login(client, "alice", "password123")
