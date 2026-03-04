@@ -36,6 +36,10 @@ class SimulateFeedbackInput(BaseModel):
         default=None,
         description="Optional pre-computed ground truth profile. If provided, skips ground truth generation for faster simulation."
     )
+    generation_observations: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional scheduler generation observations (e.g., over-limit truncation).",
+    )
 
 
 def create_simulate_feedback_tool(
@@ -73,7 +77,8 @@ def create_simulate_feedback_tool(
     def simulate_learner_feedback(
         learning_path: List[Dict[str, Any]],
         learner_profile: Dict[str, Any],
-        ground_truth_profile: Optional[Dict[str, Any]] = None
+        ground_truth_profile: Optional[Dict[str, Any]] = None,
+        generation_observations: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Simulate how a learner would respond to a proposed learning path.
@@ -108,6 +113,7 @@ def create_simulate_feedback_tool(
             payload = {
                 "learner_profile": simulation_profile,
                 "learning_path": learning_path,
+                "generation_observations": generation_observations or {},
             }
 
             feedback_result = simulator.feedback_path(payload)
@@ -126,6 +132,7 @@ def create_simulate_feedback_tool(
             payload = {
                 "learner_profile": learner_profile,
                 "learning_path": learning_path,
+                "generation_observations": generation_observations or {},
             }
             feedback_result = simulator.feedback_path(payload)
 

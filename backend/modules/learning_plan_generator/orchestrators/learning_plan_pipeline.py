@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from modules.learning_plan_generator.agents.learning_path_scheduler import LearningPathScheduler
 from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
@@ -32,6 +32,7 @@ def schedule_learning_path_agentic(
     simulation_feedback: Any = {}
     quality: Dict[str, Any] = {"pass": False, "issues": [], "feedback_summary": {}}
     evaluator_feedback: str = ""
+    generation_observations_history: List[Dict[str, Any]] = []
     attempt = 0
 
     scheduler = LearningPathScheduler(llm)
@@ -57,10 +58,16 @@ def schedule_learning_path_agentic(
         # Evaluate via learner simulation (gpt-4o-mini, fast path)
         learning_path_list = plan.get("learning_path", [])
         profile_dict = dict(learner_profile) if isinstance(learner_profile, Mapping) else learner_profile
+        generation_observations: Dict[str, Any] = {}
+        scheduler_observations = getattr(scheduler, "last_generation_observations", None)
+        if isinstance(scheduler_observations, Mapping):
+            generation_observations = dict(scheduler_observations)
+        generation_observations_history.append(generation_observations)
 
         simulation_feedback = sim_tool.invoke({
             "learning_path": learning_path_list,
             "learner_profile": profile_dict,
+            "generation_observations": generation_observations,
         })
 
         if not isinstance(simulation_feedback, dict):
@@ -87,6 +94,8 @@ def schedule_learning_path_agentic(
         "refinement_iterations": attempt + 1,
         "evaluation": quality,
         "last_simulation_feedback": simulation_feedback,
+        "final_generation_observations": generation_observations_history[-1] if generation_observations_history else {},
+        "generation_observations_history": generation_observations_history,
     }
 
     return plan, metadata

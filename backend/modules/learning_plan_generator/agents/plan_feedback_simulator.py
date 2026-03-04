@@ -7,7 +7,10 @@ from typing import Any, Dict, List, Mapping, Sequence
 from pydantic import BaseModel, Field, field_validator
 
 from base import BaseAgent
-from modules.learning_plan_generator.schemas import LearnerPlanFeedback
+from modules.learning_plan_generator.schemas import (
+    LearnerPlanFeedback,
+    MAX_LEARNING_PATH_SESSIONS,
+)
 from modules.learning_plan_generator.prompts.plan_feedback import (
     plan_feedback_simulator_system_prompt,
     plan_feedback_simulator_task_prompt,
@@ -63,6 +66,39 @@ _POSITIVE_PROGRESSION_HINTS = (
 )
 
 _SKILL_CONNECTOR_STOPWORDS = {"and", "the", "a", "an", "of"}
+_SESSION_OVERFLOW_ISSUE = (
+    f"Generated path exceeded {MAX_LEARNING_PATH_SESSIONS} sessions and was truncated."
+)
+_SESSION_OVERFLOW_DIRECTIVE = (
+    f"Regenerate a focused path that stays within {MAX_LEARNING_PATH_SESSIONS} sessions "
+    "while preserving one-step SOLO progression and required proficiency coverage."
+)
+_COVERAGE_ISSUE_RE = re.compile(
+    r"^path\s+for\s+['\"]?.+?['\"]?\s+only\s+reaches\s+['\"]?.+?['\"]?\s+"
+    r"but\s+required\s+level\s+is\s+['\"]?.+?['\"]?\.?$",
+    flags=re.IGNORECASE,
+)
+_COVERAGE_DIRECTIVE_HINTS = (
+    "reach the required proficiency level",
+    "reach required proficiency level",
+    "required proficiency level",
+    "required level",
+    "missing levels",
+    "add sessions to reach",
+)
+_NON_COVERAGE_DIRECTIVE_HINTS = (
+    "engagement",
+    "personalization",
+    "fslsm",
+    "checkpoint",
+    "navigation",
+    "reflection",
+    "visual",
+    "verbal",
+    "truncated",
+    "level-skipping",
+    "skip",
+)
 
 
 def _normalize_skill_name(skill_name: Any) -> str:
@@ -206,6 +242,20 @@ def _is_progression_issue(issue_text: str) -> bool:
     return _contains_any_keyword(issue_text, _PROGRESSION_KEYWORDS)
 
 
+def _is_coverage_issue(issue_text: str) -> bool:
+    text = str(issue_text or "").strip()
+    if not text:
+        return False
+    if _COVERAGE_ISSUE_RE.match(text):
+        return True
+    lowered = text.lower()
+    return (
+        lowered.startswith("path for ")
+        and "only reaches" in lowered
+        and "required level is" in lowered
+    )
+
+
 def _progression_claims_problem(text: str) -> bool:
     return _contains_any_keyword(text, _PROGRESSION_KEYWORDS)
 
@@ -220,6 +270,16 @@ def _is_progression_only_directive(text: str) -> bool:
     has_progression = _contains_any_keyword(text, _PROGRESSION_KEYWORDS)
     has_non_progression = _contains_any_keyword(text, _NON_PROGRESSION_HINTS)
     return has_progression and not has_non_progression
+
+
+def _is_coverage_only_directive(text: str) -> bool:
+    stripped = str(text or "").strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower()
+    has_coverage = any(hint in lowered for hint in _COVERAGE_DIRECTIVE_HINTS)
+    has_non_coverage = any(hint in lowered for hint in _NON_COVERAGE_DIRECTIVE_HINTS)
+    return has_coverage and not has_non_coverage
 
 
 def _dedupe_nonempty(items: Sequence[str]) -> List[str]:
@@ -320,9 +380,22 @@ def _build_coverage_gaps(
     return gaps
 
 
+def _detect_session_overflow(generation_observations: Any) -> bool:
+    if not isinstance(generation_observations, Mapping):
+        return False
+    if bool(generation_observations.get("was_trimmed", False)):
+        return True
+    raw_count = generation_observations.get("raw_session_count", 0)
+    try:
+        return int(raw_count) > MAX_LEARNING_PATH_SESSIONS
+    except (TypeError, ValueError):
+        return False
+
+
 def reconcile_feedback_with_solo_audit(
     feedback: LearnerPlanFeedback,
     solo_audit: Mapping[str, Any],
+    generation_observations: Mapping[str, Any] | None = None,
 ) -> LearnerPlanFeedback:
     data = feedback.model_dump()
     had_override = False
@@ -333,6 +406,16 @@ def reconcile_feedback_with_solo_audit(
     violation_count = int(solo_audit.get("violation_count", 0) or 0)
     coverage_gaps = solo_audit.get("coverage_gaps", [])
     coverage_gap_count = int(solo_audit.get("coverage_gap_count", 0) or 0)
+    has_session_overflow = _detect_session_overflow(generation_observations or {})
+
+    if coverage_gap_count == 0:
+        filtered_issues = [issue for issue in issues if not _is_coverage_issue(issue)]
+        if len(filtered_issues) != len(issues):
+            issues = filtered_issues
+            had_override = True
+        if directives and _is_coverage_only_directive(directives):
+            directives = ""
+            had_override = True
 
     if not isinstance(violations, list):
         violations = []
@@ -413,6 +496,18 @@ def reconcile_feedback_with_solo_audit(
                 "Advance one SOLO level per session."
             )
 
+    if has_session_overflow:
+        if data.get("is_acceptable") is not False:
+            data["is_acceptable"] = False
+            had_override = True
+        issues = [_SESSION_OVERFLOW_ISSUE] + [issue for issue in issues if issue != _SESSION_OVERFLOW_ISSUE]
+        if not directives:
+            directives = _SESSION_OVERFLOW_DIRECTIVE
+            had_override = True
+        elif _SESSION_OVERFLOW_DIRECTIVE not in directives:
+            directives = f"{_SESSION_OVERFLOW_DIRECTIVE} {directives}".strip()
+            had_override = True
+
     issues = _dedupe_nonempty(issues)
     if len(issues) > 3:
         issues = issues[:3]
@@ -431,8 +526,9 @@ def reconcile_feedback_with_solo_audit(
 class LearningPathFeedbackPayload(BaseModel):
     learner_profile: Any = Field(default_factory=dict)
     learning_path: Any
+    generation_observations: Dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("learner_profile", "learning_path")
+    @field_validator("learner_profile", "learning_path", "generation_observations")
     @classmethod
     def coerce_jsonish(cls, v: Any) -> Any:
         if isinstance(v, BaseModel):
@@ -485,7 +581,11 @@ class LearningPlanFeedbackSimulator(BaseAgent):
         raw_output = self.invoke(invoke_payload, task_prompt=plan_feedback_simulator_task_prompt)
         raw_output = self._normalize_feedback_output(raw_output)
         validated_output = LearnerPlanFeedback.model_validate(raw_output)
-        reconciled_output = reconcile_feedback_with_solo_audit(validated_output, solo_audit)
+        reconciled_output = reconcile_feedback_with_solo_audit(
+            validated_output,
+            solo_audit,
+            payload.generation_observations,
+        )
         return reconciled_output.model_dump()
 
 

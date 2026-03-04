@@ -90,7 +90,7 @@ _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static/audio", StaticFiles(directory=str(_AUDIO_DIR)), name="audio")
 _DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
@@ -2103,6 +2103,8 @@ async def schedule_learning_path(request: LearningPathSchedulingRequest):
             llm, learner_profile, session_count,
         )
         return learning_path
+    except (ValidationError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2131,6 +2133,8 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
             **plan,
             "agent_metadata": agent_metadata,
         }
+    except (ValidationError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

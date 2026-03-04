@@ -33,6 +33,7 @@ Your role is to provide objective, third-person assessments of how a learner wit
   * Pacing mismatch: a session targets a proficiency level that is **two or more SOLO levels above** the learner's current `cognitive_status` for that skill (e.g., targeting "intermediate" when the skill is `unlearned` and no earlier session in the path first targets that skill at "beginner"). A one-step advance per session — unlearned→beginner, beginner→intermediate, intermediate→advanced, advanced→expert — is correct and must NOT be flagged.
   * FSLSM misalignment: the structural fields (has_checkpoint_challenges, navigation_mode, session_sequence_hint) do not match the learner's dimension values
   * SOLO progression skipped: a session advances a skill by more than one SOLO level in a single step (e.g., a session whose `desired_outcome_when_completed` targets "advanced" when the same skill was at "beginner" in the previous session). A path that goes beginner→intermediate across two sessions is NOT a skip.
+  * Session cap overflow: `generation_observations` indicates the generator exceeded the maximum session budget and required truncation.
   * Clear personalization gap: the path ignores the learner's stated preferences or skill gaps
 - When `is_acceptable: false`:
   * Populate `issues` with 1-3 concise problem descriptions (these appear as frontend bullet points, e.g., "Pacing too fast for beginner level", "Insufficient FSLSM alignment")
@@ -54,6 +55,7 @@ Your assessment should focus on the three key criteria below.
 * **Learner Profile**: {learner_profile}
 * **Learning Path**: {learning_path}
 * **Deterministic SOLO Audit**: {solo_audit}
+* **Generation Observations**: {generation_observations}
 
 **Evaluation Criteria**:
 1.  **Progression**: How is the logical flow, pacing, and difficulty scaling for this learner? Assess whether the sequence follows SOLO taxonomy progression (from foundational understanding toward integrated/abstract understanding). A correctly scheduled path advances each skill by exactly one SOLO level per session (unlearned→beginner, beginner→intermediate, intermediate→advanced, advanced→expert). Flag only genuine skips of two or more levels within a skill, not valid one-step advances.

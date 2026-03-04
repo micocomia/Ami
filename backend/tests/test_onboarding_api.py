@@ -664,3 +664,44 @@ class TestAdaptationEndpoints:
         assert "adaptation" in data
         assert "status" in data["adaptation"]
         mock_enqueue_prefetch.assert_called_once()
+
+
+class TestLearningPathSchedulingErrorHandling:
+    @patch("main.get_llm")
+    @patch("main.schedule_learning_path_with_llm")
+    def test_schedule_learning_path_returns_422_for_validation_error(self, mock_schedule, mock_get_llm, client):
+        mock_get_llm.return_value = MagicMock()
+        mock_schedule.side_effect = ValueError("Learning path must contain between 1 and 20 sessions.")
+
+        resp = client.post(
+            "/schedule-learning-path",
+            json={
+                "learner_profile": "{}",
+                "session_count": 8,
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "between 1 and 20 sessions" in resp.json()["detail"]
+
+    @patch("main.get_llm")
+    @patch("main.schedule_learning_path_agentic")
+    def test_schedule_learning_path_agentic_returns_422_for_validation_error(
+        self,
+        mock_schedule_agentic,
+        mock_get_llm,
+        client,
+    ):
+        mock_get_llm.return_value = MagicMock()
+        mock_schedule_agentic.side_effect = ValueError("Learning path must contain between 1 and 20 sessions.")
+
+        resp = client.post(
+            "/schedule-learning-path-agentic",
+            json={
+                "learner_profile": "{}",
+                "session_count": 8,
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "between 1 and 20 sessions" in resp.json()["detail"]

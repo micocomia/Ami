@@ -3,7 +3,10 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Union
 from pydantic import BaseModel, Field
 
 from base import BaseAgent
-from modules.learning_plan_generator.schemas import LearningPath
+from modules.learning_plan_generator.schemas import (
+    LearningPath,
+    MAX_LEARNING_PATH_SESSIONS,
+)
 from modules.learning_plan_generator.prompts.learning_path_scheduling import (
     learning_path_scheduler_system_prompt,
     learning_path_scheduler_task_prompt_reflexion,
@@ -130,14 +133,43 @@ class LearningPathScheduler(BaseAgent):
             tools=None,
             jsonalize_output=True,
         )
+        self.last_generation_observations: Dict[str, Any] = {}
+
+    @staticmethod
+    def _extract_learning_path(raw_output: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_output, Mapping):
+            return []
+        sessions = raw_output.get("learning_path", [])
+        if not isinstance(sessions, Sequence) or isinstance(sessions, (str, bytes)):
+            return []
+        normalized_sessions: list[dict[str, Any]] = []
+        for session in sessions:
+            if isinstance(session, Mapping):
+                normalized_sessions.append(dict(session))
+        return normalized_sessions
+
+    def _normalize_and_validate_learning_path(self, raw_output: Any) -> JSONDict:
+        learning_path = self._extract_learning_path(raw_output)
+        raw_session_count = len(learning_path)
+        was_trimmed = raw_session_count > MAX_LEARNING_PATH_SESSIONS
+        if was_trimmed:
+            learning_path = learning_path[:MAX_LEARNING_PATH_SESSIONS]
+        effective_session_count = len(learning_path)
+        self.last_generation_observations = {
+            "raw_session_count": raw_session_count,
+            "effective_session_count": effective_session_count,
+            "was_trimmed": was_trimmed,
+            "max_allowed_sessions": MAX_LEARNING_PATH_SESSIONS,
+        }
+        validated_output = LearningPath.model_validate({"learning_path": learning_path})
+        return validated_output.model_dump()
 
     def schedule_session(self, input_dict: Dict[str, Any]) -> JSONDict:
         """Schedule sessions based on learner profile and desired count."""
         payload_dict = SessionSchedulePayload(**input_dict).model_dump()
         task_prompt = learning_path_scheduler_task_prompt_session
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
-        validated_output = LearningPath.model_validate(raw_output)
-        result = validated_output.model_dump()
+        result = self._normalize_and_validate_learning_path(raw_output)
         result["learning_path"] = apply_fslsm_structural_overrides(
             result.get("learning_path", []),
             payload_dict["learner_profile"],
@@ -149,8 +181,7 @@ class LearningPathScheduler(BaseAgent):
         payload_dict = LearningPathRefinementPayload(**input_dict).model_dump()
         task_prompt = learning_path_scheduler_task_prompt_reflexion
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
-        validated = LearningPath.model_validate(raw_output)
-        result = validated.model_dump()
+        result = self._normalize_and_validate_learning_path(raw_output)
         learner_profile = {}
         feedback = payload_dict.get("feedback")
         if isinstance(feedback, Mapping):
@@ -167,8 +198,7 @@ class LearningPathScheduler(BaseAgent):
         payload_dict = LearningPathReschedulePayload(**input_dict).model_dump()
         task_prompt = learning_path_scheduler_task_prompt_reschedule
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
-        validated = LearningPath.model_validate(raw_output)
-        result = validated.model_dump()
+        result = self._normalize_and_validate_learning_path(raw_output)
         result["learning_path"] = apply_fslsm_structural_overrides(
             result.get("learning_path", []),
             payload_dict["learner_profile"],

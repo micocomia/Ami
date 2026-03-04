@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
+MIN_LEARNING_PATH_SESSIONS = 1
+MAX_LEARNING_PATH_SESSIONS = 20
+
 
 class Proficiency(str, Enum):
     beginner = "beginner"
@@ -60,8 +63,11 @@ class LearningPath(BaseModel):
     @field_validator("learning_path")
     @classmethod
     def limit_sessions(cls, v: List[SessionItem]) -> List[SessionItem]:
-        if not (1 <= len(v) <= 10):
-            raise ValueError("Learning path must contain between 1 and 10 sessions.")
+        if not (MIN_LEARNING_PATH_SESSIONS <= len(v) <= MAX_LEARNING_PATH_SESSIONS):
+            raise ValueError(
+                f"Learning path must contain between {MIN_LEARNING_PATH_SESSIONS} "
+                f"and {MAX_LEARNING_PATH_SESSIONS} sessions."
+            )
         return v
 
 

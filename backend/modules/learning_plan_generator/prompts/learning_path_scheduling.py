@@ -57,12 +57,18 @@ Your role is to create, refine, or re-schedule a personalized, goal-oriented lea
      * Near-zero: Set `navigation_mode: "linear"` (default).
      * Mild positive (+0.3 to +0.7): Set `navigation_mode: "free"`; sessions may be explored with some flexibility.
      * Strong positive (> +0.7): Set `navigation_mode: "free"` for ALL sessions; sessions can be explored in any order.
-3.  **Progressive — No SOLO Level Skipping and Full Coverage**: Sessions must advance through SOLO proficiency levels strictly one step at a time: beginner → intermediate → advanced → expert. You MUST NOT skip levels. Additionally, **Completeness**: For every skill listed in the learner's `in_progress_skills`, the learning path MUST include enough sessions to advance from `current_proficiency_level` to `required_proficiency_level`, one SOLO level per session. A path that stops before reaching `required_proficiency_level` is incomplete, even if no individual session skips a level. Apply these rules without exception:
+3.  **Progressive — No SOLO Level Skipping, No Repeat-Level Targets, and Full Coverage**: Sessions must advance through SOLO proficiency levels strictly one step at a time: beginner → intermediate → advanced → expert. You MUST NOT skip levels. Additionally, **Completeness**: For every skill listed in the learner's `in_progress_skills`, the learning path MUST include enough sessions to advance from `current_proficiency_level` to `required_proficiency_level`, one SOLO level per session. A path that stops before reaching `required_proficiency_level` is incomplete, even if no individual session skips a level. Apply these rules without exception:
     - If a learner's `cognitive_status` shows a skill as absent or unlearned, that skill MUST be targeted at `beginner` before any session targets it at `intermediate` or higher.
     - A learner who has no prior knowledge of a domain requires at least one `beginner` session per major skill area before any session targets that skill at `intermediate`.
     - A single session's `desired_outcome_when_completed` MUST NOT advance any skill by more than one SOLO level relative to the learner's current `cognitive_status` for that skill.
+    - For any skill in `in_progress_skills`, each new unlearned session MUST target a proficiency level strictly higher than that skill's current level, until required level is reached.
+    - Do NOT generate same-level targets (e.g., beginner -> beginner) unless explicitly requested in feedback as remediation.
+    - Skills in `mastered_skills` MUST NOT be targeted at the same or lower level in new unlearned sessions.
+    - If mastered skills are mentioned, they may appear only as supporting context, not primary desired outcome targets.
+    - Example (Disallowed): current `beginner` -> outcome `beginner`.
+    - Example (Allowed): current `beginner` -> outcome `intermediate`.
     - Valid proficiency levels (in order): "beginner", "intermediate", "advanced", "expert".
-4.  **Quality over Quantity — Without Compressing SOLO Levels**: A focused path is better than a bloated one. The total number of sessions should generally be between 1 and 10. However, the session count MUST NEVER be achieved by skipping or compressing SOLO proficiency levels — Directive 3 takes priority over the session count target. Three correctly-paced beginner sessions are always preferable to one session that claims to cover beginner, intermediate, and advanced together.
+4.  **Quality over Quantity — Without Compressing SOLO Levels**: A focused path is better than a bloated one. The total number of sessions should generally be between 1 and 20. However, the session count MUST NEVER be achieved by skipping or compressing SOLO proficiency levels — Directive 3 takes priority over the session count target. Three correctly-paced beginner sessions are always preferable to one session that claims to cover beginner, intermediate, and advanced together.
 5.  **Mastery Thresholds**: Set `mastery_threshold` based on the session's highest required proficiency level:
     - beginner -> 60 | intermediate -> 70 | advanced -> 80 | expert -> 90
     If a session targets multiple proficiency levels, use the highest.
@@ -82,13 +88,15 @@ You will be given one of the following tasks. Follow its rules precisely.
 * **Goal**: *Modify* an `original_learning_path` based on qualitative `feedback`.
 * **Rule**: You MUST NOT change the content of any session where `"if_learned": true`.
 * **Action**: Review the feedback (Progression, Engagement, Personalization) and adjust the *unlearned* sessions' content, order, or structure to address the suggestions. If `evaluator_feedback` is provided, treat it as the highest-priority directive and address all issues listed.
+* **Anti-Repeat Carveout**: You may not change `if_learned=true` sessions; enforce no-repeat-level rules only on `if_learned=false` sessions.
 
 **Task C: Re-schedule Learning Path (Update Existing Path)**
 * **Goal**: *Update* an `original_learning_path` using an `updated_learner_profile` and other constraints.
 * **Rule 1 (Preserve Learned Sessions)**: All sessions from the `original_learning_path` with `"if_learned": true` MUST be preserved *exactly as they are* (no content changes) and placed at the *beginning* of the new path.
 * **Rule 2 (Generate New Sessions)**: After the preserved learned sessions, generate *new* sessions based on the `updated_learner_profile` to close the *remaining* skill gap.
-* **Rule 3 (Session Count)**: The *total* number of sessions (learned + new) must match the `desired_session_count`. If `desired_session_count` is -1 or not provided, generate a reasonable number of new sessions (targeting a total path length of 1-10).
+* **Rule 3 (Session Count)**: The *total* number of sessions (learned + new) must match the `desired_session_count`. If `desired_session_count` is -1 or not provided, generate a reasonable number of new sessions (targeting a total path length of 1-20).
 * **Rule 4 (Handle Feedback)**: Incorporate any `other_feedback` when generating the new (unlearned) sessions.
+* **Rule 5 (Forward Progression for New Sessions)**: For generated new sessions after preserved learned sessions, apply strict forward progression with no same-level repeats.
 
 ---
 **FINAL OUTPUT FORMAT (FOR ALL TASKS)**
@@ -99,7 +107,7 @@ learning_path_scheduler_task_prompt_session = """
 **Task A: Adaptive Path Scheduling**
 
 Create a new, structured learning path based on the learner's profile.
-The number of sessions should be within [1, 10].
+The number of sessions should be within [1, 20].
 
 * **Learner Profile**: {learner_profile}
 """

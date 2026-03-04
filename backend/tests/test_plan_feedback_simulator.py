@@ -309,3 +309,99 @@ class TestFeedbackReconciliation:
         assert output["is_acceptable"] is False
         assert any("advanced" in issue for issue in output["issues"])
         assert "advanced" in output["improvement_directives"] or "required" in output["improvement_directives"]
+
+    def test_feedback_path_clears_stale_coverage_issues_and_directive_when_no_gaps(self, monkeypatch):
+        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
+            return _base_feedback(
+                is_acceptable=False,
+                issues=[
+                    "Path for 'Understanding and Using Functions' only reaches 'unlearned' but required level is 'beginner'",
+                    "Path for 'Code Decomposition' only reaches 'unlearned' but required level is 'beginner'",
+                ],
+                directives=(
+                    "Add sessions to reach the required proficiency level for: "
+                    "'Understanding and Using Functions' needs beginner; "
+                    "'Code Decomposition' needs beginner. "
+                    "Advance one SOLO level per session."
+                ),
+            )
+
+        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
+
+        profile = {
+            "cognitive_status": {
+                "mastered_skills": [],
+                "in_progress_skills": [
+                    {
+                        "name": "Understanding and Using Functions",
+                        "current_proficiency_level": "beginner",
+                        "required_proficiency_level": "intermediate",
+                    },
+                    {
+                        "name": "Code Decomposition",
+                        "current_proficiency_level": "beginner",
+                        "required_proficiency_level": "intermediate",
+                    },
+                ],
+            }
+        }
+
+        simulator = LearningPlanFeedbackSimulator(MagicMock())
+        output = simulator.feedback_path({"learner_profile": profile, "learning_path": _valid_scaffold_path()})
+
+        assert output["issues"] == []
+        assert output["improvement_directives"] == ""
+        assert output["is_acceptable"] is True
+
+    def test_feedback_path_keeps_non_coverage_issues_when_stale_coverage_removed(self, monkeypatch):
+        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
+            return _base_feedback(
+                is_acceptable=False,
+                issues=[
+                    "Path for 'Understanding and Using Functions' only reaches 'unlearned' but required level is 'beginner'",
+                    "Insufficient FSLSM alignment",
+                ],
+                directives=(
+                    "Add sessions to reach the required proficiency level for: "
+                    "'Understanding and Using Functions' needs beginner. "
+                    "Advance one SOLO level per session."
+                ),
+            )
+
+        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
+
+        simulator = LearningPlanFeedbackSimulator(MagicMock())
+        output = simulator.feedback_path(
+            {
+                "learner_profile": {"cognitive_status": {"mastered_skills": [], "in_progress_skills": []}},
+                "learning_path": _valid_scaffold_path(),
+            }
+        )
+
+        assert output["issues"] == ["Insufficient FSLSM alignment"]
+        assert output["improvement_directives"] == ""
+        assert output["is_acceptable"] is False
+
+    def test_feedback_path_forces_unacceptable_on_session_overflow_truncation(self, monkeypatch):
+        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
+            return _base_feedback(is_acceptable=True, issues=[], directives="")
+
+        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
+
+        simulator = LearningPlanFeedbackSimulator(MagicMock())
+        output = simulator.feedback_path(
+            {
+                "learner_profile": {"cognitive_status": {"mastered_skills": [], "in_progress_skills": []}},
+                "learning_path": _valid_scaffold_path(),
+                "generation_observations": {
+                    "raw_session_count": 25,
+                    "effective_session_count": 20,
+                    "was_trimmed": True,
+                    "max_allowed_sessions": 20,
+                },
+            }
+        )
+
+        assert output["is_acceptable"] is False
+        assert any("exceeded 20 sessions and was truncated" in issue for issue in output["issues"])
+        assert "within 20 sessions" in output["improvement_directives"]
