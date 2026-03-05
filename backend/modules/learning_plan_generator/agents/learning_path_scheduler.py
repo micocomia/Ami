@@ -162,7 +162,7 @@ class LearningPathScheduler(BaseAgent):
             "max_allowed_sessions": MAX_LEARNING_PATH_SESSIONS,
         }
         validated_output = LearningPath.model_validate({"learning_path": learning_path})
-        return validated_output.model_dump()
+        return validated_output.model_dump(mode="json")
 
     def schedule_session(self, input_dict: Dict[str, Any]) -> JSONDict:
         """Schedule sessions based on learner profile and desired count."""

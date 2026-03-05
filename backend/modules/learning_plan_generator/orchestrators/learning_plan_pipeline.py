@@ -64,11 +64,20 @@ def schedule_learning_path_agentic(
             generation_observations = dict(scheduler_observations)
         generation_observations_history.append(generation_observations)
 
-        simulation_feedback = sim_tool.invoke({
-            "learning_path": learning_path_list,
-            "learner_profile": profile_dict,
-            "generation_observations": generation_observations,
-        })
+        try:
+            simulation_feedback = sim_tool.invoke({
+                "learning_path": learning_path_list,
+                "learner_profile": profile_dict,
+                "generation_observations": generation_observations,
+            })
+        except Exception as sim_exc:
+            logger.warning(
+                "Simulation tool failed (attempt %d/%d), treating plan as acceptable: %s",
+                attempt + 1,
+                1 + max_refinements,
+                sim_exc,
+            )
+            simulation_feedback = {"is_acceptable": True, "issues": [], "feedback": {}, "improvement_directives": ""}
 
         if not isinstance(simulation_feedback, dict):
             simulation_feedback = {}

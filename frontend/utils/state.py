@@ -171,6 +171,10 @@ def clear_user_state():
     # Clear ancillary keys not in PERSIST_KEYS
     for k in ["_state_loaded", "_last_save_ts", "auth_token", "_navigated_lp_once"]:
         st.session_state.pop(k, None)
+    # Clear dynamic per-goal keys that aren't in the static list above
+    for k in list(st.session_state.keys()):
+        if k.startswith("learning_path_schedule_attempted_") or k.startswith("auto_adapt_inflight_") or k.startswith("goal_runtime_state_"):
+            st.session_state.pop(k, None)
 
 
 def get_new_goal_uid():
