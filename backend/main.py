@@ -16,7 +16,8 @@ _handler.setFormatter(logging.Formatter(
 # Add to root so all module-level loggers (propagate=True by default) flow here.
 # Uvicorn's own loggers have propagate=False so they are unaffected — no double-logging.
 logging.root.addHandler(_handler)
-logging.root.setLevel(logging.INFO)
+_log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+logging.root.setLevel(_log_level)
 # Allow DEBUG from our own code specifically.
 logger = logging.getLogger("ami")
 logger.setLevel(logging.DEBUG)

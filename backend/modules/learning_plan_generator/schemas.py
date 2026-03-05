@@ -76,7 +76,7 @@ class LearningPath(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PlanFeedbackDimensions(BaseModel):
-    progression: str
+    progression: str = ""   # default empty; always overwritten by deterministic audit
     engagement: str
     personalization: str
 
@@ -96,6 +96,23 @@ class LearnerPlanFeedback(BaseModel):
         if isinstance(value, list):
             parts = [str(item).strip() for item in value if str(item).strip()]
             return "\n".join(parts)
+        return str(value).strip()
+
+
+class LLMQualityOutput(BaseModel):
+    """Internal schema: LLM assesses ONLY engagement and personalization."""
+    feedback: PlanFeedbackDimensions
+    suggestions: PlanFeedbackDimensions
+    quality_issues: List[str] = Field(default_factory=list)
+    quality_directives: str = Field(default="")
+
+    @field_validator("quality_directives", mode="before")
+    @classmethod
+    def coerce_quality_directives(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return "\n".join(str(item).strip() for item in value if str(item).strip())
         return str(value).strip()
 
 

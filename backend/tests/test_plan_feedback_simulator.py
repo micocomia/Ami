@@ -12,32 +12,27 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from modules.learning_plan_generator.agents.plan_feedback_simulator import (
     LearningPlanFeedbackSimulator,
+    _merge_feedback,
     build_deterministic_solo_audit,
 )
+from modules.learning_plan_generator.schemas import LLMQualityOutput
 
 
-def _base_feedback(
+def _base_llm_output(
     *,
-    is_acceptable=True,
-    issues=None,
-    directives="",
-    progression_feedback="The learner would likely find the path well-paced.",
-    progression_suggestion="",
+    quality_issues=None,
+    quality_directives="",
+    engagement_feedback="The learner would likely stay engaged.",
+    personalization_feedback="The path is generally aligned to learner needs.",
 ):
     return {
         "feedback": {
-            "progression": progression_feedback,
-            "engagement": "The learner would likely stay engaged.",
-            "personalization": "The path is generally aligned to learner needs.",
+            "engagement": engagement_feedback,
+            "personalization": personalization_feedback,
         },
-        "suggestions": {
-            "progression": progression_suggestion,
-            "engagement": "",
-            "personalization": "",
-        },
-        "is_acceptable": is_acceptable,
-        "issues": issues or [],
-        "improvement_directives": directives,
+        "suggestions": {"engagement": "", "personalization": ""},
+        "quality_issues": quality_issues or [],
+        "quality_directives": quality_directives,
     }
 
 
@@ -159,7 +154,36 @@ class TestDeterministicSOLOAudit:
         assert audit["coverage_gaps"][0]["required_level"] == "advanced"
         assert audit["coverage_gaps"][0]["reached_level"] == "intermediate"
 
-    def test_skill_name_normalization_matches_equivalent_names(self):
+    def test_exact_skill_name_match_no_coverage_gap(self):
+        """Exact skill name in path outcome matches profile → no coverage gap, no violation."""
+        profile = {
+            "cognitive_status": {
+                "mastered_skills": [],
+                "in_progress_skills": [
+                    {
+                        "name": "Understanding and Using Functions",
+                        "current_proficiency_level": "beginner",
+                        "required_proficiency_level": "intermediate",
+                    }
+                ],
+            }
+        }
+        path = [
+            {
+                "id": "Session 1",
+                "title": "Functions in Practice",
+                "desired_outcome_when_completed": [
+                    {"name": "Understanding and Using Functions", "level": "intermediate"},
+                ],
+            }
+        ]
+
+        audit = build_deterministic_solo_audit(profile, path)
+        assert audit["violation_count"] == 0
+        assert audit["coverage_gap_count"] == 0
+
+    def test_mismatched_skill_name_treated_as_different_skill(self):
+        """Different casing/punctuation → treated as a different skill; profile skill is flagged as coverage gap."""
         profile = {
             "cognitive_status": {
                 "mastered_skills": [],
@@ -183,21 +207,19 @@ class TestDeterministicSOLOAudit:
         ]
 
         audit = build_deterministic_solo_audit(profile, path)
-        assert audit["violation_count"] == 0
+        assert audit["coverage_gap_count"] == 1
+        assert audit["coverage_gaps"][0]["skill"] == "Understanding and Using Functions"
 
 
 class TestFeedbackReconciliation:
     def test_feedback_path_coerces_list_improvement_directives(self, monkeypatch):
         def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(
-                is_acceptable=False,
-                issues=["Needs better verbal scaffolding."],
-                directives=[
+            return _base_llm_output(
+                quality_issues=["Needs better verbal scaffolding."],
+                quality_directives=[
                     "Integrate verbal learning supports into earlier sessions.",
                     "Add clearer contextual examples for relevance.",
                 ],
-                progression_feedback="The learner would likely find the path somewhat abrupt.",
-                progression_suggestion="Add more verbal scaffolds.",
             )
 
         monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
@@ -214,48 +236,9 @@ class TestFeedbackReconciliation:
         assert "Integrate verbal learning supports" in output["improvement_directives"]
         assert "Add clearer contextual examples" in output["improvement_directives"]
 
-    def test_feedback_path_corrects_contradictory_progression_when_no_violations(self, monkeypatch):
-        captured = {}
-
-        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            captured["input"] = input_dict
-            return _base_feedback(
-                is_acceptable=False,
-                issues=[
-                    "Pacing too fast for beginner level in later sessions",
-                    "SOLO progression skipped for multiple skills",
-                ],
-                directives="Add 2 foundational sessions before advancing to intermediate content.",
-                progression_feedback="The learner would likely struggle with abrupt SOLO jumps.",
-                progression_suggestion="Add beginner sessions before moving ahead.",
-            )
-
-        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
-
-        simulator = LearningPlanFeedbackSimulator(MagicMock())
-        output = simulator.feedback_path(
-            {
-                "learner_profile": {"cognitive_status": {"mastered_skills": [], "in_progress_skills": []}},
-                "learning_path": _valid_scaffold_path(),
-            }
-        )
-
-        assert "solo_audit" in captured["input"]
-        assert captured["input"]["solo_audit"]["violation_count"] == 0
-        assert output["is_acceptable"] is True
-        assert output["issues"] == []
-        assert output["improvement_directives"] == ""
-        assert "no level-skipping transitions" in output["feedback"]["progression"]
-
     def test_feedback_path_forces_unacceptable_when_violations_are_missed(self, monkeypatch):
         def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(
-                is_acceptable=True,
-                issues=[],
-                directives="",
-                progression_feedback="The learner would likely find the progression well-paced.",
-                progression_suggestion="Keep current pacing.",
-            )
+            return _base_llm_output(quality_issues=[])
 
         monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
 
@@ -283,7 +266,7 @@ class TestFeedbackReconciliation:
     def test_feedback_path_forces_unacceptable_when_coverage_gap(self, monkeypatch):
         """Plan is correctly paced but doesn't reach required level → must be unacceptable."""
         def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(is_acceptable=True, issues=[], directives="")
+            return _base_llm_output(quality_issues=[])
 
         monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
 
@@ -310,81 +293,9 @@ class TestFeedbackReconciliation:
         assert any("advanced" in issue for issue in output["issues"])
         assert "advanced" in output["improvement_directives"] or "required" in output["improvement_directives"]
 
-    def test_feedback_path_clears_stale_coverage_issues_and_directive_when_no_gaps(self, monkeypatch):
-        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(
-                is_acceptable=False,
-                issues=[
-                    "Path for 'Understanding and Using Functions' only reaches 'unlearned' but required level is 'beginner'",
-                    "Path for 'Code Decomposition' only reaches 'unlearned' but required level is 'beginner'",
-                ],
-                directives=(
-                    "Add sessions to reach the required proficiency level for: "
-                    "'Understanding and Using Functions' needs beginner; "
-                    "'Code Decomposition' needs beginner. "
-                    "Advance one SOLO level per session."
-                ),
-            )
-
-        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
-
-        profile = {
-            "cognitive_status": {
-                "mastered_skills": [],
-                "in_progress_skills": [
-                    {
-                        "name": "Understanding and Using Functions",
-                        "current_proficiency_level": "beginner",
-                        "required_proficiency_level": "intermediate",
-                    },
-                    {
-                        "name": "Code Decomposition",
-                        "current_proficiency_level": "beginner",
-                        "required_proficiency_level": "intermediate",
-                    },
-                ],
-            }
-        }
-
-        simulator = LearningPlanFeedbackSimulator(MagicMock())
-        output = simulator.feedback_path({"learner_profile": profile, "learning_path": _valid_scaffold_path()})
-
-        assert output["issues"] == []
-        assert output["improvement_directives"] == ""
-        assert output["is_acceptable"] is True
-
-    def test_feedback_path_keeps_non_coverage_issues_when_stale_coverage_removed(self, monkeypatch):
-        def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(
-                is_acceptable=False,
-                issues=[
-                    "Path for 'Understanding and Using Functions' only reaches 'unlearned' but required level is 'beginner'",
-                    "Insufficient FSLSM alignment",
-                ],
-                directives=(
-                    "Add sessions to reach the required proficiency level for: "
-                    "'Understanding and Using Functions' needs beginner. "
-                    "Advance one SOLO level per session."
-                ),
-            )
-
-        monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
-
-        simulator = LearningPlanFeedbackSimulator(MagicMock())
-        output = simulator.feedback_path(
-            {
-                "learner_profile": {"cognitive_status": {"mastered_skills": [], "in_progress_skills": []}},
-                "learning_path": _valid_scaffold_path(),
-            }
-        )
-
-        assert output["issues"] == ["Insufficient FSLSM alignment"]
-        assert output["improvement_directives"] == ""
-        assert output["is_acceptable"] is False
-
     def test_feedback_path_forces_unacceptable_on_session_overflow_truncation(self, monkeypatch):
         def fake_invoke(self, input_dict, task_prompt=None, **kwargs):
-            return _base_feedback(is_acceptable=True, issues=[], directives="")
+            return _base_llm_output(quality_issues=[])
 
         monkeypatch.setattr(LearningPlanFeedbackSimulator, "invoke", fake_invoke)
 
@@ -405,3 +316,85 @@ class TestFeedbackReconciliation:
         assert output["is_acceptable"] is False
         assert any("exceeded 20 sessions and was truncated" in issue for issue in output["issues"])
         assert "within 20 sessions" in output["improvement_directives"]
+
+
+class TestMergeFeedback:
+    def _make_llm_output(self, *, quality_issues=None, quality_directives=""):
+        return LLMQualityOutput.model_validate(
+            _base_llm_output(quality_issues=quality_issues, quality_directives=quality_directives)
+        )
+
+    def _clean_audit(self):
+        return {
+            "violations": [],
+            "violation_count": 0,
+            "coverage_gaps": [],
+            "coverage_gap_count": 0,
+        }
+
+    def _violation_audit(self):
+        return {
+            "violations": [
+                {
+                    "session_id": "Session 1",
+                    "session_index": 1,
+                    "skill": "Functions",
+                    "from_level": "unlearned",
+                    "to_level": "advanced",
+                    "delta": 3,
+                }
+            ],
+            "violation_count": 1,
+            "coverage_gaps": [],
+            "coverage_gap_count": 0,
+        }
+
+    def test_clean_path_no_quality_issues_is_acceptable(self):
+        llm_output = self._make_llm_output()
+        result = _merge_feedback(llm_output, self._clean_audit(), {})
+        assert result.is_acceptable is True
+        assert result.issues == []
+
+    def test_quality_issues_make_unacceptable(self):
+        llm_output = self._make_llm_output(quality_issues=["FSLSM misalignment detected."])
+        result = _merge_feedback(llm_output, self._clean_audit(), {})
+        assert result.is_acceptable is False
+        assert any("FSLSM misalignment" in issue for issue in result.issues)
+
+    def test_quality_directives_list_coerced_to_string(self):
+        llm_output = self._make_llm_output(
+            quality_issues=["Engagement issue."],
+            quality_directives=["Add more activities.", "Vary delivery format."],
+        )
+        result = _merge_feedback(llm_output, self._clean_audit(), {})
+        assert isinstance(result.improvement_directives, str)
+        assert "Add more activities" in result.improvement_directives
+        assert "Vary delivery format" in result.improvement_directives
+
+    def test_violations_make_unacceptable_with_solo_issues(self):
+        llm_output = self._make_llm_output()
+        result = _merge_feedback(llm_output, self._violation_audit(), {})
+        assert result.is_acceptable is False
+        assert any("SOLO progression skipped" in issue for issue in result.issues)
+        assert "level-skipping" in result.feedback.progression
+
+    def test_no_violations_progression_says_no_level_skipping(self):
+        llm_output = self._make_llm_output()
+        result = _merge_feedback(llm_output, self._clean_audit(), {})
+        assert "no level-skipping transitions" in result.feedback.progression
+
+    def test_session_overflow_makes_unacceptable_with_overflow_first(self):
+        llm_output = self._make_llm_output()
+        observations = {"was_trimmed": True, "raw_session_count": 25}
+        result = _merge_feedback(llm_output, self._clean_audit(), observations)
+        assert result.is_acceptable is False
+        assert result.issues[0].startswith("Generated path exceeded")
+        assert "within 20 sessions" in result.improvement_directives
+
+    def test_structural_and_quality_issues_capped_at_three(self):
+        # 2 structural (violation) + 2 quality = 4 total, should be capped to 3
+        llm_output = self._make_llm_output(
+            quality_issues=["FSLSM misalignment.", "Missing personalization."],
+        )
+        result = _merge_feedback(llm_output, self._violation_audit(), {})
+        assert len(result.issues) <= 3
