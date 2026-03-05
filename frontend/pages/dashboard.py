@@ -23,7 +23,8 @@ def render_dashboard():
     with st.container(border=True):
         render_learning_progress(metrics)
     with st.container(border=True):
-        render_skill_radar_chart(metrics)
+        goal_name = goal.get("learning_goal", goal.get("goal", ""))
+        render_skill_radar_chart(metrics, goal_name=goal_name)
     with st.container(border=True):
         render_session_learning_timeseries(metrics)
     with st.container(border=True):
@@ -39,10 +40,13 @@ def render_learning_progress(metrics):
 
 
 
-def render_skill_radar_chart(metrics):
+def render_skill_radar_chart(metrics, goal_name=""):
     import plotly.graph_objects as go
 
-    st.markdown("#### Proficiency Levels for Different Skills")
+    title = "Proficiency Levels for Different Skills"
+    if goal_name:
+        title = f"Proficiency Levels for Different Skills — {goal_name}"
+    st.markdown(f"#### {title}")
     skill_radar = metrics.get("skill_radar", {})
     skill_names = skill_radar.get("labels", [])
     current_levels = skill_radar.get("current_levels", [])

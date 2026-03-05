@@ -162,6 +162,12 @@ class ContentBiasAuditRequest(BaseRequest):
     learner_information: str
 
 
+class ChatbotBiasAuditRequest(BaseRequest):
+
+    tutor_responses: str
+    learner_information: str
+
+
 class AuthRegisterRequest(BaseModel):
     username: str
     password: str

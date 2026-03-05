@@ -1,7 +1,8 @@
 import streamlit as st
 from streamlit_float import *
-from utils.request_api import chat_with_tutor
+from utils.request_api import chat_with_tutor, audit_chatbot_bias
 from utils.state import get_selected_goal
+from components.chatbot_bias import render_chatbot_bias_banners
 
 
 @st.dialog("Ask Ami")
@@ -55,7 +56,19 @@ def ask_autor_chatbot():
 
         messages.chat_message("assistant").write(response)
         st.session_state["tutor_messages"].append({"role": "assistant", "content": response})
-        # messages.chat_message("assistant").write(f"Echo: {prompt}")
+
+        # Run chatbot bias audit (non-blocking)
+        try:
+            learner_information = st.session_state.get("learner_information", "")
+            chatbot_audit_result = audit_chatbot_bias(response, learner_information)
+            st.session_state["chatbot_bias_audit"] = chatbot_audit_result
+        except Exception:
+            st.session_state["chatbot_bias_audit"] = None
+
+        # Render bias warnings if any
+        audit = st.session_state.get("chatbot_bias_audit")
+        if audit:
+            render_chatbot_bias_banners(audit)
 
 def click_chatbot_func():
     ask_autor_chatbot()

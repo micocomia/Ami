@@ -45,7 +45,7 @@ from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import
 from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
 from modules.content_generator import *
 from modules.content_generator.agents.content_feedback_simulator import simulate_content_feedback_with_llm
-from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
+from modules.ai_chatbot_tutor import chat_with_tutor_with_llm, audit_chatbot_bias_with_llm
 from modules.ai_chatbot_tutor.utils import safe_update_learning_preferences
 from api_schemas import *
 from config import load_config
@@ -1931,6 +1931,18 @@ async def audit_content_bias(request: ContentBiasAuditRequest):
     learner_information = request.learner_information
     try:
         result = audit_content_bias_with_llm(llm, generated_content, learner_information)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.post("/audit-chatbot-bias")
+async def audit_chatbot_bias(request: ChatbotBiasAuditRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    tutor_responses = request.tutor_responses
+    learner_information = request.learner_information
+    try:
+        result = audit_chatbot_bias_with_llm(llm, tutor_responses, learner_information)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
