@@ -554,6 +554,7 @@ def generate_learning_content_with_llm(
     _lightweight_llm = get_lightweight_llm(llm, lightweight_llm)
     session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
 
+    # 1. Explore knowledge points
     with _time_stage(trace, "explore_knowledge_points"):
         try:
             raw_knowledge_points = explore_knowledge_points_with_llm(
@@ -584,6 +585,7 @@ def generate_learning_content_with_llm(
     fslsm_perception = get_fslsm_dim(learner_profile, "fslsm_perception")
     fslsm_understanding = get_fslsm_dim(learner_profile, "fslsm_understanding")
 
+    # 2. Draft knowledge points
     with _time_stage(trace, "draft_knowledge_points"):
         raw_knowledge_drafts = draft_knowledge_points_with_llm(
             llm,
@@ -630,6 +632,7 @@ def generate_learning_content_with_llm(
             }
         )
 
+    # 3. Draft evaluation
     with _time_stage(trace, "draft_deterministic_audit"):
         _apply_deterministic_draft_audit(draft_records)
     with _time_stage(trace, "draft_llm_checkpoint"):
@@ -644,6 +647,7 @@ def generate_learning_content_with_llm(
 
     failed_drafts = [r for r in draft_records if not _draft_is_acceptable(r)]
     if failed_drafts and _MAX_DRAFT_RETRIES > 0:
+        # If there are failed drafts, retry creation
         with _time_stage(trace, "draft_targeted_repair"):
             for record in failed_drafts:
                 feedback_lines = list(record.get("issues", []))

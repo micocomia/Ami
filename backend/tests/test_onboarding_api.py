@@ -630,15 +630,13 @@ class TestAdaptationEndpoints:
         assert resp.status_code == 404
 
     @patch("main.get_llm")
-    @patch("main.create_simulate_feedback_tool")
+    @patch("main.evaluate_plan")
     @patch("main.reschedule_learning_path_with_llm")
     @patch("main.PREFETCH_SERVICE.enqueue_for_goal")
-    def test_adapt_learning_path_auto_mode_works(self, mock_enqueue_prefetch, mock_reschedule, mock_sim_tool, mock_get_llm, client):
+    def test_adapt_learning_path_auto_mode_works(self, mock_enqueue_prefetch, mock_reschedule, mock_evaluate_plan, mock_get_llm, client):
         goal_id = self._seed_goal_and_profile()
         mock_get_llm.return_value = MagicMock()
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
-        mock_sim_tool.return_value = sim_tool
+        mock_evaluate_plan.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
         mock_enqueue_prefetch.return_value = "queued"
         mock_reschedule.return_value = {
             "learning_path": [{

@@ -50,9 +50,10 @@ def test_schedule_learning_path_agentic_accepts_goal_context():
     llm = MagicMock()
 
     with patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler") as MockScheduler, \
-         patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool") as mock_sim_tool_factory:
+         patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator") as MockSimulator, \
+         patch("modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create", return_value=MagicMock()):
         MockScheduler.return_value.schedule_session.return_value = {"learning_path": []}
-        mock_sim_tool_factory.return_value.invoke.return_value = {
+        MockSimulator.return_value.feedback_path.return_value = {
             "feedback": {"progression": "", "engagement": "", "personalization": ""},
             "suggestions": {"progression": "", "engagement": "", "personalization": ""},
             "is_acceptable": True,

@@ -1,8 +1,9 @@
 import logging
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from base.llm_factory import LLMFactory
 from modules.learning_plan_generator.agents.learning_path_scheduler import LearningPathScheduler
-from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
+from modules.learning_plan_generator.agents.plan_feedback_simulator import LearningPlanFeedbackSimulator
 
 
 JSONDict = Dict[str, Any]
@@ -20,13 +21,15 @@ def schedule_learning_path_agentic(
 
     Flow:
     1. Generate initial plan
-    2. Evaluate plan quality via learner simulator tool (gpt-4o-mini)
+    2. Evaluate plan quality via learner simulator (gpt-4o-mini)
     3. Read is_acceptable, issues, improvement_directives from simulation feedback
     4. If quality insufficient, feed improvement_directives into reflexion()
     5. At most ``max_refinements`` reflexion passes (default 1 → two LLM calls total)
     6. Return final plan + evaluation metadata
     """
-    sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
+    fast_llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai", temperature=0)
+    simulator = LearningPlanFeedbackSimulator(fast_llm)
+    simulation_profile = dict(learner_profile) if isinstance(learner_profile, Mapping) else learner_profile
 
     plan = None
     simulation_feedback: Any = {}
@@ -55,9 +58,7 @@ def schedule_learning_path_agentic(
                 "goal_context": goal_context,
             })
 
-        # Evaluate via learner simulation (gpt-4o-mini, fast path)
         learning_path_list = plan.get("learning_path", [])
-        profile_dict = dict(learner_profile) if isinstance(learner_profile, Mapping) else learner_profile
         generation_observations: Dict[str, Any] = {}
         scheduler_observations = getattr(scheduler, "last_generation_observations", None)
         if isinstance(scheduler_observations, Mapping):
@@ -65,14 +66,14 @@ def schedule_learning_path_agentic(
         generation_observations_history.append(generation_observations)
 
         try:
-            simulation_feedback = sim_tool.invoke({
+            simulation_feedback = simulator.feedback_path({
+                "learner_profile": simulation_profile,
                 "learning_path": learning_path_list,
-                "learner_profile": profile_dict,
                 "generation_observations": generation_observations,
             })
         except Exception as sim_exc:
             logger.warning(
-                "Simulation tool failed (attempt %d/%d), treating plan as acceptable: %s",
+                "Simulation failed (attempt %d/%d), treating plan as acceptable: %s",
                 attempt + 1,
                 1 + max_refinements,
                 sim_exc,
@@ -108,3 +109,21 @@ def schedule_learning_path_agentic(
     }
 
     return plan, metadata
+
+
+def evaluate_plan(
+    llm: Any,
+    plan: Mapping[str, Any],
+    learner_profile: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Evaluate a learning plan via the feedback simulator. Returns raw simulation feedback dict."""
+    fast_llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai", temperature=0)
+    simulator = LearningPlanFeedbackSimulator(fast_llm)
+    try:
+        return simulator.feedback_path({
+            "learner_profile": dict(learner_profile),
+            "learning_path": plan.get("learning_path", []),
+        })
+    except Exception as exc:
+        logger.warning("Plan evaluation failed: %s", exc)
+        return {"is_acceptable": True, "issues": [], "feedback": {}, "improvement_directives": ""}

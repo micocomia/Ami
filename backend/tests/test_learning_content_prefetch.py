@@ -344,13 +344,13 @@ def test_on_demand_owner_unrelated_session_change_still_saves(_mock_llm, client)
 
 
 @patch("main.get_llm", return_value=MagicMock())
-@patch("main.create_simulate_feedback_tool")
+@patch("main.evaluate_plan")
 @patch("main.reschedule_learning_path_with_llm")
 @patch("modules.learning_plan_generator.utils.plan_regeneration.decide_regeneration")
 def test_adapt_applied_invalidates_only_changed_future_sessions(
     mock_decide,
     mock_reschedule,
-    mock_sim_tool,
+    mock_evaluate_plan,
     _mock_llm,
     client,
     monkeypatch,
@@ -381,9 +381,7 @@ def test_adapt_applied_invalidates_only_changed_future_sessions(
             _session("Session 3", learned=False, title="Keep Future"),
         ]
     }
-    sim_tool = MagicMock()
-    sim_tool.invoke.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
-    mock_sim_tool.return_value = sim_tool
+    mock_evaluate_plan.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
 
     resp = client.post(
         "/adapt-learning-path",

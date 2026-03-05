@@ -83,10 +83,10 @@ class TestLearningPathSchedulerInit:
 
 class TestAgenticMetadata:
 
-    def _make_sim_tool(self, feedback_dict):
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = feedback_dict
-        return sim_tool
+    def _make_mock_simulator(self, feedback_dict):
+        mock_sim = MagicMock()
+        mock_sim.feedback_path.return_value = feedback_dict
+        return mock_sim
 
     def test_quality_gate_reads_is_acceptable_from_feedback(self):
         """Quality gate should read is_acceptable directly from simulation feedback."""
@@ -104,8 +104,11 @@ class TestAgenticMetadata:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=self._make_sim_tool(feedback),
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=self._make_mock_simulator(feedback),
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -146,8 +149,11 @@ class TestAgenticMetadata:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=self._make_sim_tool(bad_feedback),
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=self._make_mock_simulator(bad_feedback),
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),

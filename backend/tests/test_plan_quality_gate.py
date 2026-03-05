@@ -56,14 +56,29 @@ _LEARNER_PROFILE = {
 }
 
 
+def _make_mock_simulator(feedback_dict):
+    """Return a mock simulator whose .feedback_path() returns feedback_dict."""
+    mock_sim = MagicMock()
+    mock_sim.feedback_path.return_value = feedback_dict
+    return mock_sim
+
+
+def _pipeline_patches(mock_simulator):
+    """Return patches needed to run schedule_learning_path_agentic without real LLM calls."""
+    return [
+        patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ),
+        patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
+        ),
+    ]
+
+
 class TestPlanQualityGatePassthrough:
     """Tests that pipeline correctly reads quality from simulation feedback."""
-
-    def _make_sim_tool(self, feedback_dict):
-        """Return a mock sim_tool whose .invoke() returns feedback_dict."""
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = feedback_dict
-        return sim_tool
 
     def test_is_acceptable_true_breaks_loop_after_first_attempt(self):
         """When is_acceptable=True, the pipeline should stop after 1 iteration."""
@@ -85,13 +100,17 @@ class TestPlanQualityGatePassthrough:
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
+        mock_sim = _make_mock_simulator(acceptable_feedback)
 
         with patch(
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=self._make_sim_tool(acceptable_feedback),
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_sim,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -129,8 +148,8 @@ class TestPlanQualityGatePassthrough:
             "improvement_directives": "",
         }
 
-        sim_tool = MagicMock()
-        sim_tool.invoke.side_effect = [failing_feedback, passing_feedback]
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.side_effect = [failing_feedback, passing_feedback]
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -140,8 +159,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -170,8 +192,8 @@ class TestPlanQualityGatePassthrough:
             "improvement_directives": "",
         }
 
-        sim_tool = MagicMock()
-        sim_tool.invoke.side_effect = [failing_feedback, passing_feedback]
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.side_effect = [failing_feedback, passing_feedback]
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -181,8 +203,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -195,8 +220,8 @@ class TestPlanQualityGatePassthrough:
 
     def test_non_dict_simulation_feedback_defaults_to_pass(self):
         """Non-dict simulation feedback should be treated as acceptable (pass=True)."""
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = "unexpected string output"
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.return_value = "unexpected string output"
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -205,8 +230,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -236,8 +264,8 @@ class TestPlanQualityGatePassthrough:
             "improvement_directives": "",
         }
 
-        sim_tool = MagicMock()
-        sim_tool.invoke.side_effect = [failing_feedback, passing_feedback]
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.side_effect = [failing_feedback, passing_feedback]
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -247,8 +275,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -275,8 +306,8 @@ class TestPlanQualityGatePassthrough:
             "improvement_directives": "",
         }
 
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = feedback
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.return_value = feedback
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -285,8 +316,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             plan, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),
@@ -312,8 +346,8 @@ class TestPlanQualityGatePassthrough:
             "simulation_metadata": {"simulation_model": "gpt-4o-mini"},
         }
 
-        sim_tool = MagicMock()
-        sim_tool.invoke.return_value = feedback
+        mock_simulator = MagicMock()
+        mock_simulator.feedback_path.return_value = feedback
 
         mock_scheduler = MagicMock()
         mock_scheduler.schedule_session.return_value = _DUMMY_PLAN
@@ -322,8 +356,11 @@ class TestPlanQualityGatePassthrough:
             "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
             return_value=mock_scheduler,
         ), patch(
-            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-            return_value=sim_tool,
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+            return_value=mock_simulator,
+        ), patch(
+            "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+            return_value=MagicMock(),
         ):
             _, metadata = schedule_learning_path_agentic(
                 llm=MagicMock(),

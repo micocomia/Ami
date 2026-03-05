@@ -87,8 +87,8 @@ def test_agentic_pipeline_forwards_generation_observations_and_surfaces_metadata
         def reflexion(self, _payload):
             raise AssertionError("reflexion should not be called when first evaluation passes")
 
-    sim_tool = MagicMock()
-    sim_tool.invoke.return_value = {
+    mock_simulator_instance = MagicMock()
+    mock_simulator_instance.feedback_path.return_value = {
         "feedback": {"progression": "Good", "engagement": "Good", "personalization": "Good"},
         "suggestions": {"progression": "", "engagement": "", "personalization": ""},
         "is_acceptable": True,
@@ -100,8 +100,11 @@ def test_agentic_pipeline_forwards_generation_observations_and_surfaces_metadata
         "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPathScheduler",
         FakeScheduler,
     ), patch(
-        "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.create_simulate_feedback_tool",
-        return_value=sim_tool,
+        "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LearningPlanFeedbackSimulator",
+        return_value=mock_simulator_instance,
+    ), patch(
+        "modules.learning_plan_generator.orchestrators.learning_plan_pipeline.LLMFactory.create",
+        return_value=MagicMock(),
     ):
         _, metadata = schedule_learning_path_agentic(
             llm=MagicMock(),
@@ -109,8 +112,8 @@ def test_agentic_pipeline_forwards_generation_observations_and_surfaces_metadata
             max_refinements=0,
         )
 
-    invoke_payload = sim_tool.invoke.call_args.args[0]
-    assert invoke_payload["generation_observations"]["was_trimmed"] is True
+    feedback_payload = mock_simulator_instance.feedback_path.call_args.args[0]
+    assert feedback_payload["generation_observations"]["was_trimmed"] is True
     assert metadata["final_generation_observations"]["was_trimmed"] is True
     assert metadata["generation_observations_history"][0]["raw_session_count"] == MAX_LEARNING_PATH_SESSIONS + 3
 

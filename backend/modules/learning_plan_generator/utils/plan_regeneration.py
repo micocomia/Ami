@@ -172,6 +172,33 @@ def decide_regeneration(
     )
 
 
+def stitch_regenerated_plan(
+    current_plan: Dict[str, Any],
+    new_plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge learned sessions from current plan with new sessions from a regenerated plan.
+
+    Preserves all learned sessions, appends new unlearned sessions with non-conflicting IDs.
+    """
+    learned = [
+        session for session in current_plan.get("learning_path", [])
+        if session.get("if_learned", False)
+    ]
+    new_sessions = [
+        session for session in new_plan.get("learning_path", [])
+        if not session.get("if_learned", False)
+    ]
+    learned_ids = {session.get("id") for session in learned}
+    offset = len(learned)
+    for i, session in enumerate(new_sessions):
+        new_id = f"Session {offset + i + 1}"
+        while new_id in learned_ids:
+            offset += 1
+            new_id = f"Session {offset + i + 1}"
+        session["id"] = new_id
+    return {"learning_path": learned + new_sessions}
+
+
 def generate_reason_with_llm(
     decision: RegenerationDecision,
     deltas: Dict[str, float],

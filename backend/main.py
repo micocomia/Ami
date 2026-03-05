@@ -40,9 +40,10 @@ from modules.learner_profiler.utils import fslsm_adaptation
 from modules.learner_profiler.utils.profile_edit_inputs import extract_slider_override_dims
 from modules.learning_plan_generator import *
 from modules.learning_plan_generator.orchestrators.learning_plan_pipeline import (
+    evaluate_plan,
     schedule_learning_path_agentic,
 )
-from modules.learning_plan_generator.tools.learner_simulation_tool import create_simulate_feedback_tool
+from modules.learning_plan_generator.utils.plan_regeneration import stitch_regenerated_plan
 from modules.content_generator import *
 from modules.content_generator.agents.content_feedback_simulator import simulate_content_feedback_with_llm
 from modules.ai_chatbot_tutor import chat_with_tutor_with_llm
@@ -1422,30 +1423,10 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
                     llm,
                     effective_profile,
                 )
-                learned = [
-                    session for session in current_plan.get("learning_path", [])
-                    if session.get("if_learned", False)
-                ]
-                new_sessions = [
-                    session for session in plan.get("learning_path", [])
-                    if not session.get("if_learned", False)
-                ]
-                learned_ids = {session.get("id") for session in learned}
-                offset = len(learned)
-                for i, session in enumerate(new_sessions):
-                    new_id = f"Session {offset + i + 1}"
-                    while new_id in learned_ids:
-                        offset += 1
-                        new_id = f"Session {offset + i + 1}"
-                    session["id"] = new_id
-                result_plan = {"learning_path": learned + new_sessions}
+                result_plan = stitch_regenerated_plan(current_plan, plan)
                 agent_metadata.update(regen_metadata)
 
-            sim_tool = create_simulate_feedback_tool(llm, use_ground_truth=False)
-            sim_feedback = sim_tool.invoke({
-                "learning_path": result_plan.get("learning_path", []),
-                "learner_profile": effective_profile,
-            })
+            sim_feedback = evaluate_plan(llm, result_plan, effective_profile)
             agent_metadata["evaluation_feedback"] = sim_feedback
             if not isinstance(sim_feedback, dict):
                 sim_feedback = {}
