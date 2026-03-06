@@ -632,12 +632,12 @@ class TestAdaptationEndpoints:
     @patch("main.get_llm")
     @patch("main.evaluate_plan")
     @patch("main.reschedule_learning_path_with_llm")
-    @patch("main.PREFETCH_SERVICE.enqueue_for_goal")
-    def test_adapt_learning_path_auto_mode_works(self, mock_enqueue_prefetch, mock_reschedule, mock_evaluate_plan, mock_get_llm, client):
+    @patch("main.PREFETCH_SERVICE.cancel_inflight_for_goal")
+    def test_adapt_learning_path_auto_mode_works(self, mock_cancel_prefetch, mock_reschedule, mock_evaluate_plan, mock_get_llm, client):
         goal_id = self._seed_goal_and_profile()
         mock_get_llm.return_value = MagicMock()
         mock_evaluate_plan.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
-        mock_enqueue_prefetch.return_value = "queued"
+        mock_cancel_prefetch.return_value = 0
         mock_reschedule.return_value = {
             "learning_path": [{
                 "id": "Session 1",
@@ -661,7 +661,7 @@ class TestAdaptationEndpoints:
         data = resp.json()
         assert "adaptation" in data
         assert "status" in data["adaptation"]
-        mock_enqueue_prefetch.assert_called_once()
+        mock_cancel_prefetch.assert_called_once()
 
 
 class TestLearningPathSchedulingErrorHandling:

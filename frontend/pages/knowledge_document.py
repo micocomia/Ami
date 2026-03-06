@@ -85,6 +85,21 @@ def render_learning_content():
     render_session_details(goal)
     session_uid = get_current_session_uid()
     is_document_available = st.session_state["document_caches"].get(session_uid, False)
+    if is_document_available and not st.session_state["if_updating_learner_profile"]:
+        # Validate that the backend still has this content — adaptation may have cleared it.
+        _uid = st.session_state.get("userId")
+        _gid = st.session_state.get("selected_goal_id")
+        _sid = st.session_state.get("selected_session_id")
+        if _uid is not None and _gid is not None and _sid is not None:
+            backend_content = get_learning_content(_uid, _gid, _sid, no_wait=True)
+            if backend_content is not None:
+                # Backend still has content — keep frontend cache in sync.
+                st.session_state["document_caches"][session_uid] = backend_content
+            else:
+                # Backend cleared the content (e.g. after adaptation) — invalidate and regenerate.
+                st.session_state["document_caches"].pop(session_uid, None)
+                is_document_available = False
+
     if not is_document_available and not st.session_state["if_updating_learner_profile"]:
         learning_content = render_content_preparation(goal)
         if learning_content is None:

@@ -3,9 +3,11 @@ import json
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+
+from modules.content_generator.orchestrators.content_generation_pipeline import ContentGenerationCancelled
 
 
 class ContentPrefetchService:
@@ -37,6 +39,8 @@ class ContentPrefetchService:
         self._lock_guard = threading.Lock()
         self._registry: Dict[str, Dict[str, Any]] = {}
         self._last_trigger_at: Dict[str, float] = {}
+        self._futures: Dict[str, Future] = {}
+        self._cancel_events: Dict[str, threading.Event] = {}
         max_workers = int(self._app_config.get("prefetch_max_workers", 2) or 2)
         self._executor = ThreadPoolExecutor(
             max_workers=max(max_workers, 1),
@@ -157,6 +161,8 @@ class ContentPrefetchService:
             entry["finished_at"] = self._now_iso()
             entry["error"] = error
             event = entry.get("event")
+            self._futures.pop(cache_key, None)
+            self._cancel_events.pop(cache_key, None)
         if isinstance(event, threading.Event):
             event.set()
 
@@ -290,6 +296,7 @@ class ContentPrefetchService:
         path_hash_at_start: str,
         trigger_source: str,
         session_guard_hash_at_start: Optional[str],
+        cancel_event: Optional[threading.Event] = None,
     ) -> None:
         cache_key = self.content_cache_key(user_id, goal_id, session_index)
         started = time.perf_counter()
@@ -323,6 +330,10 @@ class ContentPrefetchService:
             if self._store.get_learning_content(user_id, goal_id, session_index):
                 status = "succeeded"
                 return
+            if cancel_event is not None and cancel_event.is_set():
+                status = "cancelled"
+                stale_reason = "cancel_requested_before_llm"
+                return
             learner_profile = self._store.get_profile(user_id, goal_id) or {}
             llm = self._get_llm()
             learning_content = self._build_learning_content_payload(
@@ -335,6 +346,7 @@ class ContentPrefetchService:
                 with_quiz=True,
                 goal_context=goal.get("goal_context"),
                 method_name="ami",
+                cancel_event=cancel_event,
             )
             stale, stale_reason_now, path_hash_current = self.is_stale_for_target_session(
                 user_id=user_id,
@@ -353,6 +365,9 @@ class ContentPrefetchService:
                 learning_content,
             )
             status = "succeeded"
+        except ContentGenerationCancelled:
+            status = "cancelled"
+            stale_reason = "cancelled_mid_pipeline"
         except Exception as exc:
             status = "failed"
             error = str(exc)
@@ -469,6 +484,7 @@ class ContentPrefetchService:
                     )
                     return "cooldown"
 
+        cancel_event = threading.Event()
         owner_token = self.singleflight_try_start(
             cache_key,
             path_hash_at_start=path_hash,
@@ -490,8 +506,10 @@ class ContentPrefetchService:
         if apply_cooldown and now_ts is not None:
             with self._lock_guard:
                 self._last_trigger_at[cache_key] = now_ts
+        with self._lock_guard:
+            self._cancel_events[cache_key] = cancel_event
         try:
-            self._executor.submit(
+            future = self._executor.submit(
                 self._run_prefetch_worker,
                 user_id=user_id,
                 goal_id=goal_id,
@@ -500,7 +518,10 @@ class ContentPrefetchService:
                 path_hash_at_start=path_hash,
                 trigger_source=trigger_source,
                 session_guard_hash_at_start=session_guard_hash_at_start,
+                cancel_event=cancel_event,
             )
+            with self._lock_guard:
+                self._futures[cache_key] = future
         except Exception as exc:
             self.singleflight_finish(
                 cache_key,
@@ -594,7 +615,58 @@ class ContentPrefetchService:
             if isinstance(idx, int) and idx >= 0:
                 self._store.delete_learning_content(user_id, goal_id, idx)
 
+    def cancel_inflight_for_goal(self, user_id: str, goal_id: int) -> int:
+        """Best-effort cancel all running/queued prefetch workers for the given goal.
+
+        For tasks not yet started: Future.cancel() prevents execution and the registry
+        entry is finalized immediately. For tasks already running: the cancel_event is
+        set so the pipeline stops at the next stage checkpoint. Tasks mid-LLM-call fall
+        back to the staleness check after the call completes.
+
+        Returns the number of running entries that were targeted for cancellation.
+        """
+        prefix = f"{user_id}:{goal_id}:"
+        cancelled_count = 0
+        events_to_signal: List[threading.Event] = []
+
+        with self._lock_guard:
+            for key, entry in list(self._registry.items()):
+                if not key.startswith(prefix):
+                    continue
+                if not isinstance(entry, dict) or entry.get("status") != "running":
+                    continue
+
+                # Signal the pipeline cancel event so checkpoints can exit early
+                cancel_event = self._cancel_events.get(key)
+                if isinstance(cancel_event, threading.Event):
+                    cancel_event.set()
+
+                # Try to stop the task before it starts executing
+                future = self._futures.get(key)
+                future_stopped = future is not None and future.cancel()
+
+                entry["cancel_requested"] = True
+                if future_stopped:
+                    # Task never ran — finalize the registry entry now
+                    entry["status"] = "cancelled"
+                    entry["finished_at"] = self._now_iso()
+                    entry["error"] = "cancel_requested_before_start"
+                    singleflight_event = entry.get("event")
+                    if isinstance(singleflight_event, threading.Event):
+                        events_to_signal.append(singleflight_event)
+                    self._futures.pop(key, None)
+                    self._cancel_events.pop(key, None)
+
+                cancelled_count += 1
+
+        for event in events_to_signal:
+            event.set()
+
+        return cancelled_count
+
     def reset_for_test(self) -> None:
         with self._lock_guard:
             self._registry.clear()
             self._last_trigger_at.clear()
+            self._futures.clear()
+            self._cancel_events.clear()

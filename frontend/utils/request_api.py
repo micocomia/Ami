@@ -631,10 +631,11 @@ def get_goal_runtime_state(user_id, goal_id):
     return None
 
 
-def get_learning_content(user_id, goal_id, session_index):
+def get_learning_content(user_id, goal_id, session_index, no_wait: bool = False):
     url = f"{_get_backend_endpoint()}{API_NAMES['learning_content_cache']}/{user_id}/{goal_id}/{session_index}"
+    params = {"no_wait": "true"} if no_wait else {}
     try:
-        resp = httpx.get(url, timeout=60)
+        resp = httpx.get(url, params=params, timeout=60)
         if resp.status_code == 200:
             return resp.json()
     except Exception:

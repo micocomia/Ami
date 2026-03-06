@@ -4,6 +4,7 @@ import ast
 import json
 import logging
 import re
+import threading
 import time
 import uuid
 from typing import Any, Callable, Mapping, Optional
@@ -50,6 +51,16 @@ from modules.content_generator.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ContentGenerationCancelled(Exception):
+    """Raised when a cancellation event is set during content generation."""
+
+
+def _check_cancel(cancel_event: Optional[threading.Event]) -> None:
+    """Raise ContentGenerationCancelled if the cancel event has been set."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise ContentGenerationCancelled("Content generation was cancelled")
 
 
 JSONDict = dict[str, Any]
@@ -519,6 +530,7 @@ def generate_learning_content_with_llm(
     goal_context: Optional[Mapping[str, Any]] = None,
     fast_llm: Any = None,
     evaluator: Optional[Callable[[Any, JSONDict], Mapping[str, Any]]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> JSONDict:
     """Unified learning content orchestration pipeline.
 
@@ -579,6 +591,8 @@ def generate_learning_content_with_llm(
         if not trace.get("final_failure_reason"):
             trace["final_failure_reason"] = "Knowledge explorer returned no valid knowledge points."
         knowledge_points = _fallback_knowledge_points(learning_session)
+
+    _check_cancel(cancel_event)
 
     fslsm_input = get_fslsm_input(learner_profile)
     fslsm_processing = get_fslsm_dim(learner_profile, "fslsm_processing")
@@ -737,6 +751,8 @@ def generate_learning_content_with_llm(
 
     sources_used = collect_sources_used(selected_knowledge_drafts)
 
+    _check_cancel(cancel_event)
+
     media_resources = []
     narrative_resources = []
     inline_assets_plan = None
@@ -817,6 +833,8 @@ def generate_learning_content_with_llm(
     else:
         inline_stats = {"placed_assets": 0}
 
+    _check_cancel(cancel_event)
+
     def _integrate_document(integration_feedback: str = "") -> str:
         return integrate_learning_document_with_llm(
             llm,
@@ -845,6 +863,7 @@ def generate_learning_content_with_llm(
     with _time_stage(trace, "final_quality_checkpoint"):
         while quality_rounds < _MAX_QUALITY_ROUNDS:
             quality_rounds += 1
+            _check_cancel(cancel_event)
             deterministic_doc_eval = _deterministic_integrated_section_audit(
                 learning_document,
                 expected_core_sections=len(selected_knowledge_drafts),
@@ -983,6 +1002,8 @@ def generate_learning_content_with_llm(
     # Selective redraft may have updated draft contents; refresh source references.
     sources_used = collect_sources_used(selected_knowledge_drafts)
 
+    _check_cancel(cancel_event)
+
     content_format = "standard"
     if fslsm_input <= -_FSLSM_MODERATE:
         content_format = "visual_enhanced"
@@ -1022,6 +1043,8 @@ def generate_learning_content_with_llm(
         learning_content["audio_mode"] = audio_mode
     if audio_url is not None:
         learning_content["audio_url"] = audio_url
+
+    _check_cancel(cancel_event)
 
     if with_quiz:
         with _time_stage(trace, "quiz_generation"):

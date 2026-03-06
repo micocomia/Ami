@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 import copy
@@ -283,6 +284,7 @@ def _build_learning_content_payload(
     with_quiz: bool,
     goal_context: Any,
     method_name: str = "ami",
+    cancel_event: Any = None,
 ) -> Dict[str, Any]:
     learning_content = generate_learning_content_with_llm(
         llm,
@@ -296,6 +298,7 @@ def _build_learning_content_payload(
         quiz_mix_config=APP_CONFIG["quiz_mix_by_proficiency"],
         method_name=method_name,
         search_rag_manager=search_rag_manager,
+        cancel_event=cancel_event,
     )
     learning_content["view_model"] = build_learning_content_view_model(
         learning_content.get("document", ""),
@@ -661,22 +664,9 @@ async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
     goal_before = store.get_goal(user_id, goal_id)
     if goal_before is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    path_hash_before = _path_version_hash(goal_before)
     goal = store.patch_goal(user_id, goal_id, payload)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    if (
-        PREFETCH_SERVICE.prefetch_enabled()
-        and "learning_path" in payload
-        and _path_version_hash(goal) != path_hash_before
-    ):
-        PREFETCH_SERVICE.enqueue_for_goal(
-            user_id=user_id,
-            goal_id=goal_id,
-            trigger_source="goal_patch",
-            start_after=-1,
-            apply_cooldown=False,
-        )
     return store.get_goal_aggregate(user_id, goal_id)
 
 
@@ -711,7 +701,8 @@ async def get_learning_content(user_id: str, goal_id: int, session_index: int, n
         )
     if not record:
         if PREFETCH_SERVICE.prefetch_enabled() and not bool(no_wait):
-            PREFETCH_SERVICE.wait_for_inflight_content(
+            await asyncio.to_thread(
+                PREFETCH_SERVICE.wait_for_inflight_content,
                 user_id=user_id,
                 goal_id=goal_id,
                 session_index=session_index,
@@ -1140,13 +1131,8 @@ async def adapt_learning_path(request: AdaptLearningPathRequest):
                 PREFETCH_SERVICE.invalidate_learning_content_indices(
                     request.user_id, request.goal_id, changed_future_indices
                 )
-                PREFETCH_SERVICE.enqueue_for_goal(
-                    user_id=request.user_id,
-                    goal_id=request.goal_id,
-                    trigger_source="adapt_applied",
-                    start_after=-1,
-                    apply_cooldown=False,
-                )
+                PREFETCH_SERVICE.cancel_inflight_for_goal(request.user_id, request.goal_id)
+                # Prefetch is only triggered when the learner starts a session.
 
             return response
 
@@ -1849,7 +1835,8 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
                         path_hash=path_hash_now,
                         duration_ms=(time.perf_counter() - started) * 1000.0,
                     )
-                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                    await asyncio.to_thread(
+                        PREFETCH_SERVICE.wait_for_inflight_terminal,
                         user_id=request.user_id,
                         goal_id=request.goal_id,
                         session_index=request.session_index,
@@ -1894,7 +1881,8 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
                         path_hash=path_hash_now,
                         duration_ms=(time.perf_counter() - started) * 1000.0,
                     )
-                    PREFETCH_SERVICE.wait_for_inflight_terminal(
+                    await asyncio.to_thread(
+                        PREFETCH_SERVICE.wait_for_inflight_terminal,
                         user_id=request.user_id,
                         goal_id=request.goal_id,
                         session_index=request.session_index,
