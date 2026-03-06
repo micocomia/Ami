@@ -19,6 +19,9 @@ pids/
 .DS_Store
 frontend/config.py
 
+# Local diagrams
+docs/diagrams/
+
 # IDE and tooling
 .idea/
 .claude/

@@ -1560,6 +1560,63 @@ async def validate_profile_fairness(request: ProfileFairnessRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
+@app.post("/audit-content-bias")
+async def audit_content_bias(request: ContentBiasAuditRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    generated_content = request.generated_content
+    learner_information = request.learner_information
+    try:
+        result = audit_content_bias_with_llm(llm, generated_content, learner_information)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.post("/update-learner-profile")
+async def update_learner_profile(request: LearnerProfileUpdateRequest):
+    llm = get_llm(request.model_provider, request.model_name)
+    learner_profile = request.learner_profile
+    learner_interactions = request.learner_interactions
+    learner_information = request.learner_information
+    session_information = request.session_information
+    try:
+        if isinstance(learner_profile, str) and learner_profile.strip():
+            try:
+                learner_profile = ast.literal_eval(learner_profile)
+            except Exception:
+                learner_profile = {"raw": learner_profile}
+        if isinstance(learner_interactions, str) and learner_interactions.strip():
+            try:
+                learner_interactions = ast.literal_eval(learner_interactions)
+            except Exception:
+                learner_interactions = {"raw": learner_interactions}
+        if isinstance(learner_information, str) and learner_information.strip():
+            try:
+                learner_information = ast.literal_eval(learner_information)
+            except Exception:
+                learner_information = {"raw": learner_information}
+        if isinstance(session_information, str) and session_information.strip():
+            try:
+                session_information = ast.literal_eval(session_information)
+            except Exception:
+                pass
+        # Snapshot the pre-update FSLSM state so adapt-learning-path can compare old vs new.
+        if request.user_id is not None and request.goal_id is not None and isinstance(learner_profile, dict):
+            store.save_profile_snapshot(request.user_id, request.goal_id, learner_profile)
+        learner_profile = update_learner_profile_with_llm(
+            llm,
+            learner_profile,
+            learner_interactions,
+            learner_information,
+            session_information,
+        )
+        if request.user_id is not None and request.goal_id is not None:
+            store.upsert_profile(request.user_id, request.goal_id, learner_profile)
+        return {"learner_profile": learner_profile}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/update-cognitive-status")
 async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
     import traceback as _tb

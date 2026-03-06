@@ -48,6 +48,16 @@ class LearnerProfileInitializationWithInfoRequest(BaseRequest):
     goal_id: Optional[int] = None
 
 
+class LearnerProfileUpdateRequest(BaseRequest):
+
+    learner_profile: str
+    learner_interactions: str
+    learner_information: str = ""
+    session_information: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
+
+
 class CognitiveStatusUpdateRequest(BaseRequest):
 
     learner_profile: str
@@ -154,6 +164,12 @@ class ProfileFairnessRequest(BaseRequest):
     learner_profile: str
     learner_information: str
     persona_name: str = ""
+
+
+class ContentBiasAuditRequest(BaseRequest):
+
+    generated_content: str
+    learner_information: str
 
 
 class AuthRegisterRequest(BaseModel):

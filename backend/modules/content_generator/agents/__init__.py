@@ -38,6 +38,7 @@ from .integrated_document_evaluator import (
 	IntegratedDocumentEvaluator,
 	evaluate_integrated_document_with_llm,
 )
+from .content_bias_auditor import ContentBiasAuditor, audit_content_bias_with_llm
 
 __all__ = [
 	# Content creation pipeline
@@ -71,4 +72,7 @@ __all__ = [
 	"evaluate_knowledge_draft_with_llm",
 	"IntegratedDocumentEvaluator",
 	"evaluate_integrated_document_with_llm",
+	# Content bias auditor
+	"ContentBiasAuditor",
+	"audit_content_bias_with_llm",
 ]

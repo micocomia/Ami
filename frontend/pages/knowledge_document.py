@@ -4,6 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import urllib.parse as urlparse
 from utils.request_api import (
+    audit_content_bias,
     complete_session,
     delete_learning_content,
     evaluate_mastery,
@@ -17,6 +18,7 @@ from utils.state import get_current_session_uid, get_selected_goal, save_persist
 from config import use_mock_data, use_search, backend_endpoint, backend_public_endpoint
 from assets.js.doc_reading import doc_reading_auto_scroll_js
 from utils.document_parser import parse_document_for_section_view
+from components.content_bias import render_content_bias_banners
 
 
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
@@ -125,6 +127,9 @@ def render_learning_content():
                 st.audio(media_url, format="audio/mpeg")
         elif content_format == "visual_enhanced":
             st.info("📊 This content includes visual resources (diagrams, videos, images) for visual learners.")
+
+        # Content bias audit banners
+        render_content_bias_banners(goal)
 
         render_type = "by_section"
         document = learning_content["document"]
@@ -331,6 +336,13 @@ def render_content_preparation(goal):
 
     learning_content.setdefault("sources_used", [])
     _cache_learning_content(session_uid, learning_content)
+    # Run content bias audit (non-blocking)
+    try:
+        learner_information = st.session_state.get("learner_information", "")
+        content_bias_result = audit_content_bias(learning_content.get("document", ""), learner_information)
+        goal["content_bias_audit"] = content_bias_result
+    except Exception:
+        goal["content_bias_audit"] = None
     try:
         save_persistent_state()
     except Exception:

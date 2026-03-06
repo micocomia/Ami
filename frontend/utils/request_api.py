@@ -152,6 +152,7 @@ API_NAMES = {
     "iterative_refine_path": "iterative-refine-path",
     "audit_skill_gap_bias": "audit-skill-gap-bias",
     "validate_profile_fairness": "validate-profile-fairness",
+    "audit_content_bias": "audit-content-bias",
 }
 
 
@@ -351,6 +352,20 @@ def validate_profile_fairness(learner_profile, learner_information, persona_name
         "llm_type": str(llm_type),
     }
     return make_post_request(API_NAMES["validate_profile_fairness"], data)
+
+
+def audit_content_bias(generated_content, learner_information, llm_type=None, method_name=None):
+    """Call the content bias audit endpoint and return the audit result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "generated_content": str(generated_content),
+        "learner_information": _normalize_learner_information(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    return make_post_request(API_NAMES["audit_content_bias"], data)
 
 
 def create_learner_profile(
