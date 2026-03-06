@@ -42,7 +42,7 @@ from modules.content_generator.utils import (
     generate_tts_audio,
     get_fslsm_dim,
     get_fslsm_input,
-    get_lightweight_llm,
+    get_fast_llm,
     narrative_allowance,
     processing_perception_hints,
     understanding_hints,
@@ -517,7 +517,7 @@ def generate_learning_content_with_llm(
     search_rag_manager: Optional[SearchRagManager] = None,
     quiz_mix_config: Optional[dict] = None,
     goal_context: Optional[Mapping[str, Any]] = None,
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
     evaluator: Optional[Callable[[Any, JSONDict], Mapping[str, Any]]] = None,
 ) -> JSONDict:
     """Unified learning content orchestration pipeline.
@@ -551,7 +551,7 @@ def generate_learning_content_with_llm(
     integration_records: list[dict[str, Any]] = []
     draft_records: list[dict[str, Any]] = []
 
-    _lightweight_llm = get_lightweight_llm(llm, lightweight_llm)
+    _fast_llm = get_fast_llm(llm, fast_llm)
     session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
 
     # 1. Explore knowledge points
@@ -600,7 +600,7 @@ def generate_learning_content_with_llm(
             visual_formatting_hints=visual_formatting_hints(fslsm_input),
             processing_perception_hints=processing_perception_hints(fslsm_processing, fslsm_perception),
             session_adaptation_contract=session_adaptation_contract,
-            lightweight_llm=_lightweight_llm,
+            fast_llm=_fast_llm,
             max_revision_passes=0,
             run_quality_gate=False,
             search_rag_manager=search_rag_manager,
@@ -637,7 +637,7 @@ def generate_learning_content_with_llm(
         _apply_deterministic_draft_audit(draft_records)
     with _time_stage(trace, "draft_llm_checkpoint"):
         _apply_batched_draft_eval(
-            _lightweight_llm,
+            _fast_llm,
             learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
             learning_session=learning_session if isinstance(learning_session, Mapping) else {},
             session_adaptation_contract=session_adaptation_contract,
@@ -668,7 +668,7 @@ def generate_learning_content_with_llm(
                         visual_formatting_hints=visual_formatting_hints(fslsm_input),
                         processing_perception_hints=processing_perception_hints(fslsm_processing, fslsm_perception),
                         session_adaptation_contract=session_adaptation_contract,
-                        lightweight_llm=_lightweight_llm,
+                        fast_llm=_fast_llm,
                         max_revision_passes=0,
                         run_quality_gate=False,
                         evaluator_feedback=evaluator_feedback,
@@ -689,7 +689,7 @@ def generate_learning_content_with_llm(
             _apply_deterministic_draft_audit(repaired_subset)
         with _time_stage(trace, "draft_repair_llm_checkpoint"):
             _apply_batched_draft_eval(
-                _lightweight_llm,
+                _fast_llm,
                 learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
                 learning_session=learning_session if isinstance(learning_session, Mapping) else {},
                 session_adaptation_contract=session_adaptation_contract,
@@ -790,7 +790,7 @@ def generate_learning_content_with_llm(
                     media_resources,
                     session_title=session_title,
                     knowledge_point_names=kp_names,
-                    lightweight_llm=_lightweight_llm,
+                    fast_llm=_fast_llm,
                 )
 
     verbal_narrative_allowance = narrative_allowance(fslsm_input)
@@ -804,7 +804,7 @@ def generate_learning_content_with_llm(
                     session_title=session_title,
                     max_narratives=verbal_narrative_allowance,
                     include_tts=False,
-                    lightweight_llm=_lightweight_llm,
+                    fast_llm=_fast_llm,
                 )
             except Exception:
                 narrative_resources = []
@@ -872,7 +872,7 @@ def generate_learning_content_with_llm(
             else:
                 try:
                     final_integration_eval = evaluate_integrated_document_with_llm(
-                        _lightweight_llm,
+                        _fast_llm,
                         learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
                         learning_session=learning_session if isinstance(learning_session, Mapping) else {},
                         knowledge_points=selected_knowledge_points,
@@ -933,7 +933,7 @@ def generate_learning_content_with_llm(
                             visual_formatting_hints=visual_formatting_hints(fslsm_input),
                             processing_perception_hints=processing_perception_hints(fslsm_processing, fslsm_perception),
                             session_adaptation_contract=session_adaptation_contract,
-                            lightweight_llm=_lightweight_llm,
+                            fast_llm=_fast_llm,
                             max_revision_passes=0,
                             run_quality_gate=False,
                             evaluator_feedback=repair_feedback,
@@ -954,7 +954,7 @@ def generate_learning_content_with_llm(
                 ]
                 _apply_deterministic_draft_audit(repaired_subset)
                 _apply_batched_draft_eval(
-                    _lightweight_llm,
+                    _fast_llm,
                     learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
                     learning_session=learning_session if isinstance(learning_session, Mapping) else {},
                     session_adaptation_contract=session_adaptation_contract,
@@ -1083,7 +1083,7 @@ def generate_learning_content_with_llm(
 
     if evaluator is not None:
         try:
-            _ = evaluator(_lightweight_llm, learning_content)
+            _ = evaluator(_fast_llm, learning_content)
         except Exception as exc:
             logger.warning("Learning content evaluator hook failed: %s", exc)
 

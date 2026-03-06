@@ -595,7 +595,7 @@ def draft_knowledge_point_with_llm(
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
     session_adaptation_contract: Optional[Mapping[str, Any]] = None,
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
     max_revision_passes: int = 1,
     run_quality_gate: bool = True,
     evaluator_feedback: str = "",
@@ -630,7 +630,7 @@ def draft_knowledge_point_with_llm(
             pass
         return result
 
-    evaluator_model = lightweight_llm or llm
+    evaluator_model = fast_llm or llm
     evaluation_history: List[dict[str, Any]] = []
     result: dict[str, Any] = {}
 
@@ -683,7 +683,7 @@ def draft_knowledge_points_with_llm(
     visual_formatting_hints: str = "",
     processing_perception_hints: str = "",
     session_adaptation_contract: Optional[Mapping[str, Any]] = None,
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
     max_revision_passes: int = 1,
     run_quality_gate: bool = True,
     evaluator_feedback: str = "",
@@ -713,7 +713,7 @@ def draft_knowledge_points_with_llm(
             visual_formatting_hints=visual_formatting_hints,
             processing_perception_hints=processing_perception_hints,
             session_adaptation_contract=session_adaptation_contract,
-            lightweight_llm=lightweight_llm,
+            fast_llm=fast_llm,
             max_revision_passes=max_revision_passes,
             run_quality_gate=run_quality_gate,
             evaluator_feedback=evaluator_feedback,

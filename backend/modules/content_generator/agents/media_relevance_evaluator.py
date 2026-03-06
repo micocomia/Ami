@@ -133,7 +133,7 @@ def filter_media_resources_with_llm(
     resources: List[dict],
     session_title: str,
     knowledge_point_names: List[str],
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
 ) -> List[dict]:
     """Filter media resources and enrich learner-facing labels.
 
@@ -164,7 +164,7 @@ def filter_media_resources_with_llm(
         ],
     }
 
-    evaluator_model = lightweight_llm
+    evaluator_model = fast_llm
     if evaluator_model is None:
         try:
             evaluator_model = LLMFactory.create(

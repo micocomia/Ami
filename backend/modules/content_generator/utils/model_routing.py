@@ -8,16 +8,16 @@ from base.llm_factory import LLMFactory
 logger = logging.getLogger(__name__)
 
 
-def get_lightweight_llm(
+def get_fast_llm(
     primary_llm: Any,
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
     *,
     model: str = "gpt-4o-mini",
     model_provider: str = "openai",
 ):
-    """Return a lightweight LLM for support tasks, falling back to primary_llm."""
-    if lightweight_llm is not None:
-        return lightweight_llm
+    """Return a fast LLM for support tasks, falling back to primary_llm."""
+    if fast_llm is not None:
+        return fast_llm
 
     try:
         return LLMFactory.create(
@@ -26,5 +26,5 @@ def get_lightweight_llm(
             temperature=0,
         )
     except Exception as exc:
-        logger.warning("Failed to create lightweight model (%s/%s): %s", model_provider, model, exc)
+        logger.warning("Failed to create fast model (%s/%s): %s", model_provider, model, exc)
         return primary_llm

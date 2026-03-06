@@ -11,7 +11,7 @@ from .fslsm_adaptation import (
     visual_formatting_hints,
 )
 from .media_resource_finder import find_media_resources
-from .model_routing import get_lightweight_llm
+from .model_routing import get_fast_llm
 from .sources import collect_sources_used
 from .tts_generator import generate_tts_audio
 
@@ -28,6 +28,6 @@ __all__ = [
     "narrative_allowance",
     "find_media_resources",
     "generate_tts_audio",
-    "get_lightweight_llm",
+    "get_fast_llm",
     "collect_sources_used",
 ]

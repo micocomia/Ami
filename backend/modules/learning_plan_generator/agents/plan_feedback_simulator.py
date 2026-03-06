@@ -344,11 +344,34 @@ class LearningPlanFeedbackSimulator(BaseAgent):
     def feedback_path(self, payload: LearningPathFeedbackPayload | Mapping[str, Any] | str) -> dict:
         if not isinstance(payload, LearningPathFeedbackPayload):
             payload = LearningPathFeedbackPayload.model_validate(payload)
+
+        # Evaluate only sessions the learner still has to complete.
+        # Completed sessions (if_learned=True) reflect the old FSLSM profile and
+        # would bias engagement/personalization feedback toward stale preferences.
+        _raw = payload.learning_path
+        if isinstance(_raw, Mapping):
+            _sessions = _raw.get("learning_path", [])
+        elif isinstance(_raw, list):
+            _sessions = _raw
+        else:
+            _sessions = []
+        unlearned_path = [
+            s for s in _sessions
+            if isinstance(s, Mapping) and not s.get("if_learned", False)
+        ]
+
+        profile_for_eval = {
+            k: v for k, v in payload.learner_profile.items()
+            if k != "learner_information"
+        }
+
         solo_audit = build_deterministic_solo_audit(
-            learner_profile=payload.learner_profile,
-            learning_path=payload.learning_path,
+            learner_profile=profile_for_eval,
+            learning_path=unlearned_path,
         )
         invoke_payload = payload.model_dump()
+        invoke_payload["learner_profile"] = profile_for_eval
+        invoke_payload["learning_path"] = unlearned_path
         invoke_payload["solo_audit"] = solo_audit
         raw_output = self.invoke(invoke_payload, task_prompt=plan_feedback_simulator_task_prompt)
         llm_output = LLMQualityOutput.model_validate(raw_output)

@@ -120,7 +120,7 @@ def test_media_evaluator_enriches_titles_and_descriptions(mock_eval):
         resources=resources,
         session_title="Search Algorithms",
         knowledge_point_names=["Binary Search"],
-        lightweight_llm=MagicMock(),
+        fast_llm=MagicMock(),
     )
 
     assert len(out) == 1

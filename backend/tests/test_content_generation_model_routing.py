@@ -5,26 +5,26 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def test_get_lightweight_llm_prefers_explicit_instance():
-    from modules.content_generator.utils.model_routing import get_lightweight_llm
+def test_get_fast_llm_prefers_explicit_instance():
+    from modules.content_generator.utils.model_routing import get_fast_llm
 
     primary = MagicMock(name="primary")
     lightweight = MagicMock(name="lightweight")
     with patch("modules.content_generator.utils.model_routing.LLMFactory.create") as mock_create:
-        selected = get_lightweight_llm(primary, lightweight)
+        selected = get_fast_llm(primary, lightweight)
     assert selected is lightweight
     mock_create.assert_not_called()
 
 
-def test_get_lightweight_llm_falls_back_to_primary_on_error():
-    from modules.content_generator.utils.model_routing import get_lightweight_llm
+def test_get_fast_llm_falls_back_to_primary_on_error():
+    from modules.content_generator.utils.model_routing import get_fast_llm
 
     primary = MagicMock(name="primary")
     with patch(
         "modules.content_generator.utils.model_routing.LLMFactory.create",
         side_effect=RuntimeError("mini unavailable"),
     ):
-        selected = get_lightweight_llm(primary)
+        selected = get_fast_llm(primary)
     assert selected is primary
 
 
@@ -96,12 +96,12 @@ def test_orchestrator_passes_lightweight_to_support_steps(
         {"title": "Session A"},
         with_quiz=False,
         search_rag_manager=search_rag_manager,
-        lightweight_llm=lightweight,
+        fast_llm=lightweight,
     )
 
-    assert mock_filter_media.call_args.kwargs["lightweight_llm"] is lightweight
-    assert mock_narratives.call_args.kwargs["lightweight_llm"] is lightweight
-    assert mock_draft.call_args.kwargs["lightweight_llm"] is lightweight
+    assert mock_filter_media.call_args.kwargs["fast_llm"] is lightweight
+    assert mock_narratives.call_args.kwargs["fast_llm"] is lightweight
+    assert mock_draft.call_args.kwargs["fast_llm"] is lightweight
 
 
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")
@@ -111,7 +111,7 @@ def test_orchestrator_passes_lightweight_to_support_steps(
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.get_lightweight_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.get_fast_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
 def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
@@ -177,9 +177,9 @@ def test_orchestrator_uses_primary_when_lightweight_fallback_triggers(
         search_rag_manager=search_rag_manager,
     )
 
-    assert mock_filter_media.call_args.kwargs["lightweight_llm"] is primary
-    assert mock_narratives.call_args.kwargs["lightweight_llm"] is primary
-    assert mock_draft.call_args.kwargs["lightweight_llm"] is primary
+    assert mock_filter_media.call_args.kwargs["fast_llm"] is primary
+    assert mock_narratives.call_args.kwargs["fast_llm"] is primary
+    assert mock_draft.call_args.kwargs["fast_llm"] is primary
 
 
 @patch("modules.content_generator.orchestrators.content_generation_pipeline.generate_document_quizzes_with_llm")

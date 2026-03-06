@@ -1,7 +1,7 @@
 learner_profile_output_format = """
 {{
 	"goal_display_name": "A short 3-5 word descriptive name for the learning goal (e.g., 'French for Data Science')",
-	"learner_information": "Summary of the learner's information (should include any information that may related to learning goal and impact learning)",
+	"learner_information": "Biographical background of the learner: prior experience, education, or stated background. Do NOT include FSLSM preferences, skill mastery, or a summary of the learning goal — those are captured in learning_preferences, cognitive_status, and learning_goal respectively. If no biographical information was provided, keep this field brief (e.g. 'No prior background provided.').",
 	"learning_goal": "learner's input learning goal (should be same with the provide learning goal",
 	"cognitive_status": {{
 		"overall_progress": 60,
@@ -111,6 +111,11 @@ Generate an initial profile for the learner based on the provided details:
 - Learner Resume: {learner_information}
 - Skill Gaps: {skill_gaps}
 
+RULES:
+- learner_information must contain only biographical background from the provided resume.
+- Do NOT derive learner_information from the learning goal, skill gaps, or FSLSM persona values.
+- If no resume was provided, set learner_information to "No prior background provided." — do not invent biographical details.
+
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
 adaptive_learner_profiler_task_prompt_initialization = adaptive_learner_profiler_task_prompt_initialization.replace("LEARNER_PROFILE_OUTPUT_FORMAT", learner_profile_output_format)
@@ -144,18 +149,17 @@ adaptive_learner_profiler_task_prompt_update_cognitive = """
 Task B-Cognitive: Cognitive Status Update
 
 Update the cognitive_status section of the learner's profile based on session completion and quiz results.
-Also update learner_information to reflect newly mastered skills or significant progress milestones.
 
 - Learner's Previous Profile: {learner_profile}
 - Have Learned Session Information: {session_information}
 
 RULES:
 - You MUST preserve learning_preferences and behavioral_patterns EXACTLY as they are in the previous profile. Copy them verbatim.
+- You MUST preserve learner_information EXACTLY as it is. Do NOT append mastery notes or skill progress — that information belongs in cognitive_status only.
 - Only update cognitive_status (overall_progress, mastered_skills, in_progress_skills).
 - If if_learned is True and the session's desired_outcome level for a skill EQUALS OR EXCEEDS that skill's required_proficiency_level in in_progress_skills, move the skill from in_progress_skills to mastered_skills.
 - If if_learned is True but the session's desired_outcome level for a skill is BELOW the skill's required_proficiency_level, update that skill's current_proficiency_level in in_progress_skills to the session's desired_outcome level. Do NOT move it to mastered_skills.
 - Recalculate overall_progress based on the updated skill statuses.
-- Update learner_information to briefly note any newly mastered skills or significant progress (e.g., append "Has now mastered Python Basics." if the learner just mastered that skill). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to cognitive progress.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
@@ -165,7 +169,6 @@ adaptive_learner_profiler_task_prompt_update_preferences = """
 Task B-Preferences: Learning Preferences Update
 
 Update the learning_preferences section of the learner's profile based on the learner's feedback and interactions.
-Also update learner_information if the learner's preferred learning style has shifted significantly (e.g., from verbal to visual).
 
 - Learner's Previous Profile: {learner_profile}
 - Learner Feedback / Interactions: {learner_interactions}
@@ -173,10 +176,10 @@ Also update learner_information if the learner's preferred learning style has sh
 
 RULES:
 - You MUST preserve cognitive_status EXACTLY as it is in the previous profile. Copy it verbatim. Do NOT change mastered_skills, in_progress_skills, or overall_progress.
+- You MUST preserve learner_information EXACTLY as it is. Do NOT append or modify it with preference changes — learning style is captured in fslsm_dimensions only.
 - Only update learning_preferences (fslsm_dimensions, additional_notes).
 - Adjust FSLSM dimension values based on the learner's stated preferences and feedback.
 - You may also update behavioral_patterns if the feedback includes relevant behavioral information.
-- If a significant shift in learning style has occurred (e.g., fslsm_input shifted from verbal to visual), update learner_information to reflect this change (e.g., "Now prefers visual learning materials over text-based content."). Do NOT rewrite the entire learner_information — only append or revise the parts relevant to the preference change.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """

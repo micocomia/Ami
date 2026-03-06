@@ -51,7 +51,7 @@ def identify_skill_gap_with_llm(
 
     original_goal = learning_goal
     was_auto_refined = False
-    lightweight_llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai")
+    fast_llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai")
 
     # ── LOOP 1: Goal Clarification (GoalContextParser ↔ LearningGoalRefiner) ──────
     goal_context: Dict[str, Any] = {}
@@ -59,7 +59,7 @@ def identify_skill_gap_with_llm(
     verified_content_flag = False
 
     for attempt in range(MAX_GOAL_ITERATIONS):
-        goal_context = GoalContextParser(lightweight_llm).parse({
+        goal_context = GoalContextParser(fast_llm).parse({
             "learning_goal": learning_goal,
             "learner_information": learner_information,
         })
@@ -78,7 +78,7 @@ def identify_skill_gap_with_llm(
 
         if attempt < MAX_GOAL_ITERATIONS - 1:
             try:
-                refined = LearningGoalRefiner(lightweight_llm).refine_goal({
+                refined = LearningGoalRefiner(fast_llm).refine_goal({
                     "learning_goal": learning_goal,
                     "learner_information": learner_information,
                 })
@@ -124,7 +124,7 @@ def identify_skill_gap_with_llm(
         # Skip evaluator on last iteration to avoid a wasted LLM call
         if iteration < MAX_EVAL_ITERATIONS - 1:
             try:
-                evaluation = SkillGapEvaluator(lightweight_llm).evaluate({
+                evaluation = SkillGapEvaluator(fast_llm).evaluate({
                     "learning_goal": learning_goal,
                     "learner_information": learner_information,
                     "coverage_context": retrieved_context_str,
@@ -173,7 +173,7 @@ def identify_skill_gap_with_llm(
 
     # ── BIAS AUDIT ─────────────────────────────────────────────────────────────────
     try:
-        bias_result = BiasAuditor(lightweight_llm).audit_skill_gaps({
+        bias_result = BiasAuditor(fast_llm).audit_skill_gaps({
             "learner_information": learner_information,
             "skill_gaps": skill_gaps_result,
         })

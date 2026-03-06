@@ -1885,7 +1885,7 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
 
 @app.post("/validate-profile-fairness")
 async def validate_profile_fairness(request: ProfileFairnessRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai", temperature=0)
     learner_profile = request.learner_profile
     learner_information = request.learner_information
     persona_name = request.persona_name

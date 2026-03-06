@@ -311,7 +311,7 @@ def test_draft_knowledge_point_retries_once_after_quality_gate_failure(mock_draf
         knowledge_points=[{"name": "Branching", "role": "foundational", "solo_level": "beginner"}],
         knowledge_point={"name": "Branching", "role": "foundational", "solo_level": "beginner"},
         use_search=False,
-        lightweight_llm=MagicMock(name="lightweight"),
+        fast_llm=MagicMock(name="lightweight"),
     )
 
     assert mock_draft.call_count == 2

@@ -106,12 +106,12 @@ class NarrativeTTSNormalizer(BaseAgent):
         return normalized or (text or "")
 
 
-def _normalize_narrative_content_for_tts(llm, content: str, lightweight_llm: Any = None) -> str:
+def _normalize_narrative_content_for_tts(llm, content: str, fast_llm: Any = None) -> str:
     if not content:
         return ""
-    if lightweight_llm is not None:
+    if fast_llm is not None:
         try:
-            return NarrativeTTSNormalizer(lightweight_llm).normalize(content)
+            return NarrativeTTSNormalizer(fast_llm).normalize(content)
         except Exception:
             pass
     try:
@@ -137,7 +137,7 @@ def generate_narrative_resources_with_llm(
     session_title: str,
     max_narratives: int,
     include_tts: bool = False,
-    lightweight_llm: Any = None,
+    fast_llm: Any = None,
 ) -> List[dict]:
     if llm is None or max_narratives <= 0:
         return []
@@ -183,7 +183,7 @@ def generate_narrative_resources_with_llm(
                     normalized_content = _normalize_narrative_content_for_tts(
                         llm,
                         n.get("content", ""),
-                        lightweight_llm=lightweight_llm,
+                        fast_llm=fast_llm,
                     )
                     n["audio_url"] = generate_tts_audio(
                         normalized_content,
