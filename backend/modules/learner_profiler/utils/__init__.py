@@ -15,6 +15,7 @@ from .fslsm_adaptation import (
     session_signal_keys,
     update_fslsm_from_evidence,
 )
+from .behavioral_metrics import compute_behavioral_metrics
 from .profile_edit_inputs import (
     clamp_fslsm_value,
     compose_learner_information_update_inputs,
@@ -24,6 +25,7 @@ from .profile_edit_inputs import (
 )
 
 __all__ = [
+    "compute_behavioral_metrics",
     "FSLSM_DIM_KEYS",
     "append_evidence",
     "build_adaptation_fingerprint",

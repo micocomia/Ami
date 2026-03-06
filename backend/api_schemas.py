@@ -188,3 +188,28 @@ class BehavioralMetricsResponse(BaseModel):
     motivational_triggers_count: int
     mastery_history: list
     latest_mastery_rate: Optional[float] = None
+
+
+class AutoProfileUpdateRequest(BaseModel):
+    user_id: str
+    goal_id: int = 0
+
+    # optional overrides (otherwise uses app_config defaults via get_llm)
+    model_provider: Optional[str] = None
+    model_name: Optional[str] = None
+
+    # only needed if this is the FIRST time we create the profile
+    learning_goal: Optional[str] = None
+    learner_information: Optional[Any] = None
+    skill_gaps: Optional[Any] = None
+
+    # optional session metadata
+    session_information: Optional[Dict[str, Any]] = None
+
+
+class AdaptLearningPathRequest(BaseRequest):
+    """Request for adaptive plan regeneration."""
+    user_id: str
+    goal_id: int
+    new_learner_profile: Optional[str] = None
+    force: bool = False

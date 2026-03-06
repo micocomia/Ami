@@ -1,3 +1,4 @@
+from .mastery_evaluator import evaluate_mastery_submission
 from .fslsm_adaptation import (
     _FSLSM_MODERATE,
     _FSLSM_STRONG,
@@ -16,6 +17,7 @@ from .sources import collect_sources_used
 from .tts_generator import generate_tts_audio
 
 __all__ = [
+    "evaluate_mastery_submission",
     "_FSLSM_STRONG",
     "_FSLSM_MODERATE",
     "build_session_adaptation_contract",
