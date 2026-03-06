@@ -96,15 +96,16 @@ def _seed_goal(user_id: str = "alice", *, learning_path=None) -> int:
 
 @patch("main.get_llm", return_value=MagicMock())
 @patch("main.generate_learning_content_with_llm", side_effect=_fake_learning_content)
-def test_patch_goal_with_changed_learning_path_enqueues_prefetch(mock_generate, _mock_llm, client):
+def test_patch_goal_with_changed_learning_path_does_not_enqueue_prefetch(mock_generate, _mock_llm, client):
     goal_id = _seed_goal(learning_path=[])
     updated_path = [_session("Session 1")]
 
     resp = client.patch(f"/goals/alice/{goal_id}", json={"learning_path": updated_path})
     assert resp.status_code == 200
 
-    assert _wait_until(lambda: store.get_learning_content("alice", goal_id, 0) is not None)
-    assert mock_generate.call_count == 1
+    time.sleep(0.15)
+    assert mock_generate.call_count == 0
+    assert store.get_learning_content("alice", goal_id, 0) is None
 
 
 @patch("main.get_llm", return_value=MagicMock())
