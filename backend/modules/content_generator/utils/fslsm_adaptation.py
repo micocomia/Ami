@@ -116,14 +116,6 @@ def build_session_adaptation_contract(learning_session: Any, learner_profile: An
         processing_mode = "reflective"
         processing_intensity = "strong" if (thinking_minutes >= 10 or processing_score >= _FSLSM_STRONG) else "mild"
         reflection_level = "extended" if thinking_minutes >= 10 else "brief"
-    elif processing_score <= -_FSLSM_MODERATE:
-        processing_mode = "active"
-        processing_intensity = "strong" if processing_score <= -_FSLSM_STRONG else "mild"
-        checkpoint_frequency = "multiple" if processing_intensity == "strong" else "single"
-    elif processing_score >= _FSLSM_MODERATE:
-        processing_mode = "reflective"
-        processing_intensity = "strong" if processing_score >= _FSLSM_STRONG else "mild"
-        reflection_level = "extended" if processing_intensity == "strong" else "brief"
 
     perception_mode = "balanced"
     perception_intensity = "none"
@@ -140,16 +132,31 @@ def build_session_adaptation_contract(learning_session: Any, learner_profile: An
         perception_intensity = "strong" if perception_score >= _FSLSM_STRONG else "mild"
         conceptual_leap_allowance = "high" if perception_intensity == "strong" else "normal"
         section_order = ["theory", "pattern", "example"]
-    elif perception_score <= -_FSLSM_MODERATE:
-        perception_mode = "application_first"
-        perception_intensity = "strong" if perception_score <= -_FSLSM_STRONG else "mild"
-        conceptual_leap_allowance = "low"
-        section_order = ["application", "example", "theory"]
-    elif perception_score >= _FSLSM_MODERATE:
-        perception_mode = "theory_first"
-        perception_intensity = "strong" if perception_score >= _FSLSM_STRONG else "mild"
-        conceptual_leap_allowance = "high" if perception_intensity == "strong" else "normal"
-        section_order = ["theory", "pattern", "example"]
+
+    input_score = get_fslsm_dim(learner_profile, "fslsm_input")
+    understanding_score = get_fslsm_dim(learner_profile, "fslsm_understanding")
+
+    if input_score <= -_FSLSM_STRONG:
+        input_mode = "strong_visual"
+    elif input_score <= -_FSLSM_MODERATE:
+        input_mode = "mild_visual"
+    elif input_score >= _FSLSM_STRONG:
+        input_mode = "strong_verbal"
+    elif input_score >= _FSLSM_MODERATE:
+        input_mode = "mild_verbal"
+    else:
+        input_mode = "balanced"
+
+    if understanding_score <= -_FSLSM_STRONG:
+        understanding_mode, understanding_intensity = "sequential", "strong"
+    elif understanding_score <= -_FSLSM_MODERATE:
+        understanding_mode, understanding_intensity = "sequential", "mild"
+    elif understanding_score >= _FSLSM_STRONG:
+        understanding_mode, understanding_intensity = "global", "strong"
+    elif understanding_score >= _FSLSM_MODERATE:
+        understanding_mode, understanding_intensity = "global", "mild"
+    else:
+        understanding_mode, understanding_intensity = "balanced", "none"
 
     return {
         "processing": {
@@ -163,6 +170,19 @@ def build_session_adaptation_contract(learning_session: Any, learner_profile: An
             "intensity": perception_intensity,
             "conceptual_leap_allowance": conceptual_leap_allowance,
             "section_order": section_order,
+        },
+        "input": {
+            "mode": input_mode,
+            "has_visual_formatting": input_score <= -_FSLSM_MODERATE,
+            "audio_mode": (
+                "podcast" if input_score >= _FSLSM_STRONG
+                else "narration" if input_score >= _FSLSM_MODERATE
+                else "none"
+            ),
+        },
+        "understanding": {
+            "mode": understanding_mode,
+            "intensity": understanding_intensity,
         },
     }
 

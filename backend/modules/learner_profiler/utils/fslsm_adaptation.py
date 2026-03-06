@@ -9,6 +9,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from modules.learner_profiler.schemas import refresh_learning_preferences_derived_fields
+
 
 FSLSM_DIM_KEYS: Tuple[str, ...] = (
     "fslsm_processing",
@@ -424,6 +426,7 @@ def update_fslsm_from_evidence(
 
     for key in FSLSM_DIM_KEYS:
         dims[key] = round(float(current_dims.get(key, 0.0)), 6)
+    refresh_learning_preferences_derived_fields(updated)
     return updated, net_changes
 
 

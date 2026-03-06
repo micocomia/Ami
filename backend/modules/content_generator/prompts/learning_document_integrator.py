@@ -40,6 +40,11 @@ Your role is to perform the "Integration" step by synthesizing multiple `knowled
     * Ensure the final document is structured, clear, and engaging.
     * If `integration_feedback` is provided, treat it as binding repair guidance for this integration attempt.
 
+4.  **Understanding-Driven Structure** (`contract.understanding`):
+    * If `mode = "sequential"`: use explicit "Building on [previous concept]..." transitions between sections. Do NOT reference or mention concepts before they have been introduced.
+    * If `mode = "global"`: open the integrated document with a `## Big Picture` section that situates the session within the broader learning path, and add cross-references between sections to highlight connections.
+    * If `mode = "balanced"`: default document structure with no special ordering constraints.
+
 **Final Output Format**:
 Your output MUST be a valid JSON object matching this exact structure.
 Do NOT include any other text or markdown tags (e.g., ```json) around the final JSON output.
@@ -65,7 +70,6 @@ Ensure the final document is aligned with the learner's profile and session goal
 
 **Knowledge Drafts to Integrate**:
 {knowledge_drafts}
-{understanding_hints}
 
 **Integration Feedback (if any)**:
 {integration_feedback}

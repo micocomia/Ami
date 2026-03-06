@@ -15,13 +15,6 @@ from .learning_document_integrator import (
 	map_integrated_sections_to_draft_ids,
 	prepare_markdown_document,
 )
-from .learning_content_creator import (
-	LearningContentCreator,
-	ContentBasePayload,
-	ContentDraftPayload,
-	prepare_content_outline_with_llm,
-	create_learning_content_with_llm,
-)
 from .search_enhanced_knowledge_drafter import (
 	SearchEnhancedKnowledgeDrafter,
 	KnowledgeDraftPayload,
@@ -63,11 +56,6 @@ __all__ = [
 	"DocumentQuizGenerator",
 	"DocumentQuizPayload",
 	"generate_document_quizzes_with_llm",
-	"LearningContentCreator",
-	"ContentBasePayload",
-	"ContentDraftPayload",
-	"prepare_content_outline_with_llm",
-	"create_learning_content_with_llm",
 	# Adaptive content delivery
 	"find_media_resources",
 	"PodcastStyleConverter",

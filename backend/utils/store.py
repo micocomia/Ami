@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from modules.learner_profiler.schemas import refresh_learning_preferences_derived_fields
+
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "users"
 _PROFILES_PATH = _DATA_DIR / "profiles.json"
 _EVENTS_PATH = _DATA_DIR / "events.json"
@@ -84,6 +86,7 @@ def _mastery_history_key(user_id: str, goal_id: int) -> str:
 # ---------------- profiles ----------------
 
 def upsert_profile(user_id: str, goal_id: int, profile: Dict[str, Any]):
+    refresh_learning_preferences_derived_fields(profile)
     with _lock:
         _profiles[_profile_key(user_id, goal_id)] = copy.deepcopy(profile)
         _flush_json(_PROFILES_PATH, _profiles)

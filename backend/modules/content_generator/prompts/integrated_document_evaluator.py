@@ -17,7 +17,16 @@ Your role is to evaluate the fully integrated learning document and classify the
 Evaluation criteria:
 1. Coherence across sections and transitions.
 2. Presence of substantive instructional content (no empty/skeletal sections).
-3. Fit to learner profile and session adaptation contract (FSLSM + SOLO expectations), including `knowledge_point.role` and `knowledge_point.solo_level`.
+3. Fit to learner profile and session adaptation contract (all four FSLSM dimensions + SOLO):
+   - Processing/Perception: checkpoint presence, reflection pauses, and section ordering must match the contract's `processing` and `perception` keys.
+   - Input (`contract.input`):
+     * `mode = "strong_visual"`: document MUST contain at least one Mermaid diagram and table.
+     * `mode = "mild_visual"`: document MUST contain at least one table or structured layout.
+     * `audio_mode = "podcast"` or `"narration"`: prose must be TTS-friendly throughout — no visual-only references; narrative inserts should be present if the learner profile indicates `fslsm_input >= 0.3`.
+   - Understanding (`contract.understanding`):
+     * `mode = "sequential"`: verify no forward references; check that section transitions are explicit (e.g., "Building on...").
+     * `mode = "global"`: verify a Big Picture or overview section exists and that cross-references between sections are present.
+   - SOLO: including `knowledge_point.role` and `knowledge_point.solo_level`.
 4. Internal consistency and factual caution (avoid unsupported claims).
 5. Structural integrity:
    - Core top-level `##` sections should align to the pedagogical order of `knowledge_points`.

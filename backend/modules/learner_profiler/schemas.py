@@ -53,48 +53,143 @@ class FSLSMDimensions(BaseModel):
 
 
 def derive_content_style(dims: FSLSMDimensions) -> str:
-    """Derive content style from perception + understanding dimensions."""
+    """Derive content style from perception + understanding dimensions (5 bands each)."""
     parts: list[str] = []
     # perception: sensing (-1) → concrete/practical; intuitive (+1) → conceptual/theoretical
     if dims.fslsm_perception <= -0.7:
         parts.append("concrete examples and practical applications")
+    elif dims.fslsm_perception <= -0.3:
+        parts.append("primarily practical content with some conceptual grounding")
     elif dims.fslsm_perception >= 0.7:
         parts.append("conceptual and theoretical explanations")
+    elif dims.fslsm_perception >= 0.3:
+        parts.append("primarily conceptual content with practical examples")
     else:
         parts.append("a mix of practical and conceptual content")
     # understanding: sequential (-1) → step-by-step; global (+1) → big-picture
     if dims.fslsm_understanding <= -0.7:
-        parts.append("presented in step-by-step sequences")
+        parts.append("presented in strict step-by-step sequences")
+    elif dims.fslsm_understanding <= -0.3:
+        parts.append("presented in a structured, sequential order")
     elif dims.fslsm_understanding >= 0.7:
         parts.append("with big-picture overviews first")
+    elif dims.fslsm_understanding >= 0.3:
+        parts.append("with big-picture framing before sequential detail")
     else:
         parts.append("balancing sequential detail and big-picture context")
     return parts[0][0].upper() + parts[0][1:] + ", " + parts[1]
 
 
 def derive_activity_type(dims: FSLSMDimensions) -> str:
-    """Derive activity type from processing + input dimensions."""
+    """Derive activity type from processing + input dimensions (5 bands each)."""
     parts: list[str] = []
     # processing: active (-1) → hands-on/interactive; reflective (+1) → reading/observation
     if dims.fslsm_processing <= -0.7:
         parts.append("hands-on and interactive activities")
+    elif dims.fslsm_processing <= -0.3:
+        parts.append("primarily interactive activities with opportunities to practice")
     elif dims.fslsm_processing >= 0.7:
         parts.append("reading and observation-based learning")
+    elif dims.fslsm_processing >= 0.3:
+        parts.append("primarily reflective activities with some hands-on application")
     else:
         parts.append("a balance of interactive and reflective activities")
-    # input: visual (-1) → diagrams/videos; verbal (+1) → text/lectures
+    # input: visual (-1) → diagrams/charts; verbal (+1) → written/narrated
     if dims.fslsm_input <= -0.7:
-        parts.append("with diagrams, charts, and videos")
+        parts.append("with diagrams, charts, and structured visual overviews")
+    elif dims.fslsm_input <= -0.3:
+        parts.append("with visual aids such as diagrams and charts")
     elif dims.fslsm_input >= 0.7:
-        parts.append("with text-based materials and lectures")
+        parts.append("with detailed written or narrated explanations")
+    elif dims.fslsm_input >= 0.3:
+        parts.append("with rich written and narrative-style content")
     else:
         parts.append("using both visual and verbal materials")
     return parts[0][0].upper() + parts[0][1:] + ", " + parts[1]
 
 
+def derive_additional_notes(dims: FSLSMDimensions) -> str:
+    """Derive a high-level learning preference summary from all four FSLSM dimensions.
+
+    Only describes dimensions that cross the ±0.3 threshold. Descriptions align with
+    the adaptations in the learning path scheduler but avoid implementation-specific
+    terms (no checkpoint challenges, navigation modes, or podcast mentions).
+    """
+    notes: list[str] = []
+
+    # Processing dimension
+    if dims.fslsm_processing <= -0.7:
+        notes.append("learns best through active engagement and practice")
+    elif dims.fslsm_processing <= -0.3:
+        notes.append("prefers hands-on activities with opportunities to apply concepts")
+    elif dims.fslsm_processing >= 0.7:
+        notes.append("prefers to reflect deeply on new concepts before proceeding")
+    elif dims.fslsm_processing >= 0.3:
+        notes.append("benefits from time to reflect before moving on")
+
+    # Perception dimension
+    if dims.fslsm_perception <= -0.7:
+        notes.append("strongly prefers concrete examples and real-world applications before theory")
+    elif dims.fslsm_perception <= -0.3:
+        notes.append("tends to prefer practical examples introduced before theoretical concepts")
+    elif dims.fslsm_perception >= 0.7:
+        notes.append("prefers to grasp the big-picture theory and concepts first")
+    elif dims.fslsm_perception >= 0.3:
+        notes.append("tends to prefer understanding concepts before seeing examples")
+
+    # Input dimension
+    if dims.fslsm_input <= -0.7:
+        notes.append("strongly prefers visual formats such as diagrams and structured visual overviews")
+    elif dims.fslsm_input <= -0.3:
+        notes.append("prefers visual aids like diagrams and charts to support understanding")
+    elif dims.fslsm_input >= 0.7:
+        notes.append("strongly prefers detailed written or narrated explanations over visual materials")
+    elif dims.fslsm_input >= 0.3:
+        notes.append("prefers rich written and narrative-style content, including spoken or narrated explanations")
+
+    # Understanding dimension
+    if dims.fslsm_understanding <= -0.7:
+        notes.append("learns best with a strict step-by-step, sequential approach")
+    elif dims.fslsm_understanding <= -0.3:
+        notes.append("tends to prefer a structured, sequential progression through material")
+    elif dims.fslsm_understanding >= 0.7:
+        notes.append("strongly prefers to see the overall big picture before diving into specifics")
+    elif dims.fslsm_understanding >= 0.3:
+        notes.append("tends to prefer getting the big picture before exploring details")
+
+    if not notes:
+        return "No strong learning style preferences; balanced across all dimensions."
+
+    notes[0] = notes[0][0].upper() + notes[0][1:]
+    return "; ".join(notes) + "."
+
+
+def refresh_learning_preferences_derived_fields(profile_dict: dict) -> None:
+    """Refresh derived text fields in learning_preferences based on current FSLSM dims.
+
+    Updates content_style, activity_type, and additional_notes in-place on the raw
+    profile dict so they stay consistent with fslsm_dimensions in raw-dict code paths
+    (e.g., adaptation engine, store) that don't go through the Pydantic model.
+
+    No-op if learning_preferences is absent — avoids creating the key on minimal dicts.
+    """
+    if not isinstance(profile_dict, dict) or not isinstance(profile_dict.get("learning_preferences"), dict):
+        return
+    raw_dims = profile_dict["learning_preferences"].get("fslsm_dimensions", {})
+    try:
+        dims = FSLSMDimensions(**{k: float(raw_dims.get(k, 0.0) or 0.0) for k in (
+            "fslsm_processing", "fslsm_perception", "fslsm_input", "fslsm_understanding"
+        )})
+    except Exception:
+        return
+    prefs = profile_dict["learning_preferences"]
+    prefs["content_style"] = derive_content_style(dims)
+    prefs["activity_type"] = derive_activity_type(dims)
+    prefs["additional_notes"] = derive_additional_notes(dims)
+
+
 class LearningPreferences(BaseModel):
     fslsm_dimensions: FSLSMDimensions = Field(default_factory=FSLSMDimensions)
-    additional_notes: str | None = None
 
     @computed_field
     @property
@@ -105,6 +200,11 @@ class LearningPreferences(BaseModel):
     @property
     def activity_type(self) -> str:
         return derive_activity_type(self.fslsm_dimensions)
+
+    @computed_field
+    @property
+    def additional_notes(self) -> str:
+        return derive_additional_notes(self.fslsm_dimensions)
 
 
 class BehavioralPatterns(BaseModel):

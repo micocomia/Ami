@@ -39,6 +39,13 @@ Your role is to quality-check a single drafted knowledge section before it is in
 3. **Check Learner Fit**:
    * Use the `learner_profile` and `session_adaptation_contract` to assess FSLSM alignment.
    * Verify the draft respects the session's intended ordering and teaching style.
+   * **Input** (`contract.input`):
+     - `mode = "strong_visual"`: flag if the draft has no Mermaid diagram.
+     - `mode = "mild_visual"`: flag if the draft has no table or structured visual element.
+     - `mode = "mild_verbal"` or `"strong_verbal"`: flag if the draft is diagram-heavy with minimal explanatory prose, or contains TTS-hostile phrasing (e.g., "see the figure above").
+   * **Understanding** (`contract.understanding`):
+     - `mode = "sequential"`: flag any forward references to concepts not yet introduced.
+     - `mode = "global"`: flag if the draft opens with dense technical detail before any big-picture framing (apply primarily to the first section of a session).
 4. **Check SOLO Fit**:
    * Use the learner's `cognitive_status` and the current `learning_session` / `knowledge_point.solo_level` context to judge whether the draft is pitched at an appropriate SOLO depth.
    * Flag drafts that jump too far beyond the learner's likely readiness or stay too shallow for the intended session outcome.

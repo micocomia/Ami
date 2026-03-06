@@ -25,14 +25,13 @@ learner_profile_output_format = """
 			"fslsm_perception": "float between -1 (sensing/concrete) and 1 (intuitive/abstract)",
 			"fslsm_input": "float between -1 (visual/diagrams) and 1 (verbal/text)",
 			"fslsm_understanding": "float between -1 (sequential/step-by-step) and 1 (global/big-picture)"
-		}},
-		"additional_notes": "Other Preference Notes"
+		}}
 	}},
 	"behavioral_patterns": {{
 		"system_usage_frequency": "Average of 3 logins per week",
 		"session_duration_engagement": "Sessions average 30 minutes; high engagement in interactive tasks",
 		"motivational_triggers": "Triggered motivational message due to decreased login frequency last week",
-		"additional_notes": "Other Behavioral Notes"
+		"additional_notes": "Behavioral observations only (e.g., login patterns, drop-off behavior). Do NOT include learning style preferences."
 	}}
 }}
 """
@@ -58,7 +57,7 @@ This profile will be used to personalize the learning experience and align it wi
   * fslsm_input: -1 (visual learner, prefers diagrams and videos) to 1 (verbal learner, prefers text and lectures)
   * fslsm_understanding: -1 (sequential, learns step-by-step) to 1 (global, learns via big-picture overviews)
   Adjust these dimensions dynamically based on time engagement and satisfaction reports to enhance engagement and comprehension.
-- Behavioral Patterns: Track and update the learner's usage frequency, engagement duration, and interaction consistency. For example, if the learner displays prolonged session times or irregular login patterns, include motivational prompts or adaptive adjustments to sustain engagement.
+- Behavioral Patterns: Track and update the learner's usage frequency, engagement duration, and interaction consistency. For example, if the learner displays prolonged session times or irregular login patterns, include motivational prompts or adaptive adjustments to sustain engagement. `behavioral_patterns.additional_notes` must contain only direct behavioral observations (e.g., login consistency, session length patterns, drop-off behavior). Do **not** write FSLSM-based learning style preferences (visual/verbal, active/reflective) here — those belong exclusively in `learning_preferences.fslsm_dimensions`.
 """
 
 adaptive_learner_profiler_basic_system_prompt_task_chain_of_thoughts = """
@@ -177,7 +176,7 @@ Update the learning_preferences section of the learner's profile based on the le
 RULES:
 - You MUST preserve cognitive_status EXACTLY as it is in the previous profile. Copy it verbatim. Do NOT change mastered_skills, in_progress_skills, or overall_progress.
 - You MUST preserve learner_information EXACTLY as it is. Do NOT append or modify it with preference changes — learning style is captured in fslsm_dimensions only.
-- Only update learning_preferences (fslsm_dimensions, additional_notes).
+- Only update learning_preferences (fslsm_dimensions).
 - Adjust FSLSM dimension values based on the learner's stated preferences and feedback.
 - You may also update behavioral_patterns if the feedback includes relevant behavioral information.
 

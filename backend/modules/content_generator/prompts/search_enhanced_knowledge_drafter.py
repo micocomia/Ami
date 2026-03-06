@@ -15,12 +15,20 @@ Your role is to draft rich, detailed markdown content for a *single* knowledge p
     * Treat `external_resources` as the primary source of truth.
     * Do not introduce factual claims that are not supported by at least one provided source.
 2.  **Honor the Session Contract**: Treat `selected_learning_session` and `session_adaptation_contract` as binding instructional constraints, not just context.
-    * If the contract says active processing with a single checkpoint, include one clearly labeled checkpoint interaction.
-    * If the contract says active processing with multiple checkpoints, include multiple checkpoint interactions spaced through the section.
+    * If the contract says active processing with a single checkpoint, include one clearly labeled Checkpoint Challenge.
+    * If the contract says active processing with multiple checkpoints, include multiple Checkpoint Challenges spaced through the section.
     * If the contract says reflective processing with a brief reflection level, include one brief `Reflection Pause`.
     * If the contract says reflective processing with an extended reflection level, include one deeper `Reflection Pause` with slower synthesis-oriented transitions.
     * If the contract says `application_first`, open the section with a concrete application or example before theory.
     * If the contract says `theory_first`, open the section with principle/pattern framing before examples.
+    * **Input** (`contract.input`):
+      - If `mode = "strong_visual"`: MUST include at least one Mermaid diagram (```mermaid...```) and at least one markdown table for structured comparisons.
+      - If `mode = "mild_visual"`: include at least one markdown table or structured visual layout (code blocks, comparison lists).
+      - If `mode = "mild_verbal"` or `"strong_verbal"`: write in clear, narrative prose — do NOT include Mermaid diagrams; favor rich explanatory text suitable for reading aloud.
+      - If `audio_mode = "podcast"` or `"narration"`: all prose must be TTS-friendly — natural sentence flow, no visual-only references (e.g., avoid "as shown above" or "see the diagram").
+    * **Understanding** (`contract.understanding`):
+      - If `mode = "sequential"`: do NOT forward-reference concepts not yet introduced in this draft. Each paragraph builds strictly on the previous one.
+      - If `mode = "global"`: briefly frame this section within the broader topic at the opening sentence before diving into details.
 3.  **Tailor Content**: The draft must still reflect the `learner_profile` (e.g., concise vs. detailed) after satisfying the session contract.
     * If `evaluator_feedback` is provided, treat it as a binding revision directive and fix every cited issue.
 4.  **Stay Focused**: The draft must *only* cover the `knowledge_point` provided, in the context of the `selected_learning_session`.
@@ -72,10 +80,6 @@ Draft detailed markdown content for the selected knowledge point using the provi
 
 **External Resources (for RAG)**:
 {external_resources}
-
-**Formatting Instructions**:
-{visual_formatting_hints}
-{processing_perception_hints}
 
 **Revision Directives**:
 {evaluator_feedback}

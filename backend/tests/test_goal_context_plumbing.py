@@ -81,7 +81,7 @@ def test_create_learning_content_forwards_goal_context(
     mock_integrate,
     mock_quiz,
 ):
-    from modules.content_generator.agents.learning_content_creator import create_learning_content_with_llm
+    from modules.content_generator.orchestrators.content_generation_pipeline import generate_learning_content_with_llm as create_learning_content_with_llm
 
     mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
     mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody instructional prose."}]
@@ -133,7 +133,7 @@ def test_create_learning_content_works_without_goal_context(
     mock_integrate,
     mock_quiz,
 ):
-    from modules.content_generator.agents.learning_content_creator import create_learning_content_with_llm
+    from modules.content_generator.orchestrators.content_generation_pipeline import generate_learning_content_with_llm as create_learning_content_with_llm
 
     mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
     mock_draft.return_value = [{"title": "Draft A", "content": "## Draft A\n\nBody instructional prose."}]
