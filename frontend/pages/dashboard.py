@@ -5,6 +5,12 @@ from utils.request_api import get_app_config, get_dashboard_metrics
 from utils.state import get_selected_goal
 
 
+def _get_active_goals():
+    """Return all non-deleted goals from session state."""
+    goals = st.session_state.get("goals", [])
+    return [g for g in goals if isinstance(g, dict) and not g.get("is_deleted", False)]
+
+
 def render_dashboard():
     goal = get_selected_goal()
     if not isinstance(goal, dict):
@@ -12,18 +18,50 @@ def render_dashboard():
         return
 
     user_id = st.session_state.get("userId")
-    goal_id = goal.get("id")
-    metrics = get_dashboard_metrics(user_id, goal_id) if user_id is not None and goal_id is not None else None
-    if not metrics:
-        st.warning("Analytics are not available yet.")
-        return
 
     st.title("Learning Analytics")
     st.write("Track your learning progress and view learning insights here.")
+
+    # Goal selector at the top — controls the entire dashboard
+    active_goals = _get_active_goals()
+    if not active_goals:
+        st.warning("No goals available yet.")
+        return
+
+    goal_options = {}
+    for g in active_goals:
+        raw_name = g.get("learning_goal", g.get("goal", f"Goal {g.get('id', '?')}"))
+        goal_options[raw_name.title()] = g
+
+    # Default to currently selected goal
+    current_goal_name = goal.get("learning_goal", goal.get("goal", ""))
+    current_goal_title = current_goal_name.title() if current_goal_name else None
+    default_index = 0
+    option_keys = list(goal_options.keys())
+    if current_goal_title in option_keys:
+        default_index = option_keys.index(current_goal_title)
+
+    selected_label = st.selectbox(
+        "Select a learning goal",
+        options=option_keys,
+        index=default_index,
+        key="dashboard_goal_selector",
+    )
+    selected_goal = goal_options[selected_label]
+    selected_goal_id = selected_goal.get("id")
+
+    # Fetch metrics for the selected goal
+    metrics = get_dashboard_metrics(user_id, selected_goal_id) if user_id and selected_goal_id is not None else None
+    if not metrics:
+        st.warning("Analytics are not available yet for this goal.")
+        return
+
+    st.markdown(f"**Showing analytics for: {selected_label}**")
+
     with st.container(border=True):
         render_learning_progress(metrics)
     with st.container(border=True):
-        render_skill_radar_chart(metrics)
+        render_skill_radar_chart(metrics, goal_name=selected_label)
     with st.container(border=True):
         render_session_learning_timeseries(metrics)
     with st.container(border=True):
@@ -38,13 +76,16 @@ def render_learning_progress(metrics):
     st.write(f"Overall Progress: {overall_progress:.2f}%")
 
 
-
-def render_skill_radar_chart(metrics):
+def render_skill_radar_chart(metrics, goal_name=""):
     import plotly.graph_objects as go
 
-    st.markdown("#### Proficiency Levels for Different Skills")
+    title = "Proficiency Levels for Different Skills"
+    if goal_name:
+        title = f"Proficiency Levels for Different Skills — {goal_name}"
+    st.markdown(f"#### {title}")
+
     skill_radar = metrics.get("skill_radar", {})
-    skill_names = skill_radar.get("labels", [])
+    skill_names = [name.title() for name in skill_radar.get("labels", [])]
     current_levels = skill_radar.get("current_levels", [])
     required_levels = skill_radar.get("required_levels", [])
     skill_levels = skill_radar.get("skill_levels") or get_app_config()["skill_levels"]
@@ -92,7 +133,6 @@ def render_skill_radar_chart(metrics):
     st.plotly_chart(fig, key="skill_radar_chart", on_select="rerun")
 
 
-
 def render_session_learning_timeseries(metrics):
     st.markdown("#### Session Learning Timeseries")
     st.write("View the learning progress over time.")
@@ -108,7 +148,6 @@ def render_session_learning_timeseries(metrics):
         for item in series
     ])
     st.bar_chart(df, x="Session", y="Time", stack=False)
-
 
 
 def render_mastery_skills_timeseries(metrics):

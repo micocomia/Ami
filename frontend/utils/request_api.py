@@ -153,6 +153,7 @@ API_NAMES = {
     "audit_skill_gap_bias": "audit-skill-gap-bias",
     "validate_profile_fairness": "validate-profile-fairness",
     "audit_content_bias": "audit-content-bias",
+    "audit_chatbot_bias": "audit-chatbot-bias",
 }
 
 
@@ -366,6 +367,20 @@ def audit_content_bias(generated_content, learner_information, llm_type=None, me
         "method_name": str(method_name),
     }
     return make_post_request(API_NAMES["audit_content_bias"], data)
+
+
+def audit_chatbot_bias(tutor_responses, learner_information, llm_type=None, method_name=None):
+    """Call the chatbot bias audit endpoint and return the audit result."""
+    cfg = get_app_config()
+    llm_type = llm_type or cfg["default_llm_type"]
+    method_name = method_name or cfg["default_method_name"]
+    data = {
+        "tutor_responses": str(tutor_responses),
+        "learner_information": _normalize_learner_information(learner_information),
+        "llm_type": str(llm_type),
+        "method_name": str(method_name),
+    }
+    return make_post_request(API_NAMES["audit_chatbot_bias"], data)
 
 
 def create_learner_profile(

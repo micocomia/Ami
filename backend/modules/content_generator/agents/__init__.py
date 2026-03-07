@@ -24,6 +24,7 @@ from .search_enhanced_knowledge_drafter import (
 from .media_resource_finder import find_media_resources
 from .podcast_style_converter import PodcastStyleConverter, convert_to_podcast_with_llm
 from .tts_generator import generate_tts_audio
+from .content_bias_auditor import ContentBiasAuditor, audit_content_bias_with_llm
 from .content_feedback_simulator import (
 	LearningContentFeedbackSimulator,
 	simulate_content_feedback_with_llm,
@@ -38,7 +39,6 @@ from .integrated_document_evaluator import (
 	IntegratedDocumentEvaluator,
 	evaluate_integrated_document_with_llm,
 )
-from .content_bias_auditor import ContentBiasAuditor, audit_content_bias_with_llm
 
 __all__ = [
 	# Content creation pipeline
@@ -62,6 +62,9 @@ __all__ = [
 	"PodcastStyleConverter",
 	"convert_to_podcast_with_llm",
 	"generate_tts_audio",
+	# Content bias auditor
+	"ContentBiasAuditor",
+	"audit_content_bias_with_llm",
 	# Content feedback simulator
 	"LearningContentFeedbackSimulator",
 	"simulate_content_feedback_with_llm",
@@ -72,7 +75,4 @@ __all__ = [
 	"evaluate_knowledge_draft_with_llm",
 	"IntegratedDocumentEvaluator",
 	"evaluate_integrated_document_with_llm",
-	# Content bias auditor
-	"ContentBiasAuditor",
-	"audit_content_bias_with_llm",
 ]

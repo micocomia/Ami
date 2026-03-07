@@ -256,17 +256,6 @@ class LearningContent(BaseModel):
     quizzes: List[QuizPair] = Field(default_factory=list)
 
 
-class FeedbackDetail(BaseModel):
-    progression: str
-    engagement: str
-    personalization: str
-
-
-class LearnerFeedback(BaseModel):
-    feedback: FeedbackDetail
-    suggestions: FeedbackDetail
-
-
 # ── Content Bias Auditor schemas ──────────────────────────────────
 
 
@@ -319,3 +308,14 @@ class ContentBiasAuditResult(BaseModel):
     audited_section_count: int = 0
     flagged_section_count: int = 0
     ethical_disclaimer: str = Field(default=_DEFAULT_CONTENT_ETHICAL_DISCLAIMER)
+
+
+class FeedbackDetail(BaseModel):
+    progression: str
+    engagement: str
+    personalization: str
+
+
+class LearnerFeedback(BaseModel):
+    feedback: FeedbackDetail
+    suggestions: FeedbackDetail

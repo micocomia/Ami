@@ -12,6 +12,7 @@ from utils.request_api import (
     get_learning_content,
     post_session_activity,
     submit_content_feedback,
+    audit_content_bias,
 )
 from utils.format import inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
@@ -335,14 +336,15 @@ def render_content_preparation(goal):
         return
 
     learning_content.setdefault("sources_used", [])
-    _cache_learning_content(session_uid, learning_content)
     # Run content bias audit (non-blocking)
     try:
         learner_information = st.session_state.get("learner_information", "")
-        content_bias_result = audit_content_bias(learning_content.get("document", ""), learner_information)
+        learning_document = learning_content.get("content", "")
+        content_bias_result = audit_content_bias(learning_document, learner_information)
         goal["content_bias_audit"] = content_bias_result
     except Exception:
         goal["content_bias_audit"] = None
+    _cache_learning_content(session_uid, learning_content)
     try:
         save_persistent_state()
     except Exception:
