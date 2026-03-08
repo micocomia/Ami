@@ -33,6 +33,15 @@ This repo contains:
 
 Implemented in `identify_skill_gap_with_llm`. Separates goal-specific refinement from skill-gap quality evaluation, with bias auditing as a mandatory gate.
 
+Bias and ethics auditing extends across all major surfaces of the system:
+
+| Surface | Agent | What it checks |
+|---|---|---|
+| Skill gap | `BiasAuditor` | Demographic or confidence-level bias in gap assumptions |
+| Learner profile | `FairnessValidator` | Stereotyping or demographic bias in profile construction |
+| Generated content | `ContentBiasAuditor` | Exclusionary framing, inappropriate language, or demographic bias in lesson material |
+| Chatbot responses | `ChatbotBiasAuditor` | Bias or inappropriate content in tutor replies |
+
 ### 2. Learning Plan Reflexion
 
 - Initial schedule generation (`LearningPathScheduler.schedule_session`)
@@ -98,7 +107,7 @@ Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the 
 
 2. **`learner_profiler`**
 
-   Learner profile creation and multi-channel updates. FSLSM-driven adaptation utilities; scoped update endpoints (FSLSM dimensions vs. learner information updated separately); quiz-driven SOLO cognitive status progression; signal-gated preference updates from chatbot interactions; and fairness validation.
+   Learner profile creation and multi-channel updates. FSLSM-driven adaptation utilities; scoped update endpoints (FSLSM dimensions vs. learner information updated separately); quiz-driven SOLO cognitive status progression; signal-gated preference updates from chatbot interactions; and `FairnessValidator` bias auditing of profile construction.
 
 3. **`learning_plan_generator`**
 
@@ -106,11 +115,11 @@ Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the 
 
 4. **`content_generator`**
 
-   Staged content generation pipeline with draft evaluation, FSLSM-aware adaptation, media enrichment (audio/TTS, media search, diagrams), and quiz generation.
+   Staged content generation pipeline with draft evaluation, FSLSM-aware adaptation, media enrichment (audio/TTS, media search, diagrams), quiz generation, and `ContentBiasAuditor` post-generation bias check.
 
 5. **`ai_chatbot_tutor`**
 
-   Conversational tutoring agent ("Ami") with request-time tool assembly and signal-gated learner preference updates.
+   Conversational tutoring agent ("Ami") with request-time tool assembly, signal-gated learner preference updates, and `ChatbotBiasAuditor` for response bias checking.
 
 ### Runtime Services (Backend)
 

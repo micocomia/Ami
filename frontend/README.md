@@ -59,13 +59,7 @@ Replace `path/to/Ami` with your local path.
 
 #### Step 3 — Start the Backend (Recommended)
 
-The frontend expects a running backend.
-
-From repo root in another terminal:
-
-```bash
-./scripts/start_backend.sh 8000
-```
+The frontend expects a running backend on port `8000`. Follow the setup instructions in [`backend/README.md`](../backend/README.md) to start it.
 
 By default, frontend calls `http://127.0.0.1:8000/` (or Docker override; see below).
 

@@ -9,7 +9,7 @@ It is designed to work with the Streamlit frontend in `../frontend`, but can als
 - **Authentication and accounts** (`/auth/*`)
 - **Goal lifecycle and multi-goal state** (`/goals/*`)
 - **Learner profile creation, update, and sync** (`/profile/*`, `/sync-profile/*`) — FSLSM dimensions and learner information are updated via separate scoped endpoints
-- **Skill-gap analysis with two-loop reflexion and bias/fairness auditing**
+- **Skill-gap analysis with two-loop reflexion and bias auditing** — ethics/bias checks run across all major surfaces: skill gaps (`BiasAuditor`), learner profiles (`FairnessValidator`), generated content (`ContentBiasAuditor`), and chatbot responses (`ChatbotBiasAuditor`)
 - **Learning-path scheduling and agentic adaptation** with embedded plan feedback simulation
 - **Content generation** — staged quality pipeline with evaluators, FSLSM-aware adaptation, and multi-modal enrichment (audio/TTS, media search, diagrams)
 - **Session content caching and prefetch** (`services/content_prefetch.py`)
@@ -96,6 +96,7 @@ Additional capabilities:
 - **FSLSM-aware adaptation** (`fslsm_adaptation.py`): tailors content format and style to learner's FSLSM profile
 - **Media enrichment**: `MediaResourceFinder` + `MediaRelevanceEvaluator` for external videos/diagrams/podcasts; `DiagramRenderer` for ASCII diagrams; `TTSGenerator` for audio
 - **Quiz generation**: `DocumentQuizGenerator` produces SOLO-aligned quizzes
+- **Bias auditing**: `ContentBiasAuditor` checks generated lesson material for exclusionary framing, inappropriate language, or demographic bias
 
 ### `ai_chatbot_tutor` module
 
@@ -115,13 +116,35 @@ Per-request tool assembly; each tool can be individually enabled/disabled:
 
 Preference updates are signal-gated: profile writes occur only when strong preference signals are detected and user/goal context is present.
 
+`ChatbotBiasAuditor` can be run post-response to check tutor replies for bias or inappropriate content (exposed via `/audit-chatbot-bias`).
+
 ## Quickstart
 
 ### Option A: Docker (Recommended)
 
-#### Step 1 — Prepare `.env`
+Docker runs the backend in an isolated container so you do not need to manage local Python dependencies.
 
-From `backend/`:
+#### Step 1 — Install Docker Desktop
+
+Download and install Docker Desktop for your OS:
+
+| Operating System | Download Link |
+|---|---|
+| Windows 10/11 | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) |
+| macOS (Intel / Apple Silicon) | [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) |
+| Linux | [Docker Desktop for Linux](https://docs.docker.com/desktop/setup/install/linux/) |
+
+After installation, open Docker Desktop and wait until it is fully started.
+
+#### Step 2 — Open a Terminal and Enter the Backend Folder
+
+```bash
+cd path/to/Ami/backend
+```
+
+Replace `path/to/Ami` with your local path.
+
+#### Step 3 — Prepare `.env`
 
 ```bash
 cp .env.example .env
@@ -129,32 +152,44 @@ cp .env.example .env
 
 Open `.env` and fill in at least one LLM key (for example `OPENAI_API_KEY`) and a secure `JWT_SECRET`.
 
-#### Step 2 — Build and run
-
-From `backend/`:
+#### Step 4 — Build and Start Backend Container
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-When startup completes, backend will be available at:
+First run may take several minutes while Docker downloads base images and dependencies.
+
+#### Step 5 — Open the API
 
 - API base: `http://localhost:8000`
-- API docs: `http://localhost:8000/docs`
+- API docs (Swagger UI): `http://localhost:8000/docs`
 
-#### Step 3 — Stop
+#### Stopping / Restarting
+
+Stop:
 
 ```bash
 docker compose -f docker/docker-compose.yml down
 ```
 
+Restart:
+
+```bash
+docker compose -f docker/docker-compose.yml up
+```
+
+Rebuild after dependency/code changes:
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
 #### Docker notes
 
 - Compose maps host `8000` to container `8000`.
-- Compose mounts:
-  - `../data` -> `/app/data`
-  - `../resources` -> `/app/resources`
-- Data persists across container restarts through mounted directories.
+- Compose mounts `../data` → `/app/data` and `../resources` → `/app/resources`.
+- Data persists across container restarts through the mounted directories.
 
 ### Option B: Local Python (venv)
 
