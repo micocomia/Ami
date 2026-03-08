@@ -5,7 +5,7 @@ from utils.state import (
     normalize_selected_goal_id,
     save_persistent_state,
 )
-from components.topbar import logout
+from components.topbar import logout  # login dialog kept in topbar for potential reuse
 initialize_session_state()
 
 
@@ -78,11 +78,7 @@ st.set_page_config(page_title="Ami", page_icon="./assets/avatar.png", layout="wi
 st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
 
 if not st.session_state.get("logged_in", False):
-    from components.topbar import login
-    st.title("Welcome to Ami")
-    st.write("Please log in or register to continue.")
-    if st.button("Login / Register", icon=":material/account_circle:"):
-        login()
+    st.navigation([st.Page("pages/login.py", title="Login", url_path="login")], position="hidden").run()
     st.stop()
 
 try:
@@ -111,7 +107,6 @@ goal_management = st.Page("pages/goal_management.py", title="Goal Management", i
 knowledge_document = st.Page("pages/knowledge_document.py", title="Knowledge Document", icon=":material/book_2:", default=False, url_path="knowledge_document")
 dashboard = st.Page("pages/dashboard.py", title="Analytics Dashboard", icon=":material/browse:", default=False, url_path="dashboard")
 
-# Learning Analytics Dashboard
 if not st.session_state["if_complete_onboarding"]:
     nav_position = "sidebar"
     pg = st.navigation({"Ami": [onboarding, skill_gaps, learning_path, knowledge_document]}, position="hidden", expanded=True)

@@ -4,9 +4,7 @@ from typing import Any, Dict, Optional
 
 
 class BaseRequest(BaseModel):
-    model_provider: Optional[str] = None
-    model_name: Optional[str] = None
-    method_name: str = "ami"
+    pass
 
 
 class ChatWithAutorRequest(BaseRequest):
@@ -215,10 +213,6 @@ class BehavioralMetricsResponse(BaseModel):
 class AutoProfileUpdateRequest(BaseModel):
     user_id: str
     goal_id: int = 0
-
-    # optional overrides (otherwise uses app_config defaults via get_llm)
-    model_provider: Optional[str] = None
-    model_name: Optional[str] = None
 
     # only needed if this is the FIRST time we create the profile
     learning_goal: Optional[str] = None

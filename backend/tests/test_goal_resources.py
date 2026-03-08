@@ -45,7 +45,7 @@ class TestGoalResources:
 
     def test_goal_crud_round_trip(self, client):
         create_resp = client.post(
-            "/goals/alice",
+            "/v1/goals/alice",
             json={
                 "learning_goal": "Learn Python",
                 "skill_gaps": [],
@@ -57,18 +57,18 @@ class TestGoalResources:
         goal = create_resp.json()
         assert goal["learning_goal"] == "Learn Python"
 
-        list_resp = client.get("/goals/alice")
+        list_resp = client.get("/v1/goals/alice")
         assert list_resp.status_code == 200
         assert len(list_resp.json()["goals"]) == 1
 
-        patch_resp = client.patch(f"/goals/alice/{goal['id']}", json={"learning_goal": "Learn Python Well"})
+        patch_resp = client.patch(f"/v1/goals/alice/{goal['id']}", json={"learning_goal": "Learn Python Well"})
         assert patch_resp.status_code == 200
         assert patch_resp.json()["learning_goal"] == "Learn Python Well"
 
-        delete_resp = client.delete(f"/goals/alice/{goal['id']}")
+        delete_resp = client.delete(f"/v1/goals/alice/{goal['id']}")
         assert delete_resp.status_code == 200
         assert delete_resp.json() == {"ok": True}
-        assert client.get("/goals/alice").json()["goals"] == []
+        assert client.get("/v1/goals/alice").json()["goals"] == []
 
     def test_learning_content_cache_round_trip(self, client):
         goal = store.create_goal("alice", {"learning_goal": "Learn Python", "learning_path": [{"id": "Session 1"}]})
@@ -79,24 +79,24 @@ class TestGoalResources:
             "content_format": "standard",
         })
 
-        get_resp = client.get(f"/learning-content/alice/{goal['id']}/0")
+        get_resp = client.get(f"/v1/learning-content/alice/{goal['id']}/0")
         assert get_resp.status_code == 200
         assert get_resp.json()["document"].startswith("## Doc")
 
-        delete_resp = client.delete(f"/learning-content/alice/{goal['id']}/0")
+        delete_resp = client.delete(f"/v1/learning-content/alice/{goal['id']}/0")
         assert delete_resp.status_code == 200
-        assert client.get(f"/learning-content/alice/{goal['id']}/0").status_code == 404
+        assert client.get(f"/v1/learning-content/alice/{goal['id']}/0").status_code == 404
 
     def test_session_activity_endpoint(self, client):
         goal = store.create_goal("alice", {"learning_goal": "Learn Python", "learning_path": [{"id": "Session 1"}]})
-        start_resp = client.post("/session-activity", json={
+        start_resp = client.post("/v1/session-activity", json={
             "user_id": "alice",
             "goal_id": goal["id"],
             "session_index": 0,
             "event_type": "start",
         })
         assert start_resp.status_code == 200
-        heartbeat_resp = client.post("/session-activity", json={
+        heartbeat_resp = client.post("/v1/session-activity", json={
             "user_id": "alice",
             "goal_id": goal["id"],
             "session_index": 0,
@@ -117,7 +117,7 @@ class TestGoalResources:
             trigger_source="test",
         )
         assert owner_token is not None
-        resp = client.get(f"/learning-content/alice/{goal['id']}/0?no_wait=true")
+        resp = client.get(f"/v1/learning-content/alice/{goal['id']}/0?no_wait=true")
         assert resp.status_code == 404
         main.PREFETCH_SERVICE.singleflight_finish(
             cache_key,

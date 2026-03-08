@@ -73,7 +73,6 @@ def render_identifying_skill_gap(goal):
     with st.spinner('Identifying Skill Gap ...'):
         learning_goal = goal["learning_goal"]
         learner_information = st.session_state["learner_information"]
-        llm_type = st.session_state["llm_type"]
 
         # Gather mastered skills from existing goals so the LLM doesn't flag them as gaps
         goals = st.session_state.get("goals", [])
@@ -95,7 +94,7 @@ def render_identifying_skill_gap(goal):
             )
 
         skill_gaps, goal_assessment, retrieved_sources, goal_context = identify_skill_gap(
-            learning_goal, learner_information, llm_type
+            learning_goal, learner_information
         )
     goal["skill_gaps"] = skill_gaps
     goal["goal_assessment"] = goal_assessment
@@ -114,7 +113,6 @@ def render_identifying_skill_gap(goal):
             bias_audit = audit_skill_gap_bias(
                 skill_gaps_dict,
                 learner_information,
-                llm_type,
             )
             goal["bias_audit"] = bias_audit
         except Exception:

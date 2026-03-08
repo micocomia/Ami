@@ -100,7 +100,7 @@ def test_patch_goal_with_changed_learning_path_does_not_enqueue_prefetch(mock_ge
     goal_id = _seed_goal(learning_path=[])
     updated_path = [_session("Session 1")]
 
-    resp = client.patch(f"/goals/alice/{goal_id}", json={"learning_path": updated_path})
+    resp = client.patch(f"/v1/goals/alice/{goal_id}", json={"learning_path": updated_path})
     assert resp.status_code == 200
 
     time.sleep(0.15)
@@ -113,7 +113,7 @@ def test_patch_goal_with_changed_learning_path_does_not_enqueue_prefetch(mock_ge
 def test_patch_goal_without_learning_path_change_does_not_prefetch(mock_generate, _mock_llm, client):
     goal_id = _seed_goal(learning_path=[_session("Session 1")])
 
-    resp = client.patch(f"/goals/alice/{goal_id}", json={"learning_goal": "Learn Python Deeply"})
+    resp = client.patch(f"/v1/goals/alice/{goal_id}", json={"learning_goal": "Learn Python Deeply"})
     assert resp.status_code == 200
     time.sleep(0.15)
     assert mock_generate.call_count == 0
@@ -125,7 +125,7 @@ def test_session_start_prefetches_next_session_only(mock_generate, _mock_llm, cl
     goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2"), _session("Session 3")])
 
     resp = client.post(
-        "/session-activity",
+        "/v1/session-activity",
         json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
     )
     assert resp.status_code == 200
@@ -146,7 +146,7 @@ def test_prefetch_skips_when_cache_exists(mock_generate, _mock_llm, client):
         {"document": "Cached", "quizzes": {}, "sources_used": [], "content_format": "standard"},
     )
 
-    resp = client.patch(f"/goals/alice/{goal_id}", json={"learning_path": [_session("Session 1", title="Updated")]})
+    resp = client.patch(f"/v1/goals/alice/{goal_id}", json={"learning_path": [_session("Session 1", title="Updated")]})
     assert resp.status_code == 200
     time.sleep(0.15)
     assert mock_generate.call_count == 0
@@ -168,11 +168,11 @@ def test_duplicate_trigger_while_inflight_does_not_duplicate_generation(_mock_ll
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1")])
         r1 = client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         r2 = client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         assert r1.status_code == 200
@@ -190,10 +190,10 @@ def test_get_learning_content_waits_for_inflight_prefetch(_mock_llm, client):
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
-        resp = client.get(f"/learning-content/alice/{goal_id}/0")
+        resp = client.get(f"/v1/learning-content/alice/{goal_id}/0")
         assert resp.status_code == 200
         assert "document" in resp.json()
 
@@ -210,7 +210,7 @@ def test_generate_learning_content_joins_inflight_without_duplicate_generation(_
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         payload = {
@@ -225,7 +225,7 @@ def test_generate_learning_content_joins_inflight_without_duplicate_generation(_
             "goal_id": goal_id,
             "session_index": 0,
         }
-        resp = client.post("/generate-learning-content", json=payload)
+        resp = client.post("/v1/generate-learning-content", json=payload)
         assert resp.status_code == 200
         assert call_count["value"] == 1
 
@@ -241,7 +241,7 @@ def test_target_session_change_discards_prefetch_write(_mock_llm, client):
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1", title="Old")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         store.patch_goal("alice", goal_id, {"learning_path": [_session("Session 1", title="New")]})
@@ -264,7 +264,7 @@ def test_unrelated_session_runtime_change_does_not_discard_prefetch_write(_mock_
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
         )
         time.sleep(0.05)
@@ -293,7 +293,7 @@ def test_target_session_learned_discards_prefetch_write(_mock_llm, client):
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
         )
         time.sleep(0.05)
@@ -338,7 +338,7 @@ def test_on_demand_owner_unrelated_session_change_still_saves(_mock_llm, client)
             "goal_id": goal_id,
             "session_index": 1,
         }
-        resp = client.post("/generate-learning-content", json=payload)
+        resp = client.post("/v1/generate-learning-content", json=payload)
         assert resp.status_code == 200
         assert call_count["value"] == 1
         assert store.get_learning_content("alice", goal_id, 1) is not None
@@ -385,7 +385,7 @@ def test_adapt_applied_invalidates_only_changed_future_sessions(
     mock_evaluate_plan.return_value = {"is_acceptable": True, "issues": [], "feedback": {}}
 
     resp = client.post(
-        "/adapt-learning-path",
+        "/v1/adapt-learning-path",
         json={"user_id": "alice", "goal_id": goal_id, "force": True},
     )
     assert resp.status_code == 200
@@ -402,7 +402,7 @@ def test_session_start_cooldown_blocks_rapid_repeat_prefetch(mock_generate, _moc
     goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
 
     first = client.post(
-        "/session-activity",
+        "/v1/session-activity",
         json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
     )
     assert first.status_code == 200
@@ -410,7 +410,7 @@ def test_session_start_cooldown_blocks_rapid_repeat_prefetch(mock_generate, _moc
     store.delete_learning_content("alice", goal_id, 1)
 
     second = client.post(
-        "/session-activity",
+        "/v1/session-activity",
         json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
     )
     assert second.status_code == 200
@@ -434,7 +434,7 @@ def test_generate_content_join_does_not_return_504_even_with_tiny_timeout(_mock_
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         payload = {
@@ -449,7 +449,7 @@ def test_generate_content_join_does_not_return_504_even_with_tiny_timeout(_mock_
             "goal_id": goal_id,
             "session_index": 0,
         }
-        resp = client.post("/generate-learning-content", json=payload)
+        resp = client.post("/v1/generate-learning-content", json=payload)
         assert resp.status_code == 200
         assert "document" in resp.json()
         assert call_count["value"] == 1
@@ -461,14 +461,14 @@ def test_logging_contains_session_and_trigger_trace(_mock_generate, _mock_llm, c
     caplog.set_level(logging.INFO)
     goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
 
-    client.patch(f"/goals/alice/{goal_id}", json={"learning_path": [_session("Session 1"), _session("Session 2")]})
+    client.patch(f"/v1/goals/alice/{goal_id}", json={"learning_path": [_session("Session 1"), _session("Session 2")]})
     client.post(
-        "/session-activity",
+        "/v1/session-activity",
         json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
     )
-    client.get(f"/learning-content/alice/{goal_id}/0")
+    client.get(f"/v1/learning-content/alice/{goal_id}/0")
     client.post(
-        "/generate-learning-content",
+        "/v1/generate-learning-content",
         json={
             "learner_profile": json.dumps({}),
             "learning_path": json.dumps([_session("Session 1"), _session("Session 2")]),
@@ -503,7 +503,7 @@ def test_worker_discard_logs_stale_reason(_mock_llm, client, caplog):
     with patch("main.generate_learning_content_with_llm", side_effect=_slow_generate):
         goal_id = _seed_goal(learning_path=[_session("Session 1", title="Old")])
         client.post(
-            "/session-activity",
+            "/v1/session-activity",
             json={"user_id": "alice", "goal_id": goal_id, "session_index": -1, "event_type": "start"},
         )
         store.patch_goal("alice", goal_id, {"learning_path": [_session("Session 1", title="New")]})

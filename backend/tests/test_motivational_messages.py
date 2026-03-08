@@ -237,7 +237,7 @@ def _create_goal(user_id: str) -> dict:
 
 
 def _heartbeat(client, user_id: str, goal_id: int, session_index: int, event_time: str) -> dict:
-    resp = client.post("/session-activity", json={
+    resp = client.post("/v1/session-activity", json={
         "user_id": user_id,
         "goal_id": goal_id,
         "session_index": session_index,
@@ -252,7 +252,7 @@ class TestHeartbeatTriggerIntegration:
     def test_heartbeat_without_profile_returns_valid_shape(self, client):
         goal = _create_goal("alice")
         # Start the session first so heartbeat is accepted
-        client.post("/session-activity", json={
+        client.post("/v1/session-activity", json={
             "user_id": "alice",
             "goal_id": goal["id"],
             "session_index": 0,
@@ -278,7 +278,7 @@ class TestHeartbeatTriggerIntegration:
             }
         })
         # Start the session
-        client.post("/session-activity", json={
+        client.post("/v1/session-activity", json={
             "user_id": "alice",
             "goal_id": goal["id"],
             "session_index": 0,
@@ -298,15 +298,15 @@ class TestHeartbeatTriggerIntegration:
         )
 
     def test_response_schema_is_unchanged(self, client):
-        goal = _create_goal("bob")
-        client.post("/session-activity", json={
-            "user_id": "bob",
+        goal = _create_goal("alice")
+        client.post("/v1/session-activity", json={
+            "user_id": "alice",
             "goal_id": goal["id"],
             "session_index": 0,
             "event_type": "start",
             "event_time": "2026-01-01T00:00:00+00:00",
         })
-        data = _heartbeat(client, "bob", goal["id"], 0, "2026-01-01T00:03:00+00:00")
+        data = _heartbeat(client, "alice", goal["id"], 0, "2026-01-01T00:03:00+00:00")
         assert set(data.keys()) >= {"ok", "trigger"}
         trigger = data["trigger"]
         assert "show" in trigger

@@ -346,9 +346,6 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
             for key, value in other_prefs.items():
                 if key not in target_prefs or not target_prefs[key]:
                     target_prefs[key] = value
-                elif key in ("fslsm_dimensions", "additional_notes"):
-                    if value:
-                        target_prefs[key] = value
                 elif isinstance(value, dict) and isinstance(target_prefs.get(key), dict):
                     for sub_key, sub_value in value.items():
                         if sub_key not in target_prefs[key]:
@@ -385,6 +382,32 @@ def merge_shared_profile_fields(user_id: str, target_goal_id: int) -> Optional[D
 
     upsert_profile(user_id, target_goal_id, target_profile)
     return target_profile
+
+
+def propagate_learning_preferences_to_other_goals(user_id: str, source_goal_id: int) -> None:
+    """Push learning_preferences and behavioral_patterns from source goal to all other goals.
+
+    Called when a user explicitly edits their FSLSM dimensions so that all other goals
+    stay in sync with the updated preferences.
+    """
+    all_profiles = get_all_profiles_for_user(user_id)
+    source_profile = all_profiles.get(source_goal_id)
+    if source_profile is None:
+        return
+    source_prefs = source_profile.get("learning_preferences")
+    source_behavioral = source_profile.get("behavioral_patterns")
+    for goal_id, profile in all_profiles.items():
+        if goal_id == source_goal_id:
+            continue
+        changed = False
+        if source_prefs is not None:
+            profile["learning_preferences"] = copy.deepcopy(source_prefs)
+            changed = True
+        if source_behavioral is not None:
+            profile["behavioral_patterns"] = copy.deepcopy(source_behavioral)
+            changed = True
+        if changed:
+            upsert_profile(user_id, goal_id, profile)
 
 
 def propagate_learner_information_to_all_goals(user_id: str, learner_information: str) -> int:

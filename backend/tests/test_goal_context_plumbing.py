@@ -340,26 +340,12 @@ def test_generate_learning_content_endpoint_forwards_goal_context():
          patch("main.generate_learning_content_with_llm") as mock_create:
         mock_create.return_value = {"document": "ok"}
         client = TestClient(app)
-        response = client.post("/generate-learning-content", json=payload)
+        response = client.post("/v1/generate-learning-content", json=payload)
 
     assert response.status_code == 200
     assert response.json()["document"] == "ok"
     assert "view_model" in response.json()
     assert mock_create.call_args.kwargs["goal_context"] == payload["goal_context"]
-
-
-def test_generate_learning_content_rejects_non_ami_method():
-    from main import app
-
-    payload = {
-        "learner_profile": "{}",
-        "learning_path": "{}",
-        "learning_session": "{}",
-        "method_name": "genmentor",
-    }
-    client = TestClient(app)
-    response = client.post("/generate-learning-content", json=payload)
-    assert response.status_code == 400
 
 
 def test_removed_content_generation_endpoints_return_404():

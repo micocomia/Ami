@@ -106,7 +106,7 @@ def test_update_learning_preferences_clears_only_old_sign_key(mock_get_llm, mock
     mock_update.return_value = new_profile
 
     response = client.post(
-        "/update-learning-preferences",
+        "/v1/update-learning-preferences",
         json={
             "learner_profile": str(old_profile),
             "learner_interactions": "{}",
@@ -138,7 +138,7 @@ def test_submit_content_feedback_clears_only_old_sign_key(mock_get_llm, mock_upd
     mock_update.return_value = new_profile
 
     response = client.post(
-        "/submit-content-feedback",
+        "/v1/submit-content-feedback",
         json={
             "user_id": user_id,
             "goal_id": goal_id,

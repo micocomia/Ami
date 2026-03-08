@@ -173,7 +173,7 @@ class TestExtractPdfText:
             mock_plumber.open.return_value = mock_pdf
 
             resp = client.post(
-                "/extract-pdf-text",
+                "/v1/extract-pdf-text",
                 files={"file": ("resume.pdf", io.BytesIO(fake_pdf_bytes), "application/pdf")},
             )
             assert resp.status_code == 200
@@ -195,7 +195,7 @@ class TestExtractPdfText:
             mock_plumber.open.return_value = mock_pdf
 
             resp = client.post(
-                "/extract-pdf-text",
+                "/v1/extract-pdf-text",
                 files={"file": ("resume.pdf", io.BytesIO(fake_pdf_bytes), "application/pdf")},
             )
             assert resp.status_code == 200
@@ -205,7 +205,7 @@ class TestExtractPdfText:
 
     def test_upload_no_file_returns_422(self, client):
         """Missing file should return 422 (validation error)."""
-        resp = client.post("/extract-pdf-text")
+        resp = client.post("/v1/extract-pdf-text")
         assert resp.status_code == 422
 
 
@@ -220,7 +220,7 @@ class TestRefineGoalEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_refine.return_value = MOCK_REFINED_GOAL
 
-        resp = client.post("/refine-learning-goal", json={
+        resp = client.post("/v1/refine-learning-goal", json={
             "learning_goal": "Become HR Manager",
             "learner_information": "MBA grad with admin background",
         })
@@ -234,7 +234,7 @@ class TestRefineGoalEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_refine.return_value = MOCK_REFINED_GOAL
 
-        client.post("/refine-learning-goal", json={
+        client.post("/v1/refine-learning-goal", json={
             "learning_goal": "Learn Python",
             "learner_information": "CS student, sophomore year",
         })
@@ -251,7 +251,7 @@ class TestRefineGoalEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_refine.return_value = MOCK_REFINED_GOAL
 
-        resp = client.post("/refine-learning-goal", json={
+        resp = client.post("/v1/refine-learning-goal", json={
             "learning_goal": "Learn Python",
             "learner_information": "",
         })
@@ -262,7 +262,7 @@ class TestRefineGoalEndpoint:
         mock_get_llm.return_value = MagicMock()
 
         with patch("main.refine_learning_goal_with_llm", side_effect=Exception("LLM timeout")):
-            resp = client.post("/refine-learning-goal", json={
+            resp = client.post("/v1/refine-learning-goal", json={
                 "learning_goal": "Learn Python",
                 "learner_information": "",
             })
@@ -280,7 +280,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
 
-        resp = client.post("/identify-skill-gap-with-info", json={
+        resp = client.post("/v1/identify-skill-gap-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad with admin background",
         })
@@ -296,7 +296,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
 
-        resp = client.post("/identify-skill-gap-with-info", json={
+        resp = client.post("/v1/identify-skill-gap-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
         })
@@ -313,7 +313,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
 
-        resp = client.post("/identify-skill-gap-with-info", json={
+        resp = client.post("/v1/identify-skill-gap-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
             "skill_requirements": '{"HRIS Management": "intermediate"}',
@@ -327,7 +327,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
 
-        resp = client.post("/identify-skill-gap-with-info", json={
+        resp = client.post("/v1/identify-skill-gap-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
         })
@@ -342,7 +342,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_identify.return_value = (MOCK_SKILL_GAPS_RESULT, MOCK_SKILL_REQUIREMENTS)
 
-        client.post("/identify-skill-gap-with-info", json={
+        client.post("/v1/identify-skill-gap-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
         })
@@ -355,7 +355,7 @@ class TestIdentifySkillGapEndpoint:
         mock_get_llm.return_value = MagicMock()
 
         with patch("main.identify_skill_gap_with_llm", side_effect=Exception("LLM error")):
-            resp = client.post("/identify-skill-gap-with-info", json={
+            resp = client.post("/v1/identify-skill-gap-with-info", json={
                 "learning_goal": "Learn Python",
                 "learner_information": "Beginner",
             })
@@ -373,7 +373,7 @@ class TestCreateLearnerProfileEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_init.return_value = MOCK_LEARNER_PROFILE
 
-        resp = client.post("/create-learner-profile-with-info", json={
+        resp = client.post("/v1/create-learner-profile-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad with admin background",
             "skill_gaps": json.dumps(MOCK_SKILL_GAPS_RESULT["skill_gaps"]),
@@ -390,7 +390,7 @@ class TestCreateLearnerProfileEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_init.return_value = MOCK_LEARNER_PROFILE
 
-        resp = client.post("/create-learner-profile-with-info", json={
+        resp = client.post("/v1/create-learner-profile-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
             "skill_gaps": json.dumps(MOCK_SKILL_GAPS_RESULT["skill_gaps"]),
@@ -410,7 +410,7 @@ class TestCreateLearnerProfileEndpoint:
         mock_get_llm.return_value = MagicMock()
         mock_init.return_value = MOCK_LEARNER_PROFILE
 
-        resp = client.post("/create-learner-profile-with-info", json={
+        resp = client.post("/v1/create-learner-profile-with-info", json={
             "learning_goal": "Become an HR Manager",
             "learner_information": "MBA grad",
             "skill_gaps": json.dumps(MOCK_SKILL_GAPS_RESULT["skill_gaps"]),
@@ -426,7 +426,7 @@ class TestCreateLearnerProfileEndpoint:
 
 class TestEventLogging:
     def test_log_event_success(self, client):
-        resp = client.post("/events/log", json={
+        resp = client.post("/v1/events/log", json={
             "user_id": "alice",
             "event_type": "page_view",
             "payload": {"page": "onboarding"},
@@ -437,12 +437,12 @@ class TestEventLogging:
 
     def test_log_multiple_events(self, client):
         for i in range(3):
-            client.post("/events/log", json={
+            client.post("/v1/events/log", json={
                 "user_id": "alice",
                 "event_type": f"action_{i}",
                 "payload": {},
             })
-        resp = client.post("/events/log", json={
+        resp = client.post("/v1/events/log", json={
             "user_id": "alice",
             "event_type": "action_3",
             "payload": {},
@@ -450,7 +450,7 @@ class TestEventLogging:
         assert resp.json()["event_count"] == 4
 
     def test_log_event_auto_timestamps(self, client):
-        resp = client.post("/events/log", json={
+        resp = client.post("/v1/events/log", json={
             "user_id": "alice",
             "event_type": "click",
             "payload": {},
@@ -467,23 +467,23 @@ class TestEventLogging:
 class TestProfileRetrieval:
     def test_get_profile_by_goal_id(self, client):
         store.upsert_profile("alice", 0, MOCK_LEARNER_PROFILE)
-        resp = client.get("/profile/alice", params={"goal_id": 0})
+        resp = client.get("/v1/profile/alice", params={"goal_id": 0})
         assert resp.status_code == 200
         assert resp.json()["learner_profile"]["learning_goal"] == "Become an HR Manager"
 
     def test_get_all_profiles(self, client):
         store.upsert_profile("alice", 0, {"goal": "Python"})
         store.upsert_profile("alice", 1, {"goal": "Rust"})
-        resp = client.get("/profile/alice")
+        resp = client.get("/v1/profile/alice")
         assert resp.status_code == 200
         assert len(resp.json()["profiles"]) == 2
 
     def test_get_profile_nonexistent_returns_404(self, client):
-        resp = client.get("/profile/nobody", params={"goal_id": 0})
+        resp = client.get("/v1/profile/alice", params={"goal_id": 0})
         assert resp.status_code == 404
 
     def test_get_profiles_nonexistent_user_returns_404(self, client):
-        resp = client.get("/profile/nobody")
+        resp = client.get("/v1/profile/alice")
         assert resp.status_code == 404
 
 
@@ -493,16 +493,16 @@ class TestProfileRetrieval:
 
 class TestPersonasEndpoint:
     def test_get_personas_returns_200(self, client):
-        resp = client.get("/personas")
+        resp = client.get("/v1/personas")
         assert resp.status_code == 200
 
     def test_get_personas_has_personas_key(self, client):
-        resp = client.get("/personas")
+        resp = client.get("/v1/personas")
         data = resp.json()
         assert "personas" in data
 
     def test_get_personas_contains_all_five(self, client):
-        personas = client.get("/personas").json()["personas"]
+        personas = client.get("/v1/personas").json()["personas"]
         expected = {
             "Hands-on Explorer",
             "Reflective Reader",
@@ -513,7 +513,7 @@ class TestPersonasEndpoint:
         assert set(personas.keys()) == expected
 
     def test_get_personas_each_has_required_fields(self, client):
-        personas = client.get("/personas").json()["personas"]
+        personas = client.get("/v1/personas").json()["personas"]
         for name, persona in personas.items():
             assert "description" in persona, f"{name} missing description"
             assert "fslsm_dimensions" in persona, f"{name} missing fslsm_dimensions"
@@ -524,7 +524,7 @@ class TestPersonasEndpoint:
 
     def test_get_personas_dimensions_in_range(self, client):
         """All FSLSM dimension values should be between -1.0 and 1.0."""
-        personas = client.get("/personas").json()["personas"]
+        personas = client.get("/v1/personas").json()["personas"]
         for name, persona in personas.items():
             for dim_key, value in persona["fslsm_dimensions"].items():
                 assert -1.0 <= value <= 1.0, f"{name}.{dim_key} = {value} is out of range"
@@ -536,11 +536,11 @@ class TestPersonasEndpoint:
 
 class TestConfigEndpoint:
     def test_get_config_returns_200(self, client):
-        resp = client.get("/config")
+        resp = client.get("/v1/config")
         assert resp.status_code == 200
 
     def test_get_config_has_all_required_keys(self, client):
-        data = client.get("/config").json()
+        data = client.get("/v1/config").json()
         required_keys = [
             "skill_levels",
             "default_session_count",
@@ -559,16 +559,16 @@ class TestConfigEndpoint:
             assert key in data, f"Missing config key: {key}"
 
     def test_get_config_skill_levels_is_nonempty_list(self, client):
-        data = client.get("/config").json()
+        data = client.get("/v1/config").json()
         assert isinstance(data["skill_levels"], list)
         assert len(data["skill_levels"]) > 0
 
     def test_get_config_skill_levels_contains_expected_values(self, client):
-        levels = client.get("/config").json()["skill_levels"]
+        levels = client.get("/v1/config").json()["skill_levels"]
         assert levels == ["unlearned", "beginner", "intermediate", "advanced", "expert"]
 
     def test_get_config_numeric_values(self, client):
-        data = client.get("/config").json()
+        data = client.get("/v1/config").json()
         assert isinstance(data["default_session_count"], int)
         assert data["default_session_count"] > 0
         assert isinstance(data["motivational_trigger_interval_secs"], int)
@@ -577,12 +577,12 @@ class TestConfigEndpoint:
         assert data["max_refinement_iterations"] > 0
 
     def test_get_config_fslsm_thresholds_has_all_dimensions(self, client):
-        thresholds = client.get("/config").json()["fslsm_thresholds"]
+        thresholds = client.get("/v1/config").json()["fslsm_thresholds"]
         for dim in ("perception", "understanding", "processing", "input"):
             assert dim in thresholds, f"Missing fslsm_thresholds dimension: {dim}"
 
     def test_get_config_fslsm_thresholds_have_required_fields(self, client):
-        thresholds = client.get("/config").json()["fslsm_thresholds"]
+        thresholds = client.get("/v1/config").json()["fslsm_thresholds"]
         for dim, cfg in thresholds.items():
             for field in ("low_threshold", "high_threshold", "low_label", "high_label", "neutral_label"):
                 assert field in cfg, f"fslsm_thresholds.{dim} missing {field}"
@@ -656,7 +656,7 @@ class TestAdaptationEndpoints:
                 "input_mode_hint": "verbal",
             }]
         }
-        resp = client.post("/adapt-learning-path", json={"user_id": "alice", "goal_id": goal_id})
+        resp = client.post("/v1/adapt-learning-path", json={"user_id": "alice", "goal_id": goal_id})
         assert resp.status_code == 200
         data = resp.json()
         assert "adaptation" in data
@@ -672,7 +672,7 @@ class TestLearningPathSchedulingErrorHandling:
         mock_schedule.side_effect = ValueError("Learning path must contain between 1 and 20 sessions.")
 
         resp = client.post(
-            "/schedule-learning-path",
+            "/v1/schedule-learning-path",
             json={
                 "learner_profile": "{}",
                 "session_count": 8,
@@ -694,7 +694,7 @@ class TestLearningPathSchedulingErrorHandling:
         mock_schedule_agentic.side_effect = ValueError("Learning path must contain between 1 and 20 sessions.")
 
         resp = client.post(
-            "/schedule-learning-path-agentic",
+            "/v1/schedule-learning-path-agentic",
             json={
                 "learner_profile": "{}",
                 "session_count": 8,

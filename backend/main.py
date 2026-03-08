@@ -29,7 +29,8 @@ import threading
 import time
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header, APIRouter, Depends
+from utils.auth_jwt import get_current_user
 from io import BytesIO
 import pdfplumber
 from base.llm_factory import LLMFactory
@@ -65,7 +66,14 @@ from utils.motivational_messages import pick_motivational_message
 app_config = load_config(config_name="main")
 search_rag_manager = SearchRagManager.from_config(app_config)
 
-app = FastAPI()
+app = FastAPI(
+    title="Ami API",
+    version="1.0.0",
+    description="Ami (Adaptive Mentoring Intelligence) — AI-powered Intelligent Tutoring System backend.",
+)
+
+public_router = APIRouter(prefix="/v1", tags=["Public"])
+protected_router = APIRouter(prefix="/v1", tags=["Protected"], dependencies=[Depends(get_current_user)])
 
 from fastapi import Request
 
@@ -140,6 +148,12 @@ def _compute_mastery_rate(profile: dict) -> float:
 def _refresh_goal_profile(user_id: str, goal_id: int) -> dict:
     merged = store.merge_shared_profile_fields(user_id, goal_id)
     return merged or store.get_profile(user_id, goal_id) or {}
+
+
+def _assert_owns(current_user: str, resource_user_id: str) -> None:
+    """Raise 403 if the authenticated user does not own this resource."""
+    if current_user != resource_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _goal_or_404(user_id: str, goal_id: int) -> dict:
@@ -533,23 +547,25 @@ class BehaviorEvent(BaseModel):
     payload: Dict[str, Any] = {}
     ts: Optional[str] = None
 
-@app.post("/events/log")
-async def log_event(evt: BehaviorEvent):
+@protected_router.post("/events/log", summary="Log a behavioral event (page view, interaction, etc.) for analytics")
+async def log_event(evt: BehaviorEvent, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, evt.user_id)
     e = evt.dict() if hasattr(evt, "dict") else evt.model_dump()
     e["ts"] = e["ts"] or datetime.utcnow().isoformat()
     store.append_event(evt.user_id, e)
     return {"ok": True, "event_count": len(store.get_events(evt.user_id))}
 
-@app.post("/profile/auto-update")
-async def auto_update_profile(request: AutoProfileUpdateRequest):
+@protected_router.post("/profile/auto-update", summary="Automatically update a learner profile based on recent behavioral events")
+async def auto_update_profile(request: AutoProfileUpdateRequest, current_user: str = Depends(get_current_user)):
     """
     If profile doesn't exist: initialize it (needs learning_goal + learner_information + skill_gaps).
     If profile exists: update it using EVENT_STORE[user_id] as learner_interactions.
     """
+    _assert_owns(current_user, request.user_id)
     try:
         user_id = request.user_id
         goal_id = request.goal_id
-        llm = get_llm(request.model_provider, request.model_name)
+        llm = get_llm()
         interactions = store.get_events(user_id)
 
         # Normalize optional structured fields
@@ -598,19 +614,33 @@ async def auto_update_profile(request: AutoProfileUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/sync-profile/{user_id}/{goal_id}")
-async def sync_profile(user_id: str, goal_id: int):
+@protected_router.post("/sync-profile/{user_id}/{goal_id}", summary="Sync shared profile fields (learner_information, name, etc.) across all user goals")
+async def sync_profile(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
     """Merge shared profile fields (mastered skills, preferences, behavioral patterns)
     from all of a user's goals into the target goal's profile."""
+    _assert_owns(current_user, user_id)
     result = store.merge_shared_profile_fields(user_id, goal_id)
     if result is None:
         raise HTTPException(status_code=404, detail="No profile found for this goal")
     return {"learner_profile": result}
 
 
-@app.put("/profile/{user_id}/{goal_id}")
-async def put_profile(user_id: str, goal_id: int, body: dict):
+@protected_router.post("/propagate-profile/{user_id}/{goal_id}", summary="Push learning preferences and behavioral patterns from this goal to all other goals")
+async def propagate_profile(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
+    """After a user edits their FSLSM dimensions, call this to sync the updated learning
+    preferences and behavioral patterns to all of the user's other goals."""
+    _assert_owns(current_user, user_id)
+    source_profile = store.get_profile(user_id, goal_id)
+    if source_profile is None:
+        raise HTTPException(status_code=404, detail="No profile found for this goal")
+    store.propagate_learning_preferences_to_other_goals(user_id, goal_id)
+    return {"ok": True}
+
+
+@protected_router.put("/profile/{user_id}/{goal_id}", summary="Persist a learner profile directly without triggering an LLM call")
+async def put_profile(user_id: str, goal_id: int, body: dict, current_user: str = Depends(get_current_user)):
     """Persist a learner profile to the store without an LLM call."""
+    _assert_owns(current_user, user_id)
     profile = body.get("learner_profile")
     if not profile:
         raise HTTPException(status_code=400, detail="learner_profile is required")
@@ -621,8 +651,9 @@ async def put_profile(user_id: str, goal_id: int, body: dict):
     return {"ok": True}
 
 
-@app.get("/profile/{user_id}")
-async def get_profile(user_id: str, goal_id: Optional[int] = None):
+@protected_router.get("/profile/{user_id}", summary="Retrieve learner profile(s); optionally filter by goal_id")
+async def get_profile(user_id: str, goal_id: Optional[int] = None, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     if goal_id is not None:
         profile = store.get_profile(user_id, goal_id)
         if not profile:
@@ -633,26 +664,30 @@ async def get_profile(user_id: str, goal_id: Optional[int] = None):
         raise HTTPException(status_code=404, detail="No profile found for this user_id")
     return {"user_id": user_id, "profiles": profiles}
 
-@app.get("/events/{user_id}")
-async def get_events(user_id: str):
+@protected_router.get("/events/{user_id}", summary="List all behavioral events logged for a user")
+async def get_events(user_id: str, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     return {"user_id": user_id, "events": store.get_events(user_id)}
 
 
-@app.delete("/user-data/{user_id}")
-async def delete_user_data(user_id: str):
+@protected_router.delete("/user-data/{user_id}", summary="Delete all non-auth learning data for a user (goals, profiles, events)")
+async def delete_user_data(user_id: str, current_user: str = Depends(get_current_user)):
     """Delete all non-auth data for a user (profiles, events, state, snapshots).
     Used by Restart Onboarding so mastered skills and persona info are fully cleared."""
+    _assert_owns(current_user, user_id)
     store.delete_all_user_data(user_id)
     return {"ok": True}
 
 
-@app.get("/goals/{user_id}")
-async def list_goals(user_id: str):
+@protected_router.get("/goals/{user_id}", summary="List all goals for a user")
+async def list_goals(user_id: str, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     return {"goals": store.list_goal_aggregates(user_id)}
 
 
-@app.post("/goals/{user_id}")
-async def create_goal(user_id: str, request: GoalCreateRequest):
+@protected_router.post("/goals/{user_id}", summary="Create a new learning goal for a user")
+async def create_goal(user_id: str, request: GoalCreateRequest, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     payload = request.model_dump()
     learner_profile = payload.pop("learner_profile", None)
     goal = store.create_goal(user_id, payload)
@@ -664,8 +699,9 @@ async def create_goal(user_id: str, request: GoalCreateRequest):
     return store.get_goal_aggregate(user_id, goal["id"])
 
 
-@app.patch("/goals/{user_id}/{goal_id}")
-async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
+@protected_router.patch("/goals/{user_id}/{goal_id}", summary="Update fields on an existing goal (learning_goal, learning_path, skill_gaps, etc.)")
+async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     payload = {k: v for k, v in request.model_dump().items() if v is not None}
     goal_before = store.get_goal(user_id, goal_id)
     if goal_before is None:
@@ -676,21 +712,24 @@ async def patch_goal(user_id: str, goal_id: int, request: GoalUpdateRequest):
     return store.get_goal_aggregate(user_id, goal_id)
 
 
-@app.delete("/goals/{user_id}/{goal_id}")
-async def soft_delete_goal(user_id: str, goal_id: int):
+@protected_router.delete("/goals/{user_id}/{goal_id}", summary="Soft-delete a goal (marks as deleted, preserves data)")
+async def soft_delete_goal(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     goal = store.delete_goal(user_id, goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
     return {"ok": True}
 
 
-@app.get("/goal-runtime-state/{user_id}")
-async def goal_runtime_state(user_id: str, goal_id: int):
+@protected_router.get("/goal-runtime-state/{user_id}", summary="Get computed runtime state for a goal (progress, prefetch status, motivational messages)")
+async def goal_runtime_state(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     return _build_goal_runtime_state(user_id, goal_id)
 
 
-@app.get("/learning-content/{user_id}/{goal_id}/{session_index}")
-async def get_learning_content(user_id: str, goal_id: int, session_index: int, no_wait: bool = False):
+@protected_router.get("/learning-content/{user_id}/{goal_id}/{session_index}", summary="Retrieve cached learning content for a session, optionally waiting for generation to complete")
+async def get_learning_content(user_id: str, goal_id: int, session_index: int, no_wait: bool = False, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     started = time.perf_counter()
     path_hash = PREFETCH_SERVICE.current_path_hash(user_id, goal_id)
     record = store.get_learning_content(user_id, goal_id, session_index)
@@ -741,14 +780,15 @@ async def get_learning_content(user_id: str, goal_id: int, session_index: int, n
     return record.get("learning_content", {})
 
 
-@app.delete("/learning-content/{user_id}/{goal_id}/{session_index}")
-async def delete_learning_content(user_id: str, goal_id: int, session_index: int):
+@protected_router.delete("/learning-content/{user_id}/{goal_id}/{session_index}", summary="Invalidate cached learning content for a session (forces regeneration on next access)")
+async def delete_learning_content(user_id: str, goal_id: int, session_index: int, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     store.delete_learning_content(user_id, goal_id, session_index)
     return {"ok": True}
 
 
-@app.post("/session-activity")
-async def session_activity(request: SessionActivityRequest):
+async def _session_activity_core(request: SessionActivityRequest):
+    """Core session activity logic shared by the HTTP route and complete_session."""
     if request.event_type not in {"start", "heartbeat", "end"}:
         raise HTTPException(status_code=400, detail="Unsupported event_type")
 
@@ -842,9 +882,16 @@ async def session_activity(request: SessionActivityRequest):
     return {"ok": True, "trigger": trigger}
 
 
-@app.post("/complete-session")
-async def complete_session(request: CompleteSessionRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/session-activity", summary="Record a session activity event (start/heartbeat/end) with timing data")
+async def session_activity(request: SessionActivityRequest, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, request.user_id)
+    return await _session_activity_core(request)
+
+
+@protected_router.post("/complete-session", summary="Mark a learning session complete, update cognitive status, and record mastery")
+async def complete_session(request: CompleteSessionRequest, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     goal = _goal_or_404(request.user_id, request.goal_id)
     learning_path = goal.get("learning_path", [])
     if request.session_index < 0 or request.session_index >= len(learning_path):
@@ -869,7 +916,7 @@ async def complete_session(request: CompleteSessionRequest):
     store.upsert_profile(request.user_id, request.goal_id, profile)
     merged = _refresh_goal_profile(request.user_id, request.goal_id)
     store.append_mastery_history(request.user_id, request.goal_id, _compute_mastery_rate(merged))
-    await session_activity(SessionActivityRequest(
+    await _session_activity_core(SessionActivityRequest(
         user_id=request.user_id,
         goal_id=request.goal_id,
         session_index=request.session_index,
@@ -886,9 +933,10 @@ async def complete_session(request: CompleteSessionRequest):
     }
 
 
-@app.post("/submit-content-feedback")
-async def submit_content_feedback(request: SubmitContentFeedbackRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/submit-content-feedback", summary="Submit learner feedback on session content; triggers learning preference update")
+async def submit_content_feedback(request: SubmitContentFeedbackRequest, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     feedback = _parse_jsonish(request.feedback, request.feedback)
     merged, profile_updated = safe_update_learning_preferences(
         llm,
@@ -914,11 +962,12 @@ async def submit_content_feedback(request: SubmitContentFeedbackRequest):
     }
 
 
-@app.get("/dashboard-metrics/{user_id}")
-async def dashboard_metrics(user_id: str, goal_id: int):
+@protected_router.get("/dashboard-metrics/{user_id}", summary="Retrieve analytics dashboard metrics (progress, mastery history, time spent) for a goal")
+async def dashboard_metrics(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
     goal = _goal_aggregate_or_404(user_id, goal_id)
     profile = goal.get("learner_profile", {})
-    metrics = await get_behavioral_metrics(user_id, goal_id=goal_id)
+    metrics = await _behavioral_metrics_core(user_id, goal_id=goal_id)
     skill_levels = APP_CONFIG["skill_levels"]
     level_map = {name: idx for idx, name in enumerate(skill_levels)}
     mastered = profile.get("cognitive_status", {}).get("mastered_skills", [])
@@ -961,8 +1010,7 @@ async def dashboard_metrics(user_id: str, goal_id: int):
     }
 
 
-@app.get("/behavioral-metrics/{user_id}")
-async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
+async def _behavioral_metrics_core(user_id: str, goal_id: Optional[int] = None):
     try:
         return compute_behavioral_metrics(
             user_id=user_id,
@@ -977,9 +1025,16 @@ async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.post("/evaluate-mastery")
-async def evaluate_mastery(request: MasteryEvaluationRequest):
+@protected_router.get("/behavioral-metrics/{user_id}", summary="Retrieve computed behavioral engagement metrics (session counts, duration, streaks) for a user")
+async def get_behavioral_metrics(user_id: str, goal_id: Optional[int] = None, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
+    return await _behavioral_metrics_core(user_id, goal_id=goal_id)
+
+
+@protected_router.post("/evaluate-mastery", summary="Score submitted quiz answers and update mastery status for the session")
+async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str = Depends(get_current_user)):
     """Evaluate quiz answers, compute score, and determine mastery status."""
+    _assert_owns(current_user, request.user_id)
     goal = _goal_or_404(request.user_id, request.goal_id)
 
     learning_path = goal.get("learning_path", [])
@@ -1043,9 +1098,10 @@ async def evaluate_mastery(request: MasteryEvaluationRequest):
     return response
 
 
-@app.get("/quiz-mix/{user_id}")
-async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
+@protected_router.get("/quiz-mix/{user_id}", summary="Get the SOLO Taxonomy-aligned question type distribution for a session's quiz")
+async def get_quiz_mix(user_id: str, goal_id: int, session_index: int, current_user: str = Depends(get_current_user)):
     """Return the question type counts for a session based on its proficiency level."""
+    _assert_owns(current_user, user_id)
     from utils.quiz_scorer import get_quiz_mix_for_session
 
     goal = _goal_or_404(user_id, goal_id)
@@ -1059,9 +1115,10 @@ async def get_quiz_mix(user_id: str, goal_id: int, session_index: int):
     return mix
 
 
-@app.get("/session-mastery-status/{user_id}")
-async def session_mastery_status(user_id: str, goal_id: int):
+@protected_router.get("/session-mastery-status/{user_id}", summary="Get mastery pass/fail status for all sessions in a goal")
+async def session_mastery_status(user_id: str, goal_id: int, current_user: str = Depends(get_current_user)):
     """Return mastery status for all sessions in a goal."""
+    _assert_owns(current_user, user_id)
     goal = _goal_or_404(user_id, goal_id)
 
     result = []
@@ -1077,10 +1134,11 @@ async def session_mastery_status(user_id: str, goal_id: int):
     return result
 
 
-@app.post("/adapt-learning-path")
-async def adapt_learning_path(request: AdaptLearningPathRequest):
+@protected_router.post("/adapt-learning-path", summary="Regenerate the learning path based on updated learner profile")
+async def adapt_learning_path(request: AdaptLearningPathRequest, current_user: str = Depends(get_current_user)):
     """Detect preference/mastery changes and adapt the learning path accordingly."""
-    llm = get_llm(request.model_provider, request.model_name)
+    _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     ctx: Dict[str, Any] = {}
 
     try:
@@ -1169,7 +1227,7 @@ app.add_middleware(
 )
 
 
-@app.post("/auth/register")
+@public_router.post("/auth/register", summary="Register a new user account")
 async def auth_register(request: AuthRegisterRequest):
     if len(request.username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
@@ -1183,7 +1241,7 @@ async def auth_register(request: AuthRegisterRequest):
     return {"token": token, "username": request.username}
 
 
-@app.post("/auth/login")
+@public_router.post("/auth/login", summary="Authenticate and receive a JWT token")
 async def auth_login(request: AuthLoginRequest):
     if not auth_store.verify_password(request.username, request.password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -1191,7 +1249,7 @@ async def auth_login(request: AuthLoginRequest):
     return {"token": token, "username": request.username}
 
 
-@app.get("/auth/me")
+@public_router.get("/auth/me", summary="Get the currently authenticated user's identity")
 async def auth_me(authorization: str = Header("")):
     token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
     username = auth_jwt.verify_token(token)
@@ -1200,7 +1258,7 @@ async def auth_me(authorization: str = Header("")):
     return {"username": username}
 
 
-@app.delete("/auth/user")
+@public_router.delete("/auth/user", summary="Delete the authenticated user's account and all associated data")
 async def auth_delete_user(authorization: str = Header("")):
     token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
     username = auth_jwt.verify_token(token)
@@ -1266,7 +1324,7 @@ PERSONAS = {
 }
 
 
-@app.get("/personas")
+@public_router.get("/personas", summary="List available learner persona configurations")
 async def get_personas():
     """Return all available learning personas with their FSLSM dimensions."""
     return {"personas": PERSONAS}
@@ -1370,13 +1428,13 @@ PREFETCH_SERVICE = ContentPrefetchService(
 )
 
 
-@app.get("/config")
+@public_router.get("/config", summary="Retrieve application configuration (LLM settings, FSLSM thresholds, etc.)")
 async def get_app_config():
     """Return application configuration for frontend consumption."""
     return APP_CONFIG
 
 
-@app.post("/extract-pdf-text")
+@public_router.post("/extract-pdf-text", summary="Extract plain text from an uploaded PDF file")
 async def extract_pdf_text(file: UploadFile = File(...)):
     """Extract text from an uploaded PDF file."""
     try:
@@ -1387,9 +1445,11 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-@app.post("/chat-with-tutor")
-async def chat_with_autor(request: ChatWithAutorRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/chat-with-tutor", summary="Chat with the AI tutor; optionally updates learner profile from interactions")
+async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Depends(get_current_user)):
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learner_profile = request.learner_profile
     try:
         if isinstance(request.messages, str) and request.messages.strip().startswith("["):
@@ -1468,18 +1528,18 @@ async def chat_with_autor(request: ChatWithAutorRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-@app.post("/refine-learning-goal")
+@public_router.post("/refine-learning-goal", summary="Use LLM to refine a raw learning goal into a structured, actionable statement")
 async def refine_learning_goal(request: LearningGoalRefinementRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     try:
         refined_learning_goal = refine_learning_goal_with_llm(llm, request.learning_goal, request.learner_information)
         return refined_learning_goal
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
-@app.post("/identify-skill-gap-with-info")
+@public_router.post("/identify-skill-gap-with-info", summary="Identify skill gaps between learner's current state and learning goal using RAG+LLM")
 async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     learning_goal = request.learning_goal
     learner_information = request.learner_information
     skill_requirements = request.skill_requirements
@@ -1498,9 +1558,9 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/audit-skill-gap-bias")
+@public_router.post("/audit-skill-gap-bias", summary="Audit identified skill gaps for demographic or content bias")
 async def audit_skill_gap_bias(request: BiasAuditRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     learner_information = request.learner_information
     skill_gaps = request.skill_gaps
     try:
@@ -1517,9 +1577,11 @@ async def audit_skill_gap_bias(request: BiasAuditRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/create-learner-profile-with-info")
-async def create_learner_profile_with_info(request: LearnerProfileInitializationWithInfoRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/create-learner-profile-with-info", summary="Generate a learner profile using LLM from goal, learner info, and skill gaps")
+async def create_learner_profile_with_info(request: LearnerProfileInitializationWithInfoRequest, current_user: str = Depends(get_current_user)):
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learner_information = request.learner_information
     learning_goal = request.learning_goal
     skill_gaps = request.skill_gaps
@@ -1547,7 +1609,7 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/validate-profile-fairness")
+@public_router.post("/validate-profile-fairness", summary="Validate a learner profile for fairness and stereotyping risks")
 async def validate_profile_fairness(request: ProfileFairnessRequest):
     llm = LLMFactory.create(model="gpt-4o-mini", model_provider="openai", temperature=0)
     learner_profile = request.learner_profile
@@ -1569,9 +1631,9 @@ async def validate_profile_fairness(request: ProfileFairnessRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/audit-content-bias")
+@public_router.post("/audit-content-bias", summary="Audit generated learning content for bias or exclusionary language")
 async def audit_content_bias(request: ContentBiasAuditRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     generated_content = request.generated_content
     learner_information = request.learner_information
     try:
@@ -1581,9 +1643,9 @@ async def audit_content_bias(request: ContentBiasAuditRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/audit-chatbot-bias")
+@public_router.post("/audit-chatbot-bias", summary="Audit AI tutor responses for bias or inappropriate content")
 async def audit_chatbot_bias(request: ChatbotBiasAuditRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     tutor_responses = request.tutor_responses
     learner_information = request.learner_information
     try:
@@ -1593,10 +1655,12 @@ async def audit_chatbot_bias(request: ChatbotBiasAuditRequest):
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
-@app.post("/update-cognitive-status")
-async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
+@protected_router.post("/update-cognitive-status", summary="Update the cognitive status section of a learner profile after a session")
+async def update_cognitive_status(request: CognitiveStatusUpdateRequest, current_user: str = Depends(get_current_user)):
     import traceback as _tb
-    llm = get_llm(request.model_provider, request.model_name)
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learner_profile = request.learner_profile
     session_information = request.session_information
     try:
@@ -1635,9 +1699,11 @@ async def update_cognitive_status(request: CognitiveStatusUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/update-learning-preferences")
-async def update_learning_preferences(request: LearningPreferencesUpdateRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/update-learning-preferences", summary="Update FSLSM learning style preferences from recent interactions")
+async def update_learning_preferences(request: LearningPreferencesUpdateRequest, current_user: str = Depends(get_current_user)):
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learner_profile = request.learner_profile
     learner_interactions = request.learner_interactions
     learner_information = request.learner_information
@@ -1702,9 +1768,11 @@ async def update_learning_preferences(request: LearningPreferencesUpdateRequest)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/update-learner-information")
-async def update_learner_information(request: LearnerInformationUpdateRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/update-learner-information", summary="Update learner background information (edited text or resume)")
+async def update_learner_information(request: LearnerInformationUpdateRequest, current_user: str = Depends(get_current_user)):
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learner_profile = request.learner_profile
     edited_learner_information = request.edited_learner_information
     resume_text = request.resume_text
@@ -1759,9 +1827,9 @@ async def update_learner_information(request: LearnerInformationUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/schedule-learning-path")
+@public_router.post("/schedule-learning-path", summary="Generate a sequenced learning path from a learner profile (single-shot)")
 async def schedule_learning_path(request: LearningPathSchedulingRequest):
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     learner_profile = request.learner_profile
     session_count = request.session_count
     try:
@@ -1785,10 +1853,10 @@ class AgenticLearningPathRequest(BaseRequest):
     session_count: int = 0
 
 
-@app.post("/schedule-learning-path-agentic")
+@public_router.post("/schedule-learning-path-agentic", summary="Generate and auto-refine a learning path using an agentic pipeline")
 async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRequest):
     """Agentic learning path generation with retrieval, simulation, and auto-refinement."""
-    llm = get_llm(request.model_provider, request.model_name)
+    llm = get_llm()
     learner_profile = request.learner_profile
     session_count = request.session_count
     try:
@@ -1809,12 +1877,11 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/generate-learning-content")
-async def generate_learning_content(request: LearningContentGenerationRequest):
-    if request.method_name != "ami":
-        raise HTTPException(status_code=400, detail="Unsupported method_name. Expected 'ami'.")
-
-    llm = get_llm(request.model_provider, request.model_name)
+@protected_router.post("/generate-learning-content", summary="Generate RAG+LLM content for a session (document + quiz) and cache it")
+async def generate_learning_content(request: LearningContentGenerationRequest, current_user: str = Depends(get_current_user)):
+    if request.user_id:
+        _assert_owns(current_user, request.user_id)
+    llm = get_llm()
     learning_path = _parse_jsonish(request.learning_path, request.learning_path)
     learner_profile = _parse_jsonish(request.learner_profile, request.learner_profile)
     learning_session = _parse_jsonish(request.learning_session, request.learning_session)
@@ -1954,7 +2021,7 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
             allow_parallel=allow_parallel,
             with_quiz=with_quiz,
             goal_context=goal_context,
-            method_name=request.method_name,
+            method_name="ami",
         )
         if has_cache_identity:
             stale, stale_reason, path_hash_current = PREFETCH_SERVICE.is_stale_for_target_session(
@@ -2047,6 +2114,9 @@ async def generate_learning_content(request: LearningContentGenerationRequest):
                 owner_token=owner_token,
                 status=owner_terminal_status,
             )
+
+app.include_router(public_router)
+app.include_router(protected_router)
 
 if __name__ == "__main__":
     server_cfg = app_config.get("server", {})

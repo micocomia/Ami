@@ -49,7 +49,6 @@ def render_learner_profile():
                         goal["learning_goal"],
                         st.session_state["learner_information"],
                         goal["skill_gaps"],
-                        st.session_state["llm_type"],
                         user_id=user_id,
                         goal_id=goal_id,
                     )

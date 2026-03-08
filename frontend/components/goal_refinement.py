@@ -20,7 +20,6 @@ def render_goal_refinement(goal, button_col=None, hint_col=None):
         st.session_state["refined_learning_goal"] = refine_learning_goal(
             goal["learning_goal"],
             st.session_state["learner_information"],
-            st.session_state["llm_type"],
         )
         goal["learning_goal"] = st.session_state["refined_learning_goal"]
         st.toast("✅ Refined Learning goal successfully.")

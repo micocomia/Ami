@@ -6,6 +6,7 @@ from typing import Optional
 
 import jwt
 from jwt.utils import base64url_decode, base64url_encode
+from fastapi import Header, HTTPException
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
@@ -36,3 +37,12 @@ def verify_token(token: str) -> Optional[str]:
         return None
     except Exception:
         return None
+
+
+def get_current_user(authorization: str = Header("")) -> str:
+    """FastAPI dependency: verify Bearer token, return username or raise 401."""
+    token = authorization.removeprefix("Bearer ").strip()
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return username

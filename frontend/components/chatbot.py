@@ -34,7 +34,6 @@ def ask_autor_chatbot():
         response_payload = chat_with_tutor(
             st.session_state["tutor_messages"][-20:],
             learner_profile,
-            st.session_state["llm_type"],
             user_id=st.session_state.get("userId"),
             goal_id=goal.get("id") if isinstance(goal, dict) else None,
             session_index=session_index,

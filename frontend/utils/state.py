@@ -355,7 +355,17 @@ def propagate_profile_fields_to_other_goals(
     sync_preferences: bool = False,
     sync_mastered_skills: bool = False,
 ):
-    """Backend now owns cross-goal propagation; refresh goals list if needed."""
+    """Push profile fields from source_goal to all other goals via the backend.
+
+    When sync_preferences is True, the backend copies the source goal's
+    learning_preferences (including FSLSM dimensions) and behavioral_patterns
+    to every other goal the user has, keeping them in sync after an FSLSM edit.
+    """
+    if sync_preferences:
+        user_id = st.session_state.get("userId")
+        if user_id and source_goal_id is not None:
+            from utils.request_api import propagate_learner_profile_to_other_goals
+            propagate_learner_profile_to_other_goals(user_id, source_goal_id)
     try:
         load_persistent_state()
     except Exception:

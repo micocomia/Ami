@@ -184,6 +184,118 @@ class TestMergeSharedProfileFields:
         mastered_names = {s["name"] for s in persisted["cognitive_status"]["mastered_skills"]}
         assert mastered_names == {"Python", "Docker"}
 
+    def test_merge_does_not_overwrite_target_fslsm_dimensions(self):
+        """Regression: completing a session must NOT revert manually edited FSLSM dimensions.
+
+        Goal 0 holds the old (pre-edit) FSLSM values. Goal 1 holds the user's manually
+        edited values. After merge_shared_profile_fields is called for goal 1 (as happens
+        inside complete_session → _refresh_goal_profile), goal 1's edited dimensions must
+        be preserved unchanged.
+        """
+        old_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_input": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+        edited_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        store.upsert_profile("alice", 0, _make_profile(learning_preferences=old_prefs))
+        store.upsert_profile("alice", 1, _make_profile(learning_preferences=edited_prefs))
+
+        result = store.merge_shared_profile_fields("alice", 1)
+
+        dims = result["learning_preferences"]["fslsm_dimensions"]
+        assert dims["fslsm_processing"] == -0.8, "Manually edited FSLSM must not be overwritten by other goal's values"
+        assert dims["fslsm_perception"] == 0.6
+        assert dims["fslsm_input"] == -0.4
+        assert dims["fslsm_understanding"] == 0.9
+
+
+# ===================================================================
+# TestPropagatePreferences
+# ===================================================================
+
+class TestPropagatePreferences:
+
+    def test_propagate_pushes_fslsm_to_other_goals(self):
+        """After editing goal 0's FSLSM, propagation updates goal 1 and 2."""
+        edited_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        old_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_input": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+        store.upsert_profile("alice", 0, _make_profile(learning_preferences=edited_prefs))
+        store.upsert_profile("alice", 1, _make_profile(learning_preferences=old_prefs))
+        store.upsert_profile("alice", 2, _make_profile())  # no prefs yet
+
+        store.propagate_learning_preferences_to_other_goals("alice", 0)
+
+        goal1 = store.get_profile("alice", 1)
+        assert goal1["learning_preferences"]["fslsm_dimensions"]["fslsm_processing"] == -0.8
+        assert goal1["learning_preferences"]["fslsm_dimensions"]["fslsm_perception"] == 0.6
+
+        goal2 = store.get_profile("alice", 2)
+        assert goal2["learning_preferences"]["fslsm_dimensions"]["fslsm_processing"] == -0.8
+
+    def test_propagate_does_not_alter_source_goal(self):
+        """The source goal's profile is untouched by propagation."""
+        edited_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        store.upsert_profile("alice", 0, _make_profile(learning_preferences=edited_prefs))
+        store.upsert_profile("alice", 1, _make_profile())
+
+        store.propagate_learning_preferences_to_other_goals("alice", 0)
+
+        source = store.get_profile("alice", 0)
+        assert source["learning_preferences"]["fslsm_dimensions"]["fslsm_processing"] == -0.8
+
+    def test_propagate_single_goal_noop(self):
+        """Propagation with only one goal does not raise and leaves profile intact."""
+        edited_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        store.upsert_profile("alice", 0, _make_profile(learning_preferences=edited_prefs))
+
+        store.propagate_learning_preferences_to_other_goals("alice", 0)  # should not raise
+
+        source = store.get_profile("alice", 0)
+        assert source["learning_preferences"]["fslsm_dimensions"]["fslsm_processing"] == -0.8
+
+    def test_propagate_unknown_user_noop(self):
+        """Propagation for a user with no profiles does not raise."""
+        store.propagate_learning_preferences_to_other_goals("nobody", 0)  # should not raise
+
 
 # ===================================================================
 # TestSyncEndpoint
@@ -205,7 +317,7 @@ class TestSyncEndpoint:
         store.upsert_profile("alice", 0, _make_profile(mastered=[_skill("Python")]))
         store.upsert_profile("alice", 1, _make_profile(mastered=[_skill("Docker")]))
 
-        resp = client.post("/sync-profile/alice/1")
+        resp = client.post("/v1/sync-profile/alice/1")
         assert resp.status_code == 200
         data = resp.json()
         mastered_names = {s["name"] for s in data["learner_profile"]["cognitive_status"]["mastered_skills"]}
@@ -213,5 +325,5 @@ class TestSyncEndpoint:
 
     def test_sync_endpoint_404_no_profile(self, client):
         """Returns 404 if target goal has no profile."""
-        resp = client.post("/sync-profile/alice/99")
+        resp = client.post("/v1/sync-profile/alice/99")
         assert resp.status_code == 404

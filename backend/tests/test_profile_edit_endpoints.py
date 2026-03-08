@@ -108,7 +108,7 @@ def test_update_learning_preferences_slider_override_applies_explicit_dims(mock_
     mock_update.return_value = llm_output
 
     response = client.post(
-        "/update-learning-preferences",
+        "/v1/update-learning-preferences",
         json={
             "learner_profile": str(initial_profile),
             "learner_interactions": str(
@@ -159,7 +159,7 @@ def test_update_learner_information_propagates_to_all_goals(mock_get_llm, mock_u
     mock_update_info.return_value = updated
 
     response = client.post(
-        "/update-learner-information",
+        "/v1/update-learner-information",
         json={
             "learner_profile": str(_profile("old A")),
             "edited_learner_information": "new learner information",

@@ -57,7 +57,7 @@ def test_chat_with_tutor_legacy_response_shape(mock_get_llm, mock_chat, client):
     mock_chat.return_value = "Hello from Ami"
 
     resp = client.post(
-        "/chat-with-tutor",
+        "/v1/chat-with-tutor",
         json={
             "messages": "[{\"role\": \"user\", \"content\": \"Hello\"}]",
             "learner_profile": "{}",
@@ -78,7 +78,7 @@ def test_chat_with_tutor_metadata_mode(mock_get_llm, mock_chat, client):
     }
 
     resp = client.post(
-        "/chat-with-tutor",
+        "/v1/chat-with-tutor",
         json={
             "messages": "[{\"role\": \"user\", \"content\": \"Use more visuals\"}]",
             "learner_profile": "{}",
@@ -96,7 +96,7 @@ def test_chat_with_tutor_metadata_mode(mock_get_llm, mock_chat, client):
 
 def test_chat_with_tutor_rejects_invalid_messages_format(client):
     resp = client.post(
-        "/chat-with-tutor",
+        "/v1/chat-with-tutor",
         json={
             "messages": "hello",
             "learner_profile": "{}",

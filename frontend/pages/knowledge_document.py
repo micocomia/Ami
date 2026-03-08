@@ -316,7 +316,7 @@ def render_content_preparation(goal):
             st.rerun()
             return cached_learning_content
 
-    with st.spinner("Generating personalized learning content..."):
+    with st.spinner("Generating personalized learning content. This may take up to 5 mins."):
         learning_content = generate_learning_content(
             goal["learner_profile"],
             goal["learning_path"],
@@ -328,7 +328,6 @@ def render_content_preparation(goal):
             user_id=user_id,
             goal_id=selected_gid,
             session_index=selected_sid,
-            llm_type="gpt4o",
         )
 
     if not learning_content:
