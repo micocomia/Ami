@@ -163,13 +163,30 @@ docker compose -f docker/docker-compose.yml down
 - Python 3.13
 - `pip`
 
+#### Cross-Platform Notes (Windows / macOS / Linux)
+
+All dependencies in `requirements.txt` are cross-platform compatible. Key details:
+
+| Package | Notes |
+|---|---|
+| `torch`, `torchvision` | CPU wheels from PyPI work on Windows, macOS (Intel + Apple Silicon), and Linux. No extra index URL needed. |
+| `opencv-python-headless` | Headless variant — no system GUI libraries required. Works identically on all platforms. |
+| `onnxruntime` | Pre-built wheels available for Windows, macOS, and Linux. |
+| `pyclipper`, `grpcio`, `brotli` | C extensions with pre-built wheels for all major platforms. |
+| `rapidocr` | Depends on `onnxruntime`; works wherever onnxruntime works. |
+
+**Windows-specific:** Use `python -m venv .venv` then `.venv\Scripts\activate` (backslash, no `source`).
+
+**macOS Apple Silicon:** If `pip install` fails for any native package, ensure you are using a native ARM Python (not Rosetta). Run `python -c "import platform; print(platform.machine())"` — should print `arm64`.
+
 #### Step 1 — Install dependencies
 
 From repo root:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate       # macOS/Linux
+# .venv\Scripts\activate        # Windows
 pip install -r backend/requirements.txt
 ```
 

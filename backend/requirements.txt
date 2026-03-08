@@ -103,7 +103,7 @@ oauthlib==3.3.1
 omegaconf==2.3.0
 onnxruntime==1.24.1
 openai==2.16.0
-opencv-python==4.13.0.90
+opencv-python-headless==4.13.0.90
 openpyxl==3.1.5
 opentelemetry-api==1.39.1
 opentelemetry-exporter-otlp-proto-common==1.39.1
