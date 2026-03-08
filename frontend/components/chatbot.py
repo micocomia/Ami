@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_float import *
-from utils.request_api import chat_with_tutor, audit_chatbot_bias
+from utils.request_api import chat_with_tutor, audit_chatbot_bias, save_learner_profile
 from utils.state import get_selected_goal
 from components.chatbot_bias import render_chatbot_bias_banners
 
@@ -44,6 +44,10 @@ def ask_autor_chatbot():
             response = response_payload.get("response") or "I could not generate a response right now."
             updated_profile = response_payload.get("updated_learner_profile")
             if isinstance(updated_profile, dict):
+                user_id = st.session_state.get("userId")
+                goal_id = goal.get("id") if isinstance(goal, dict) else None
+                if user_id and goal_id is not None:
+                    save_learner_profile(user_id, goal_id, updated_profile)
                 goal["learner_profile"] = updated_profile
                 st.session_state["learner_profile"] = updated_profile
                 for idx, existing_goal in enumerate(st.session_state.get("goals", [])):

@@ -126,13 +126,14 @@ def _auto_adapt_if_needed(goal, runtime_state=None):
     _store_agent_reasoning(result, "adapt_learning_path")
     adaptation_status = (result.get("adaptation") or {}).get("status")
     if adaptation_status == "applied" and result.get("learning_path"):
-        goal["learning_path"] = result["learning_path"]
-        goal["plan_agent_metadata"] = result.get("agent_metadata", {})
-        update_goal(
+        persisted = update_goal(
             user_id,
             goal_id,
-            {"learning_path": goal["learning_path"], "plan_agent_metadata": goal["plan_agent_metadata"]},
+            {"learning_path": result["learning_path"], "plan_agent_metadata": result.get("agent_metadata", {})},
         )
+        if persisted is not None:
+            goal["learning_path"] = result["learning_path"]
+            goal["plan_agent_metadata"] = result.get("agent_metadata", {})
         load_persistent_state()
         try:
             save_persistent_state()
@@ -218,13 +219,16 @@ def render_learning_path():
             st.error("Scheduling returned an empty learning path.")
             return
 
-        goal["learning_path"] = learning_path
-        goal["plan_agent_metadata"] = agent_metadata
-        update_goal(
+        persisted = update_goal(
             st.session_state.get("userId"),
             goal.get("id"),
             {"learning_path": learning_path, "plan_agent_metadata": agent_metadata},
         )
+        if persisted is None:
+            st.error("Failed to save learning path to backend. Please retry.")
+            return
+        goal["learning_path"] = learning_path
+        goal["plan_agent_metadata"] = agent_metadata
         load_persistent_state()
         try:
             save_persistent_state()

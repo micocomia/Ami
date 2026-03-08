@@ -158,9 +158,12 @@ def render_existing_goals():
                 if st.button("Edit", key=f"edit_{goal['id']}"):
                     edited_goal = st.text_area("Edit Goal", value=goal["learning_goal"])
                     if st.button("Save", key=f"save_{goal['id']}"):
-                        goal["learning_goal"] = edited_goal
-                        update_goal(st.session_state.get("userId"), goal["id"], {"learning_goal": edited_goal})
-                        st.success("Goal updated successfully!")
+                        result = update_goal(st.session_state.get("userId"), goal["id"], {"learning_goal": edited_goal})
+                        if result is not None:
+                            goal["learning_goal"] = edited_goal
+                            st.success("Goal updated successfully!")
+                        else:
+                            st.error("Failed to update goal. Please try again.")
             with col2:
                 if st.button("Delete", key=f"delete_{goal['id']}", type="primary"):
                     goal_index = index_goal_by_id(goal["id"])

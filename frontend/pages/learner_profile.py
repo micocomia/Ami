@@ -376,8 +376,10 @@ def show_edit_profile_dialog(goal):
                 "slider_values": slider_values,
             }
             with st.spinner("Updating learning preferences..."):
+                fresh_profile = get_learner_profile(user_id, goal_id)
+                base_profile = fresh_profile if fresh_profile else learner_profile
                 updated_profile = update_learning_preferences(
-                    learner_profile,
+                    base_profile,
                     learner_interactions,
                     user_id=user_id,
                     goal_id=goal_id,
@@ -417,8 +419,10 @@ def show_edit_profile_dialog(goal):
             st.error("Provide edited learner information text or upload a resume before submitting.")
             return
         with st.spinner("Updating learner information..."):
+            fresh_profile = get_learner_profile(user_id, goal_id)
+            base_profile = fresh_profile if fresh_profile else learner_profile
             updated_profile = update_learner_information(
-                learner_profile,
+                base_profile,
                 edited_learner_information=edited_info,
                 resume_text=resume_text,
                 user_id=user_id,
