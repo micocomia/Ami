@@ -116,13 +116,20 @@ docker compose -f docker/docker-compose.yml up --build
 - Python 3.13
 - `pip` (or conda)
 
+#### Cross-Platform Notes (Windows / macOS / Linux)
+
+All frontend dependencies are pure Python or have pre-built wheels for all platforms. No special setup is needed beyond a standard `pip install`.
+
+**Windows-specific:** Use `.venv\Scripts\activate` instead of `source .venv/bin/activate`.
+
 #### Local Setup (venv)
 
 From repo root:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate       # macOS/Linux
+# .venv\Scripts\activate        # Windows
 pip install -r frontend/requirements.txt
 ```
 
