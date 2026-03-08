@@ -1,7 +1,7 @@
 import streamlit as st
 
 from components.goal_refinement import render_goal_refinement
-from utils.request_api import create_learner_profile, delete_goal, update_goal
+from utils.request_api import create_learner_profile, delete_goal, update_goal, list_goals
 from components.gap_identification import (
     render_identified_skill_gap,
     render_identifying_skill_gap,
@@ -14,6 +14,12 @@ from components.skill_info import render_skill_info
 
 
 def render_goal_management():
+    user_id = st.session_state.get("userId")
+    if user_id:
+        fresh_goals = list_goals(user_id)
+        if fresh_goals:
+            st.session_state["goals"] = fresh_goals
+
     st.title("Goal Management")
     st.write("Manage your learning goals: add new ones, edit or delete existing ones.")
 

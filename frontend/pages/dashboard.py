@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-from utils.request_api import get_app_config, get_dashboard_metrics
+from utils.request_api import get_app_config, get_dashboard_metrics, list_goals
 from utils.state import get_selected_goal
 
 
@@ -19,6 +19,11 @@ def render_dashboard():
 
     user_id = st.session_state.get("userId")
 
+    if user_id:
+        fresh_goals = list_goals(user_id)
+        if fresh_goals:
+            st.session_state["goals"] = fresh_goals
+
     st.title("Learning Analytics")
     st.write("Track your learning progress and view learning insights here.")
 
@@ -30,16 +35,23 @@ def render_dashboard():
 
     goal_options = {}
     for g in active_goals:
-        raw_name = g.get("learning_goal", g.get("goal", f"Goal {g.get('id', '?')}"))
-        goal_options[raw_name.title()] = g
+        raw_name = (
+            g.get("goal_display_name")
+            or g.get("learner_profile", {}).get("goal_display_name", "")
+            or g.get("learning_goal", g.get("goal", f"Goal {g.get('id', '?')}"))
+        )
+        goal_options[raw_name] = g
 
     # Default to currently selected goal
-    current_goal_name = goal.get("learning_goal", goal.get("goal", ""))
-    current_goal_title = current_goal_name.title() if current_goal_name else None
+    current_goal_name = (
+        goal.get("goal_display_name")
+        or goal.get("learner_profile", {}).get("goal_display_name", "")
+        or goal.get("learning_goal", goal.get("goal", ""))
+    )
     default_index = 0
     option_keys = list(goal_options.keys())
-    if current_goal_title in option_keys:
-        default_index = option_keys.index(current_goal_title)
+    if current_goal_name in option_keys:
+        default_index = option_keys.index(current_goal_name)
 
     selected_label = st.selectbox(
         "Select a learning goal",

@@ -153,6 +153,7 @@ def create_goal(user_id: str, goal_payload: Dict[str, Any]) -> Dict[str, Any]:
         "id": goal_id,
         "user_id": user_id,
         "learning_goal": goal_payload.get("learning_goal", ""),
+        "goal_display_name": goal_payload.get("goal_display_name", ""),
         "skill_gaps": goal_payload.get("skill_gaps", []),
         "goal_assessment": goal_payload.get("goal_assessment"),
         "goal_context": goal_payload.get("goal_context", {}),
@@ -217,7 +218,11 @@ def get_goal_aggregate(user_id: str, goal_id: int) -> Optional[Dict[str, Any]]:
 
 def assemble_goal_aggregate(user_id: str, goal: Dict[str, Any]) -> Dict[str, Any]:
     aggregate = copy.deepcopy(goal)
-    aggregate["learner_profile"] = get_profile(user_id, int(goal.get("id", 0))) or {}
+    profile = get_profile(user_id, int(goal.get("id", 0))) or {}
+    aggregate["learner_profile"] = profile
+    # Backward compat: populate goal_display_name from profile if missing on goal
+    if not aggregate.get("goal_display_name"):
+        aggregate["goal_display_name"] = profile.get("goal_display_name", "")
     return aggregate
 
 

@@ -615,6 +615,9 @@ async def put_profile(user_id: str, goal_id: int, body: dict):
     if not profile:
         raise HTTPException(status_code=400, detail="learner_profile is required")
     store.upsert_profile(user_id, goal_id, profile)
+    gdn = profile.get("goal_display_name", "") if isinstance(profile, dict) else ""
+    if gdn:
+        store.patch_goal(user_id, goal_id, {"goal_display_name": gdn})
     return {"ok": True}
 
 
@@ -655,6 +658,9 @@ async def create_goal(user_id: str, request: GoalCreateRequest):
     goal = store.create_goal(user_id, payload)
     if isinstance(learner_profile, dict) and learner_profile:
         store.upsert_profile(user_id, goal["id"], learner_profile)
+        gdn = learner_profile.get("goal_display_name", "")
+        if gdn:
+            store.patch_goal(user_id, goal["id"], {"goal_display_name": gdn})
     return store.get_goal_aggregate(user_id, goal["id"])
 
 
@@ -1533,6 +1539,9 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
         )
         if request.user_id is not None and request.goal_id is not None:
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
+            gdn = learner_profile.get("goal_display_name", "") if isinstance(learner_profile, dict) else ""
+            if gdn:
+                store.patch_goal(request.user_id, request.goal_id, {"goal_display_name": gdn})
         return {"learner_profile": learner_profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
