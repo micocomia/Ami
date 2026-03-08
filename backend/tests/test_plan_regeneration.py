@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from modules.tools.plan_regeneration_tool import (
+from modules.learning_plan_generator.utils.plan_regeneration import (
     compute_fslsm_deltas,
     count_mastery_failures,
     decide_regeneration,

@@ -80,6 +80,7 @@ class GoalAssessment(BaseModel):
 
     is_vague: bool = Field(default=False, description="Whether the goal is too vague to produce good skill mappings.")
     all_mastered: bool = Field(default=False, description="Whether the learner already masters all required skills.")
+    requires_retrieval: bool = Field(default=False, description="Whether verified course content was found and used for skill assessment.")
     suggestion: str = Field(default="", description="Actionable suggestion for the learner.")
     auto_refined: bool = Field(default=False, description="Whether the goal was automatically refined.")
     original_goal: Optional[str] = Field(default=None, description="The original goal before auto-refinement, if refined.")

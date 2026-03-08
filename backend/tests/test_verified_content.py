@@ -345,6 +345,28 @@ class TestVerifiedContentManager:
         mock_clear.assert_called_once()
         mock_index.assert_called_once_with(str(content_dir))
 
+    def test_build_manifest_skips_unreadable_file(self, manager, tmp_path):
+        content_dir = tmp_path / "courses"
+        course_dir = _make_course_dir(str(content_dir), "TEST", "course", "2024")
+        good_file = os.path.join(course_dir, "References", "good.py")
+        bad_file = os.path.join(course_dir, "References", "bad.py")
+        _write_text(good_file, "print('ok')")
+        _write_text(bad_file, "print('bad')")
+
+        original_hash_file = manager._hash_file
+
+        def _mock_hash(path):
+            if path == bad_file:
+                raise OSError(35, "Resource deadlock avoided")
+            return original_hash_file(path)
+
+        with patch.object(manager, "_hash_file", side_effect=_mock_hash):
+            manifest = manager._build_manifest(str(content_dir))
+
+        assert manifest["file_count"] == 1
+        assert len(manifest["files"]) == 1
+        assert manifest["files"][0]["path"].endswith("References/good.py")
+
 
 # ===========================================================================
 # TestHybridRetrieval

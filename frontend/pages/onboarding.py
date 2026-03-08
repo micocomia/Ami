@@ -47,60 +47,6 @@ def _inject_page_css():
             color: #374151;
             margin-bottom: 8px;
         }
-        /* Persona cards */
-        .persona-card {
-            background: #ffffff;
-            border: 1.5px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 18px 14px;
-            min-height: 150px;
-            cursor: pointer;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        .persona-card:hover {
-            border-color: #007bff;
-            box-shadow: 0 2px 12px rgba(0,123,255,0.10);
-        }
-        .persona-card.selected {
-            border-color: #007bff;
-            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-            background: #f0f7ff;
-        }
-        .persona-card .persona-icon {
-            font-size: 1.5rem;
-            margin-bottom: 6px;
-            color: #6b7280;
-        }
-        .persona-card .persona-name {
-            font-weight: 700;
-            font-size: 0.95rem;
-            color: #111827;
-            margin-bottom: 6px;
-        }
-        .persona-card .persona-desc {
-            font-size: 0.82rem;
-            color: #6b7280;
-            line-height: 1.4;
-        }
-        /* Bottom action cards */
-        .action-card {
-            background: #ffffff;
-            border: 1.5px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 18px 20px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            min-height: 60px;
-        }
-        .action-card .action-icon {
-            font-size: 1.3rem;
-            color: #6b7280;
-        }
-        .action-card .action-text {
-            font-size: 0.95rem;
-            color: #6b7280;
-        }
         /* Hint text */
         .hint-text {
             font-size: 0.88rem;
@@ -135,7 +81,7 @@ def render_onboard():
         render_topbar()
 
         # --- Welcome Header ---
-        st.markdown('<h1 class="welcome-title">Welcome to adaptive AI Tutor</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="welcome-title">Welcome to Ami</h1>', unsafe_allow_html=True)
         st.markdown(
             '<p class="welcome-subtitle">'
             "Your personal adaptive learning companion.<br>"
@@ -174,24 +120,15 @@ def render_onboard():
         for i, name in enumerate(persona_names):
             with cols[i]:
                 is_selected = name == current_persona
-                selected_class = " selected" if is_selected else ""
                 desc = PERSONAS[name]["description"]
-                st.markdown(
-                    f'<div class="persona-card{selected_class}">'
-                    f'<div class="persona-icon">ℹ️</div>'
-                    f'<div class="persona-name">{name}</div>'
-                    f'<div class="persona-desc">{desc}</div>'
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-                st.button(
-                    "Select" if not is_selected else "✓ Selected",
+                persona_label = f"**{name}**\n\n{desc}"
+                if st.button(
+                    persona_label,
                     key=f"persona_{i}",
                     use_container_width=True,
                     type="primary" if is_selected else "secondary",
-                    on_click=_select_persona,
-                    args=(name,),
-                )
+                ):
+                    _select_persona(name)
 
         # Build learner_information from persona
         persona_name = st.session_state.get("learner_persona", "")
@@ -207,39 +144,20 @@ def render_onboard():
         else:
             persona_prefix = ""
 
-        # --- Upload Resume + LinkedIn ---
+        # --- Upload Resume ---
         st.write("")  # spacing
-        upload_col, linkedin_col = st.columns(2)
-        with upload_col:
-            uploaded_file = st.file_uploader(
-                "Upload Your Resume (Optional)",
-                type="pdf",
-                label_visibility="collapsed",
-            )
-            if uploaded_file is not None:
-                with st.spinner("Extracting text from PDF..."):
-                    learner_information_pdf = extract_text_from_pdf(uploaded_file)
-                    st.session_state["learner_information_pdf"] = learner_information_pdf
-                    st.toast("✅ PDF uploaded successfully.")
-            else:
-                learner_information_pdf = st.session_state.get("learner_information_pdf", "")
-                st.markdown(
-                    '<div class="action-card">'
-                    '<span class="action-icon">ℹ️</span>'
-                    '<span class="action-text">Upload Your Resume (Optional)</span>'
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-        with linkedin_col:
-            st.markdown(
-                '<div class="action-card">'
-                '<span class="action-icon">ℹ️</span>'
-                '<span class="action-text">Connect to your LinkedIn</span>'
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            if st.button("Connect LinkedIn", use_container_width=True, type="secondary"):
-                st.toast("LinkedIn integration coming soon!")
+        uploaded_file = st.file_uploader(
+            "Upload your resume for a more personalized experience",
+            type="pdf",
+            label_visibility="visible",
+        )
+        if uploaded_file is not None:
+            with st.spinner("Extracting text from PDF..."):
+                learner_information_pdf = extract_text_from_pdf(uploaded_file)
+                st.session_state["learner_information_pdf"] = learner_information_pdf
+                st.toast("✅ PDF uploaded successfully.")
+        else:
+            learner_information_pdf = st.session_state.get("learner_information_pdf", "")
 
         # Combine learner information
         st.session_state["learner_information"] = persona_prefix + learner_information_pdf

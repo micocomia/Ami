@@ -1,60 +1,215 @@
 <div align="center">
-  <p><b>Cognitive-Style Adaptive AI Tutor</b></p>
-  <p>An enhanced fork of GenMentor — LLM-powered & Goal-oriented Tutoring System</p>
+  <p align="center">
+    <img src="assets/Logo.png" alt="Ami Logo" width="200"/>
+  </p> 
+   <p><b>Ami: Adaptive Mentoring Intelligence</b></p>
+  <p>A cognitive-style adaptive AI tutor — an enhanced fork of GenMentor (WWW 2025)</p>
 </div>
 
 ---
 
 ## Overview
 
-This repository is a **fork of [GenMentor](https://arxiv.org/pdf/2501.15749)** (WWW 2025, Industry Track — Oral Presentation), an LLM-powered multi-agent framework for goal-oriented learning in Intelligent Tutoring Systems (ITS). Our group is building upon GenMentor to create a **Cognitive-Style Adaptive AI Tutor** that delivers truly personalized learning experiences. We are calling this enhanced fork Ami: Adaptive Mentoring Intelligence system.
+This repository is a fork of [GenMentor](https://arxiv.org/pdf/2501.15749) (WWW 2025, Industry Track). Ami extends the original goal-oriented tutoring direction with explicit orchestration layers for quality control, reflexion pipelines, and production-style backend/frontend integration.
 
-Modern digital education often adopts a "one-size-fits-all" approach, failing to account for the diverse cognitive needs of individual learners. Students, professionals, and lifelong learners frequently struggle with content that is either too complex for their current knowledge level or presented in a format that does not align with their unique cognitive styles. This leads to disengagement, fragmented learning progress, and time wasted on inefficient study methods.
+The system is grounded in two pedagogical frameworks:
 
-Our project addresses this gap by enhancing GenMentor with:
+- **Felder-Silverman Learning Style Model (FSLSM)**: characterizes each learner across four dimensions (active/reflective, sensing/intuitive, visual/verbal, sequential/global) to drive content format and presentation
+- **SOLO Taxonomy**: classifies cognitive complexity across five levels (pre-structural → extended abstract) to calibrate content difficulty and quiz depth
 
-- **Verified educational content** as the source for content generation (via RAG and web search)
-- **Pedagogically-grounded learner profiling** based on the Felder-Silverman learning styles model and the SOLO Taxonomy
-- **More granular evaluation of students** through improved assessment mechanisms
-- **A React-based frontend** being developed in parallel for a responsive, accessible user experience, while this repository maintains a Streamlit frontend as an alternative
+Problem: adaptive tutoring systems typically collapse content planning, skill-gap detection, and response generation into a single pass. Ami introduces tighter control loops — parse/critique/refine steps, quality evaluators, targeted repair, ethics/bias auditing, and request-time tool routing — to improve reliability and personalization.
 
-## Key Improvements Over GenMentor
+This repo contains:
+- `backend/`: FastAPI backend (auth, goals/profiles, reflexion pipelines, content generation with quality gates, session runtime, analytics, session prefetch)
+- `frontend/`: Streamlit frontend (auth-gated onboarding, skill-gap and plan flows, learning content sessioning, profile, dashboard) — a React SPA is under active development for the Beta release
 
-| Area | Original GenMentor | Ami |
+## Ami Enhancements
+
+### 1. Skill Gap Reflexion + Bias Auditing
+
+- **Loop 1 (goal clarification)**: `GoalContextParser ↔ LearningGoalRefiner`
+- **Loop 2 (skill-gap critique/refinement)**: `SkillGapIdentifier ↔ SkillGapEvaluator`
+- **Post-loop audit (always run)**: `BiasAuditor` checks for demographic or confidence-level bias in skill gap assumptions
+
+Implemented in `identify_skill_gap_with_llm`. Separates goal-specific refinement from skill-gap quality evaluation, with bias auditing as a mandatory gate.
+
+Bias and ethics auditing extends across all major surfaces of the system:
+
+| Surface | Agent | What it checks |
 |---|---|---|
-| Content Sources | LLM-generated only | Verified materials via RAG + web search |
-| Learner Profiling | Basic profile | Grounded in Felder-Silverman & SOLO Taxonomy |
-| Student Evaluation | Coarse assessment | More granular, rubric-based evaluation |
-| Frontend | Streamlit | React SPA (in parallel development) + Streamlit alternative maintained in this repository |
-| Learner Simulation | N/A | Learner simulator agent for content quality feedback loop |
+| Skill gap | `BiasAuditor` | Demographic or confidence-level bias in gap assumptions |
+| Learner profile | `FairnessValidator` | Stereotyping or demographic bias in profile construction |
+| Generated content | `ContentBiasAuditor` | Exclusionary framing, inappropriate language, or demographic bias in lesson material |
+| Chatbot responses | `ChatbotBiasAuditor` | Bias or inappropriate content in tutor replies |
+
+### 2. Learning Plan Reflexion
+
+- Initial schedule generation (`LearningPathScheduler.schedule_session`)
+- Plan quality simulation via embedded feedback simulator (integrated into the plan pipeline, not a separate module)
+- Reflexion pass(es) using evaluator directives (`LearningPathScheduler.reflexion`)
+
+Implemented by `schedule_learning_path_agentic` with bounded refinement iterations.
+
+### 3. Content Generation Quality Pipeline
+
+The orchestrator runs a staged pipeline with two embedded reflexion loops:
+
+`explore → draft → [deterministic + LLM draft checkpoints] → targeted draft repair → integrate → final quality checkpoint → targeted repair / fallback`
+
+- **Draft reflexion loop**: `KnowledgeDraftEvaluator` evaluates each knowledge point draft; failed sections are repaired before integration
+- **Integration reflexion loop**: `IntegratedDocumentEvaluator` evaluates the full document; targeted repair (`integrator_only` or `section_redraft`) runs on failure, with a fallback path when the quality budget is exhausted
+- FSLSM-aware content adaptation (`fslsm_adaptation.py`) tailors format per learner style
+- Multi-modal enrichment: TTS audio generation, media search (videos/diagrams/podcasts), ASCII diagram rendering
+
+Implemented in `generate_learning_content_with_llm` in `modules/content_generator/`.
+
+### 4. Tutor Tool-Fetching Architecture
+
+Ami (the chatbot tutor) assembles tools at request time based on per-request toggles:
+
+| Tool | Purpose |
+|---|---|
+| `retrieve_session_learning_content` | Access current session's learning document for context-aware answers |
+| `retrieve_vector_context` | Verified-content RAG retrieval from indexed course materials |
+| `search_web_context_ephemeral` | Ephemeral web search (non-persistent) |
+| `search_media_resources` | Search and filter media resources (video, diagram, podcast) |
+| `update_learning_preferences_from_signal` | Signal-gated FSLSM profile updates from tutoring interactions |
+
+Implemented through `AITutorChatbot._build_runtime_tools` and `create_ai_tutor_tools`.
+
+### 5. Adaptive Learner Profile Updates
+
+The learner profile is not static after onboarding — it evolves throughout the learning lifecycle through three update channels:
+
+- **Manual edit**: The learner explicitly adjusts FSLSM dimensions via sliders (`update_learning_preferences_with_llm` → `/update-learning-preferences`) or updates background/bio via text and optional resume re-upload (`update_learner_information_with_llm` → `/update-learner-information`). These two paths are scoped separately to prevent unintended cross-field changes.
+- **Quiz-driven cognitive progression**: Mastery evaluation outcomes drive `update_cognitive_status_with_llm`, tracking SOLO level advancement session-over-session.
+- **Chatbot signal-gated updates**: When Ami detects a strong learning preference signal during tutoring (e.g., "I prefer visual explanations"), the `update_learning_preferences_from_signal` tool applies a preference update — but only when signal confidence and user/goal context are both present.
+
+Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the chatbot tool `update_learning_preferences_from_signal`.
+
+### 6. Session Prefetch
+
+`ContentPrefetchService` (`services/content_prefetch.py`) prefetches upcoming learning sessions in the background while a learner works through their current session. This reduces wait time at session transitions without blocking the current session flow.
 
 ## System Architecture
 
 <div align="center">
   <p align="center">
-    <img src="resources/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
+    <img src="assets/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
   </p>
 </div>
 
-### Agent Modules
+### Core Backend Modules
 
-1. **Learner Profiler** — Determines the learner's cognitive ability and learning preferences using attributes based on pedagogical studies (Felder-Silverman model), giving the system a holistic view of how each learner most effectively learns.
+1. **`skill_gap`**
 
-2. **Skill Gap Identifier** — Analyzes the gap between what the learner wants to learn and their current skills, enabling targeted learning paths and materials.
+   Goal refinement, skill-gap identification, bias auditing. Two-loop reflexion with mandatory `BiasAuditor` post-loop.
 
-3. **Learning Plan Generator** — Generates a personalized learning plan that continuously adjusts based on the student's progress and difficulty level.
+2. **`learner_profiler`**
 
-4. **Content Generator and Evaluator** — Generates personalized content and assessments tailored to learner preferences. Decides whether to source content from verified materials (via RAG) or web search.
+   Learner profile creation and multi-channel updates. FSLSM-driven adaptation utilities; scoped update endpoints (FSLSM dimensions vs. learner information updated separately); quiz-driven SOLO cognitive status progression; signal-gated preference updates from chatbot interactions; and `FairnessValidator` bias auditing of profile construction.
 
-5. **Learner Simulator** — Simulates the student to evaluate the quality of learning paths and content, creating a feedback loop for continuous improvement.
+3. **`learning_plan_generator`**
+
+   Learning-path scheduling with embedded plan feedback simulation and agentic regeneration workflows.
+
+4. **`content_generator`**
+
+   Staged content generation pipeline with draft evaluation, FSLSM-aware adaptation, media enrichment (audio/TTS, media search, diagrams), quiz generation, and `ContentBiasAuditor` post-generation bias check.
+
+5. **`ai_chatbot_tutor`**
+
+   Conversational tutoring agent ("Ami") with request-time tool assembly, signal-gated learner preference updates, and `ChatbotBiasAuditor` for response bias checking.
+
+### Runtime Services (Backend)
+
+- Goal runtime-state computation
+- Learning-content caching and prefetch (`services/content_prefetch.py`)
+- Session activity and completion tracking
+- Mastery evaluation and session mastery status
+- Behavioral and dashboard analytics
 
 ## Tech Stack
 
-- **Backend**: Python, FastAPI, LangChain, OpenAI/Google/Meta LLMs
-- **Frontend**: React (in parallel development), Streamlit (maintained alternative in this repository)
-- **Content Retrieval**: RAG (Retrieval Augmented Generation) via LangChain vector stores
-- **Evaluation**: RAGAS for the assessment of the RAG system and LLM-as-a-judge for the evaluation of the agents
-- **Design**: Figma for prototyping and design system
+- **Backend**: Python 3.13, FastAPI, LangChain, Hydra, ChromaDB
+- **Frontend (current)**: Streamlit
+- **Frontend (Beta, in development)**: React SPA
+- **Retrieval**: Verified-content vector indexing (HuggingFace `all-mpnet-base-v2`) + web search wrappers
+- **Model Routing**: Provider/model overrides via `model_provider` and `model_name`
+- **Testing/Evaluation**: Pytest test suites, LLM-as-a-judge eval scripts (RAGAS-based for RAG, rubric-based for agent quality)
+
+## Getting Started
+
+For service-specific setup details:
+- Backend guide: [`backend/README.md`](backend/README.md)
+- Frontend guide: [`frontend/README.md`](frontend/README.md)
+
+### Quick Start (Local Dev)
+
+#### Step 1 - Prepare backend environment
+
+From repo root:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Fill API keys and `JWT_SECRET` in `backend/.env`.
+
+#### Step 2 - Start backend on port 8000 (recommended)
+
+```bash
+BACKEND_PORT=8000 ./scripts/start_backend.sh
+```
+
+#### Step 3 - Start frontend in another terminal
+
+```bash
+./scripts/start_frontend.sh
+```
+
+#### Step 4 - Open services
+
+- Frontend: `http://localhost:8501`
+- Backend docs: `http://localhost:8000/docs`
+
+### Quick Start (Docker)
+
+Run each service from its directory:
+
+```bash
+# backend
+cd backend
+docker compose -f docker/docker-compose.yml up --build
+
+# frontend (separate terminal)
+cd frontend
+docker compose -f docker/docker-compose.yml up --build
+```
+
+### Optional Helper Scripts
+
+From repo root:
+
+```bash
+# Start both services in background (logs/ and pids/ managed by script)
+BACKEND_PORT=8000 ./scripts/start_all.sh
+
+# Stop services started by start_all.sh
+./scripts/stop_all.sh
+```
+
+## Repository Layout
+
+```text
+Ami/
+  backend/          # FastAPI backend, modules, configs, tests, evals, docker files; runtime data in backend/data/
+  frontend/         # Streamlit frontend, pages/components/utils, tests, docker files
+  frontend-react/   # React SPA (Beta release, in active development)
+  docs/             # design notes, migration docs, testing guides
+  scripts/          # local dev startup/stop scripts
+  assets/        # architecture diagrams and Beta screenshots
+```
 
 ## Project Context
 
@@ -74,95 +229,100 @@ This project is developed as part of **GNG 5902 (Winter 2026)** at the Universit
 | Tian Lai | UX Design Lead |
 | Xinping Wang | UX Engineer |
 
-## Getting Started
+## Interface Walkthrough
 
-For setup and usage instructions, see the respective directories:
-
-- [`backend/`](backend/) — Backend installation, configuration, and running instructions
-- [`frontend/`](frontend/) — Frontend installation, configuration, and running instructions
-
-## MVP Interface Walkthrough
-
-The screenshots below show the current MVP interfaces and key adaptive behaviors.
+The screenshots below show the current Beta interface and key adaptive behaviors.
 
 ### 1. Login
 
-![Login page](resources/MVP/1.%20Login.png)
+![Login](assets/Beta/0%20-%20Login.png)
 
 Login interface for returning users to authenticate and access personalized learning sessions.
 
 ### 2. Onboarding
 
-![Onboarding page](resources/MVP/2.%20Onboarding.png)
+![Onboarding](assets/Beta/1%20-%20Onboarding.png)
 
-Onboarding flow where learners select a persona, define a learning goal, and optionally upload a resume.
+Onboarding flow where learners select a learning persona (maps to FSLSM dimensions), define a learning goal, and optionally upload a resume.
 
 ### 3. Skill Gap Identification
 
-| Verified Content Context | Resume-Aware Skill Gap |
+![Skill gap analysis](assets/Beta/2A%20-%20Skill%20Gap.png)
+
+Skill gap analysis grounded in verified course materials and the learner's stated background.
+
+| Verified Content Context | Bias Audit |
 |---|---|
-| ![Skill gap with verified content](resources/MVP/3a.%20Skill%20Gap%20-%20Verified%20Content.png) | ![Skill gap adjusted with resume](resources/MVP/3b.%20Skill%20Gap%20-%20with%20Resume.png) |
+| ![Skill gap with verified content](assets/Beta/2C%20-%20Skill%20Gap%20%28Verified%20Content%29.png) | ![Skill gap bias audit](assets/Beta/2B%20-%20Skill%20Gap%20%28Bias%29.png) |
 
-Left: skill gap analysis grounded in verified course materials, demonstrating accurate context retrieval.  
-Right: skill gap output after resume ingestion, showing automatic recalibration of inferred proficiency.
-
-![Skill gap bias audit](resources/MVP/3c.%20Skill%20Gap%20-%20Bias.png)
-
-Bias-auditor view flagging potentially biased assumptions in skill gap analysis.
+Left: skill gap output grounded in indexed course materials via RAG.
+Right: `BiasAuditor` output flagging potentially biased assumptions in the skill gap analysis.
 
 ### 4. Learning Path Personalization (FSLSM)
 
-| Visual-Leaning Persona | Verbal-Leaning Persona |
+| Active-Sensing-Visual-Sequential Persona | Reflective-Intuitive-Verbal-Global Persona |
 |---|---|
-| ![Learning path visual persona](resources/MVP/4a.%20Learning%20Path%20Page%20-%20Visual.png) | ![Learning path verbal persona](resources/MVP/4b.%20Learning%20Path%20-%20Verbal.png) |
+| ![Learning path visual persona](assets/Beta/3A%20-%20Learning%20Path%20%28Active-Sensing-Visual-Sequential%29.png) | ![Learning path verbal persona](assets/Beta/3B%20-%20Learning%20Path%20%28Reflective-Intuitive-Verbal-Global%29.png) |
 
-Left: learning path page for a visual-leaning persona, emphasizing visual structure and cues.  
-Right: learning path page for a verbal-leaning persona, emphasizing text-forward guidance.
+Learning paths personalized by FSLSM profile. Session sequencing and scope are adapted to the learner's cognitive style and SOLO level.
 
-### 5. Content Delivery Personalization
+### 5. Learning Session and Content Delivery
 
-| Visual Persona Content | Verbal Persona Content |
-|---|---|
-| ![Visual content delivery](resources/MVP/5a.%20Content%20-%20Visual.png) | ![Verbal content delivery](resources/MVP/5b.%20Content%20-%20Verbal.png) |
+![Learning session visual persona](assets/Beta/4A.I%20-%20Learning%20Session%20%28Active-Sensing-Visual-Sequential%29.png)
 
-Left: content delivery for a visual persona, with stronger visual organization and representation.  
-Right: content delivery for a verbal persona, prioritizing narrative and text-based explanation.
+![Learning session verbal](assets/Beta/4B.I%20-%20Learning%20Session%20%28Reflective-Intuitive-Verbal-Global%29.png)
+
+Content delivery for a verbal/reflective persona, prioritizing narrative explanation and sequential structure.
+
+![Plan quality](assets/Beta/4C%20-%20Plan%20Quality.png)
+
+Plan quality reflexion output: the agentic scheduler evaluates and refines the learning path via embedded plan feedback simulation before presenting it to the learner.
 
 ### 6. Adaptive Quizzes and SOLO-based Assessment
 
 | Beginner-Level Quiz | Intermediate-Level Quiz |
 |---|---|
-| ![Beginner quiz](resources/MVP/6a.%20Quiz%20beginner.png) | ![Intermediate quiz](resources/MVP/6b.%20Quiz%20-%20intermediate.png) |
+| ![Beginner quiz](assets/Beta/5A%20-%20Quiz%20%28Beginner%29.png) | ![Intermediate quiz](assets/Beta/5B%20-%20Quiz%20%28Intermediate%29.png) |
 
-Left: quiz set for beginner-level proficiency, focused on foundational difficulty.  
-Right: quiz set for intermediate-level proficiency, with higher conceptual depth.
+Left: quiz calibrated for foundational (pre-structural/uni-structural) SOLO level.
+Right: quiz calibrated for intermediate (multi-structural/relational) SOLO level.
 
-![SOLO-based open-ended assessment](resources/MVP/6c.%20Quiz%20-%20Assessment%20using%20SOLO.png)
+![SOLO-based open-ended assessment](assets/Beta/5C.%20Quiz%20-%20Assessment%20using%20SOLO.png)
 
-Open-ended response assessment using an LLM grader aligned with SOLO taxonomy rubrics.
+Open-ended response assessment graded by an LLM judge aligned with SOLO taxonomy rubrics.
 
-### 7. Learner Profile Views
+### 7. Ami Chatbot Tutor
 
-| Cognitive Status | Learning Preference and Behavior |
+![Ami chatbot](assets/Beta/6%20-%20Chatbot.png)
+
+Conversational tutor ("Ami") with request-time tool assembly: session content retrieval, verified-content RAG, web search, media search, and signal-gated FSLSM preference updates.
+
+### 8. Learner Profile
+
+| Learner Information and Cognitive Status | Learning Preferences and Patterns |
 |---|---|
-| ![Learner profile cognitive status](resources/MVP/7a.%20Learner%20Profile%20-%20Cognitive%20Status.png) | ![Learner profile preferences and behavior](resources/MVP/7b.%20Learner%20Profile%20-%20Learning%20PReference%20and%20Behavior.png) |
+| ![Learner profile info and cognitive status](assets/Beta/7%20-%20Learner%20Profile%20%28Learner%20Information%20and%20Cognitive%20Status%29.png) | ![Learner profile preferences and patterns](assets/Beta/7B%20-%20Learner%20Profile%20%28Preferences%20and%20Patterns%29.png) |
 
-Left: learner profile view summarizing current cognitive status indicators.  
-Right: learner profile view summarizing learning preferences and behavioral signals.
+Left: current cognitive status (SOLO level) and learner background.
+Right: FSLSM learning style dimensions and behavioral signals accumulated from sessions.
 
-![Learner profile with resume](resources/MVP/7c.%20Learner%20Profile%20-%20Resume.png)
+### 9. Edit Profile
 
-Profile enrichment after resume upload, showing additional inferred background attributes.
+| FSLSM Edit | Learner Information Edit |
+|---|---|
+| ![Edit FSLSM profile](assets/Beta/8A%20-%20Edit%20Profile%20%28FSLSM%29.png) | ![Edit learner information](assets/Beta/8B%20-%20Edit%20Profile%20%28Learner%20Information%29.png) |
 
-### 8. Goal Management
+FSLSM dimension updates and personal/background information updates are separated into distinct edit flows to prevent unintended cross-field changes.
 
-![Goal management page](resources/MVP/8a.%20Goal%20Management%20Page.png)
+### 10. Goal Management
+
+![Goal management page](assets/Beta/9%20-%20Goal%20Management.png)
 
 Goal Management page for creating, selecting, and switching among multiple learning goals.
 
-### 9. Learning Analytics
+### 11. Learning Analytics
 
-![Learning analytics page](resources/MVP/9.%20Learning%20Analytics.png)
+![Learning analytics dashboard](assets/Beta/10%20-%20Analytics%20Dashboard.png)
 
 Learning Analytics dashboard showing progress, performance, and engagement metrics over time.
 

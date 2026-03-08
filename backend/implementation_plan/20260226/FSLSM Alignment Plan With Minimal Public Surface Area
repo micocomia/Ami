@@ -1,0 +1,134 @@
+# Revised Plan: Backend-First Strong Alignment, Minimal Exposure
+
+## Summary
+
+Implement stronger `processing` and `perception` alignment in the backend using a richer internal adaptation contract. Expose only the subset of metadata that is actually needed by the frontend `view_model` or other user-facing rendering.
+
+## Core Decision
+
+### Internal metadata
+Use richer adaptation metadata internally in the backend to improve personalization.
+
+### Public metadata
+Expose richer metadata only if it is consumed by:
+- `view_model`
+- session display rendering
+- another concrete frontend/UI requirement
+
+Do not expose metadata just because it exists.
+
+## Internal Adaptation Contract
+
+Add a backend-only normalized contract derived before exploration and drafting.
+
+Suggested internal shape:
+```json
+{
+  "processing": {
+    "mode": "active",
+    "intensity": "mild",
+    "checkpoint_frequency": "single",
+    "reflection_level": "none"
+  },
+  "perception": {
+    "mode": "application_first",
+    "intensity": "strong",
+    "conceptual_leap_allowance": "low",
+    "section_order": ["application", "example", "theory"]
+  }
+}
+```
+
+Purpose:
+- explorer uses it to order and choose knowledge points
+- drafter uses it to structure sections
+- integrator/renderer uses it to preserve final teaching order
+
+This contract is backend-only unless a concrete frontend need appears.
+
+## Required Backend Changes
+
+### 1. Normalize adaptation before exploration
+Build the internal adaptation contract from:
+- scheduled session fields first
+- raw FSLSM values second, only to recover strength where needed
+
+### 2. Explorer prompt
+Use the internal contract to:
+- choose knowledge points appropriate for active vs reflective processing
+- order them according to perception style
+- preserve meaningful output order
+
+### 3. Drafter prompt
+Use the internal contract to:
+- distinguish single vs multiple checkpoints
+- distinguish brief vs extended reflection
+- enforce application-first vs theory-first section openings
+
+### 4. Final document assembly
+Fix the renderer so the final document preserves the intended pedagogical order.
+
+This means:
+- stop rebuilding the body purely from `knowledge_points` grouped by type
+- use the integrated `content` as the canonical document body
+- preserve stable `##` headings so `view_model` generation still works
+
+### 5. Eval/test parity
+Update duplicated assembly logic in evals/tests so production and evaluation follow the same ordering rules.
+
+## Public API / Frontend Exposure Rules
+
+### Keep existing fields
+Retain:
+- `has_checkpoint_challenges`
+- `thinking_time_buffer_minutes`
+- `session_sequence_hint`
+- `navigation_mode`
+- existing learning-content fields
+- existing `view_model`
+
+### Expose nothing else by default
+Do not expose the full internal adaptation contract unless it has a direct rendering use.
+
+### Allow targeted exposure when needed
+If React needs explicit pedagogy information, expose only the minimum display-ready output, preferably through `view_model`, not raw adaptation state.
+
+Example of acceptable exposure:
+```json
+"view_model": {
+  "display_hints": {
+    "badges": ["Application-first", "Multiple checkpoints"]
+  }
+}
+```
+
+This is acceptable because it directly supports rendering and avoids frontend logic.
+
+Example of unnecessary exposure:
+```json
+"adaptation": {
+  "processing_intensity_score": 0.73
+}
+```
+
+This is not acceptable unless the frontend actually uses it.
+
+## Final Product Principle
+
+The backend should own:
+- pedagogical interpretation
+- adaptation strength handling
+- document ordering
+- render-ready hints when needed
+
+The frontend should mostly render:
+- session fields
+- document
+- `view_model`
+
+## Assumptions
+
+- Stronger personalization is desirable.
+- Backend-only rich metadata is fine even if never exposed.
+- Exposed metadata is justified only when it directly improves rendering or user-facing explanation.
+- The biggest implementation bug remains the current renderer overriding pedagogical ordering.

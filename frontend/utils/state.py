@@ -1,97 +1,29 @@
-import time
 import streamlit as st
-from collections import defaultdict
 import config
 
-PERSIST_KEYS = [
-    "if_complete_onboarding",
-    "sample_number",
-    "logged_in",
-    "show_chatbot",
-    "llm_type",
-    "tutor_messages",
-    "goals",
-    "learner_information",
-    "learner_information_pdf",
-    "learner_information_text",
-    "learner_persona",
-    "if_refining_learning_goal",
-    "if_rescheduling_learning_path",
-    "if_updating_learner_profile",
-    "selected_goal_id",
-    "selected_session_id",
-    "selected_point_id",
-    "to_add_goal",
-    "learned_skills_history",
-    "userId",
-    "document_caches",
-    "session_learning_times",
-    "path_feedback_cache",
-    "if_simulating_feedback",
-    "if_refining_path",
-    "quiz_answers",
-    "mastery_status",
-]
-
-# Minimum interval between HTTP saves (seconds)
-_SAVE_DEBOUNCE_SECS = 1.0
-
-
 def load_persistent_state():
-    """Load persisted keys from the backend into st.session_state."""
-    from utils.request_api import get_user_state as _api_get
+    """Load backend-backed goals into local session state."""
+    from utils.request_api import list_goals
 
-    user_id = st.session_state.get("userId", "default")
-    backend_ep = st.session_state.get("backend_endpoint", config.backend_endpoint)
-    status, data = _api_get(backend_ep, user_id)
-    if status != 200:
+    user_id = st.session_state.get("userId")
+    if not user_id or user_id == "default":
         return False
-    state = data.get("state", {})
-    for k, v in state.items():
-        if k in PERSIST_KEYS:
-            st.session_state[k] = v
+    goals = list_goals(user_id)
+    st.session_state["goals"] = goals or []
+    st.session_state["if_complete_onboarding"] = bool(st.session_state["goals"])
+    if st.session_state["goals"] and st.session_state.get("selected_goal_id") is None:
+        st.session_state["selected_goal_id"] = st.session_state["goals"][0]["id"]
     return True
 
 
 def save_persistent_state():
-    """Save whitelisted st.session_state keys to the backend.
-
-    Debounced: at most one HTTP PUT per ``_SAVE_DEBOUNCE_SECS`` seconds.
-    The caller never needs to know whether the write was debounced away —
-    the final save at the end of each Streamlit rerun will always go through
-    because enough time will have elapsed (or because a new rerun starts).
-    """
-    from utils.request_api import save_user_state as _api_put
-
-    now = time.time()
-    last = st.session_state.get("_last_save_ts", 0.0)
-    if now - last < _SAVE_DEBOUNCE_SECS:
-        return True  # debounced — skip
-
-    user_id = st.session_state.get("userId", "default")
-    backend_ep = st.session_state.get("backend_endpoint", config.backend_endpoint)
-    payload = {}
-    for k in PERSIST_KEYS:
-        if k in st.session_state:
-            try:
-                payload[k] = st.session_state[k]
-            except Exception:
-                pass
-    status, _resp = _api_put(backend_ep, user_id, payload)
-    if status == 200:
-        st.session_state["_last_save_ts"] = now
-        return True
-    return False
+    """Compatibility no-op; domain state is now persisted via explicit endpoints."""
+    return True
 
 
 def delete_persistent_state():
-    """Delete the user's persisted state on the backend."""
-    from utils.request_api import delete_user_state as _api_del
-
-    user_id = st.session_state.get("userId", "default")
-    backend_ep = st.session_state.get("backend_endpoint", config.backend_endpoint)
-    status, _resp = _api_del(backend_ep, user_id)
-    return status == 200
+    """Compatibility no-op after /user-state removal."""
+    return True
 
 
 def initialize_session_state():
@@ -101,21 +33,35 @@ def initialize_session_state():
 
     if "backend_endpoint" not in st.session_state:
         st.session_state["backend_endpoint"] = config.backend_endpoint
+    if "backend_public_endpoint" not in st.session_state:
+        st.session_state["backend_public_endpoint"] = config.backend_public_endpoint
 
     if "available_models" not in st.session_state:
-        from utils.request_api import get_available_models, get_app_config
-        models = get_available_models(config.backend_endpoint)
-        if models:
-            st.session_state["available_models"] = [f"{m.get('model_provider', '')}/{m.get('model_name', '')}" for m in models]
-        else:
-            cfg = get_app_config()
-            st.session_state["available_models"] = [cfg["default_llm_type"]]
+        from utils.request_api import check_backend, get_app_config
+        cfg = check_backend(st.session_state["backend_endpoint"]) or get_app_config()
+        st.session_state["available_models"] = [cfg["default_llm_type"]] if cfg else ["openai/gpt-4o"]
 
     if "llm_type" not in st.session_state:
         if len(st.session_state["available_models"]) > 0:
             st.session_state["llm_type"] = st.session_state["available_models"][0]
         else:
             st.session_state["llm_type"] = "None"
+    else:
+        # Safety: if restored/persisted llm_type is no longer available, fall back.
+        llm_type = st.session_state.get("llm_type")
+        available_models = st.session_state.get("available_models", [])
+        if (
+            isinstance(llm_type, str)
+            and isinstance(available_models, list)
+            and available_models
+            and llm_type not in available_models
+        ):
+            st.session_state["llm_type"] = available_models[0]
+        elif not isinstance(llm_type, str) or not llm_type.strip():
+            if isinstance(available_models, list) and available_models:
+                st.session_state["llm_type"] = available_models[0]
+            else:
+                st.session_state["llm_type"] = "None"
 
     if "userId" not in st.session_state:
         st.session_state["userId"] = "TestUser"
@@ -144,18 +90,12 @@ def initialize_session_state():
     if "document_caches" not in st.session_state:
         st.session_state["document_caches"] = {}
 
-    if "session_learning_times" not in st.session_state:
-        st.session_state["session_learning_times"] = {}
-
     for key in ["learner_information", "learner_information_pdf", "learner_information_text", "learner_persona"]:
         if key not in st.session_state:
             st.session_state[key] = ""
 
     if "if_refining_learning_goal" not in st.session_state:
         st.session_state["if_refining_learning_goal"] = False
-
-    if "if_rescheduling_learning_path" not in st.session_state:
-        st.session_state["if_rescheduling_learning_path"] = False
 
     if "if_updating_learner_profile" not in st.session_state:
         st.session_state["if_updating_learner_profile"] = False
@@ -174,23 +114,68 @@ def initialize_session_state():
     if "to_add_goal" not in st.session_state:
         reset_to_add_goal()
 
-    if 'learned_skills_history' not in st.session_state:
-        st.session_state['learned_skills_history'] = {}
-
     if "quiz_answers" not in st.session_state:
         st.session_state["quiz_answers"] = {}
     if "mastery_status" not in st.session_state:
         st.session_state["mastery_status"] = {}
 
-    # Only load from the backend once per session.  Subsequent reruns keep
-    # the in-memory session_state as the source of truth; periodic
-    # save_persistent_state() calls flush it back to the backend.
     if "_state_loaded" not in st.session_state:
         try:
             load_persistent_state()
         except Exception:
             pass
         st.session_state["_state_loaded"] = True
+
+    selected_changed = normalize_selected_goal_id()
+    if selected_changed:
+        try:
+            save_persistent_state()
+        except Exception:
+            pass
+
+def clear_user_state():
+    """Clear all persisted user state from the current session.
+
+    Called on logout and before switching users so that no data leaks
+    between accounts. After this, initialize_session_state() will
+    re-initialize keys to their defaults and load_persistent_state()
+    will pull fresh data for the new user.
+    """
+    for k in [
+        "if_complete_onboarding",
+        "sample_number",
+        "logged_in",
+        "show_chatbot",
+        "llm_type",
+        "tutor_messages",
+        "goals",
+        "learner_information",
+        "learner_information_pdf",
+        "learner_information_text",
+        "learner_persona",
+        "if_refining_learning_goal",
+        "if_updating_learner_profile",
+        "selected_goal_id",
+        "selected_session_id",
+        "selected_point_id",
+        "to_add_goal",
+        "userId",
+        "document_caches",
+        "path_feedback_cache",
+        "if_simulating_feedback",
+        "if_refining_path",
+        "quiz_answers",
+        "mastery_status",
+    ]:
+        st.session_state.pop(k, None)
+    # Clear ancillary keys not in PERSIST_KEYS
+    for k in ["_state_loaded", "_last_save_ts", "auth_token", "_navigated_lp_once"]:
+        st.session_state.pop(k, None)
+    # Clear dynamic per-goal keys that aren't in the static list above
+    for k in list(st.session_state.keys()):
+        if k.startswith("learning_path_schedule_attempted_") or k.startswith("auto_adapt_inflight_") or k.startswith("goal_runtime_state_"):
+            st.session_state.pop(k, None)
+
 
 def get_new_goal_uid():
     return max(goal["id"] for goal in st.session_state.goals) + 1 if st.session_state.goals else 0
@@ -200,6 +185,8 @@ def reset_to_add_goal():
         "learning_goal": "",
         "skill_gaps": [],
         "goal_assessment": None,
+        "goal_context": {},
+        "retrieved_sources": [],
         "learner_profile": {},
         "learning_path": [],
         "is_completed": False,
@@ -209,19 +196,88 @@ def reset_to_add_goal():
 
 
 def index_goal_by_id(goal_id):
-    goal_id_list = [goal["id"] for goal in st.session_state["goals"]]
-    try:
-        return goal_id_list.index(goal_id)
-    except ValueError:
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list):
         return None
+    for idx, goal in enumerate(goals):
+        if not isinstance(goal, dict):
+            continue
+        gid = goal.get("id")
+        if gid == goal_id or str(gid) == str(goal_id):
+            return idx
+    return None
+
+
+def get_goal_by_id(goal_id):
+    idx = index_goal_by_id(goal_id)
+    if idx is None:
+        return None
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list) or idx >= len(goals):
+        return None
+    goal = goals[idx]
+    return goal if isinstance(goal, dict) else None
+
+
+def get_selected_goal():
+    return get_goal_by_id(st.session_state.get("selected_goal_id"))
+
+
+def normalize_selected_goal_id():
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list) or not goals:
+        return False
+
+    selected = st.session_state.get("selected_goal_id")
+    if get_goal_by_id(selected) is not None:
+        return False
+
+    normalized = None
+    if isinstance(selected, int) and 0 <= selected < len(goals):
+        maybe = goals[selected]
+        if isinstance(maybe, dict):
+            normalized = maybe.get("id")
+    else:
+        try:
+            selected_int = int(selected)
+            if 0 <= selected_int < len(goals):
+                maybe = goals[selected_int]
+                if isinstance(maybe, dict):
+                    normalized = maybe.get("id")
+        except Exception:
+            pass
+
+    if normalized is None:
+        for goal in goals:
+            if isinstance(goal, dict) and not goal.get("is_deleted"):
+                normalized = goal.get("id")
+                break
+    if normalized is None:
+        for goal in goals:
+            if isinstance(goal, dict):
+                normalized = goal.get("id")
+                break
+    if normalized is None:
+        return False
+
+    if st.session_state.get("selected_goal_id") != normalized:
+        st.session_state["selected_goal_id"] = normalized
+        return True
+    return False
 
 def change_selected_goal_id(new_goal_id):
+    goals = st.session_state.get("goals", [])
+    if not isinstance(goals, list):
+        return
+    goal_id_idx = index_goal_by_id(new_goal_id)
+    if goal_id_idx is None:
+        normalize_selected_goal_id()
+        return
+
     if new_goal_id == st.session_state["selected_goal_id"]:
         return
-    goals = st.session_state["goals"]
+
     st.session_state["selected_goal_id"] = new_goal_id
-    goal_id_list = [goal["id"] for goal in goals]
-    goal_id_idx = goal_id_list.index(new_goal_id)
     st.session_state["learning_goal"] = goals[goal_id_idx]["learning_goal"]
     st.session_state["learner_profile"] = goals[goal_id_idx]["learner_profile"]
     st.session_state["skill_gaps"] = goals[goal_id_idx]["skill_gaps"]
@@ -242,19 +298,24 @@ def change_selected_goal_id(new_goal_id):
             st.session_state["learner_profile"] = merged
     # Update ready flag AFTER sync (reflects backend-fetched profile)
     st.session_state["is_learner_profile_ready"] = True if st.session_state["learner_profile"] else False
-    # persist change
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
 
 def get_existing_goal_id_list():
     return [goal["id"] for goal in st.session_state["goals"]]
 
 def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_profile={}, learning_path=[], is_completed=False, is_deleted=False, **_kwargs):
-    goal_uid = get_new_goal_uid()
+    try:
+        from utils.request_api import create_goal, sync_profile
+    except ModuleNotFoundError:
+        create_goal = None
+        sync_profile = None
+    passthrough_keys = (
+        "goal_context",
+        "retrieved_sources",
+        "bias_audit",
+        "profile_fairness",
+        "_last_identified_goal",
+    )
     goal_info = {
-        "id": goal_uid,
         "learning_goal": learning_goal,
         "skill_gaps": skill_gaps,
         "goal_assessment": goal_assessment,
@@ -263,15 +324,21 @@ def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_
         "is_completed": is_completed,
         "is_deleted": is_deleted
     }
-    st.session_state.goals.append(goal_info)
-    goal_idx = index_goal_by_id(goal_uid)
+    for key in passthrough_keys:
+        if key in _kwargs:
+            goal_info[key] = _kwargs[key]
+    user_id = st.session_state.get("userId")
+    created = create_goal(user_id, goal_info) if callable(create_goal) and user_id else None
+    if created and user_id and callable(sync_profile):
+        merged = sync_profile(user_id, created["id"])
+        if merged:
+            created["learner_profile"] = merged
+    if not created:
+        goal_uid = get_new_goal_uid()
+        created = {"id": goal_uid, **goal_info}
+    st.session_state.goals.append(created)
     reset_to_add_goal()
-    # persist after adding a goal
-    try:
-        save_persistent_state()
-    except Exception:
-        pass
-    return goal_idx
+    return created["id"]
 
 _PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
 
@@ -288,81 +355,21 @@ def propagate_profile_fields_to_other_goals(
     sync_preferences: bool = False,
     sync_mastered_skills: bool = False,
 ):
-    """Push learning_preferences and/or mastered_skills from one goal's profile to all others.
+    """Push profile fields from source_goal to all other goals via the backend.
 
-    Call this after updating a goal's profile so that changes are immediately reflected
-    in all other goals without waiting for the next goal-switch sync.
+    When sync_preferences is True, the backend copies the source goal's
+    learning_preferences (including FSLSM dimensions) and behavioral_patterns
+    to every other goal the user has, keeping them in sync after an FSLSM edit.
     """
-    from utils.request_api import save_learner_profile
-
-    goals = st.session_state.get("goals", [])
-    source_idx = index_goal_by_id(source_goal_id)
-    if source_idx is None:
-        return
-
-    source_profile = goals[source_idx].get("learner_profile") or {}
-    user_id = st.session_state.get("userId")
-
-    for goal in goals:
-        if goal["id"] == source_goal_id:
-            continue
-        target_profile = goal.get("learner_profile")
-        if not target_profile:
-            continue
-
-        changed = False
-
-        if sync_preferences:
-            new_prefs = source_profile.get("learning_preferences")
-            if new_prefs:
-                target_profile["learning_preferences"] = new_prefs
-                changed = True
-            # learner_information is shared across all goals — always propagate it
-            # so the text description stays in sync with FSLSM vectors and mastery
-            new_learner_info = source_profile.get("learner_information", "")
-            if new_learner_info:
-                target_profile["learner_information"] = new_learner_info
-                changed = True
-
-        if sync_mastered_skills:
-            # learner_information is shared — propagate it when cognitive status changes too
-            new_learner_info = source_profile.get("learner_information", "")
-            if new_learner_info and not sync_preferences:  # avoid double-write if both flags set
-                target_profile["learner_information"] = new_learner_info
-                changed = True
-            source_mastered = source_profile.get("cognitive_status", {}).get("mastered_skills", [])
-            if source_mastered:
-                target_cs = target_profile.setdefault("cognitive_status", {})
-                target_mastered = target_cs.get("mastered_skills", [])
-                merged = {s["name"]: s for s in target_mastered if s.get("name")}
-                for skill in source_mastered:
-                    name = skill.get("name")
-                    if not name:
-                        continue
-                    existing = merged.get(name)
-                    if existing is None:
-                        merged[name] = skill
-                    else:
-                        existing_idx = _proficiency_idx(existing.get("proficiency_level", "unlearned"))
-                        new_idx = _proficiency_idx(skill.get("proficiency_level", "unlearned"))
-                        if new_idx > existing_idx:
-                            merged[name] = skill
-                target_cs["mastered_skills"] = list(merged.values())
-                # Remove newly mastered skills from in_progress_skills to keep state consistent
-                mastered_names = set(merged.keys())
-                in_progress = target_cs.get("in_progress_skills", [])
-                target_cs["in_progress_skills"] = [
-                    s for s in in_progress if s.get("name") not in mastered_names
-                ]
-                changed = True
-
-        if changed:
-            goal["learner_profile"] = target_profile
-            if user_id:
-                try:
-                    save_learner_profile(user_id, goal["id"], target_profile)
-                except Exception:
-                    pass
+    if sync_preferences:
+        user_id = st.session_state.get("userId")
+        if user_id and source_goal_id is not None:
+            from utils.request_api import propagate_learner_profile_to_other_goals
+            propagate_learner_profile_to_other_goals(user_id, source_goal_id)
+    try:
+        load_persistent_state()
+    except Exception:
+        pass
 
 
 def get_current_knowledge_point_uid():

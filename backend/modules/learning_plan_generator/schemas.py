@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field, field_validator
+
+MIN_LEARNING_PATH_SESSIONS = 1
+MAX_LEARNING_PATH_SESSIONS = 20
 
 
 class Proficiency(str, Enum):
@@ -36,6 +39,10 @@ class SessionItem(BaseModel):
     thinking_time_buffer_minutes: int = Field(0, ge=0, description="Reflective learners: recommended buffer time before next session")
     session_sequence_hint: Optional[str] = Field(None, description="Perception hint: 'application-first' or 'theory-first'")
     navigation_mode: str = Field("linear", description="'linear' (sequential) or 'free' (global)")
+    input_mode_hint: Literal["visual", "verbal", "mixed"] = Field(
+        "mixed",
+        description="Input modality hint inferred from FSLSM input dimension.",
+    )
 
     @field_validator("associated_skills")
     @classmethod
@@ -56,6 +63,68 @@ class LearningPath(BaseModel):
     @field_validator("learning_path")
     @classmethod
     def limit_sessions(cls, v: List[SessionItem]) -> List[SessionItem]:
-        if not (1 <= len(v) <= 10):
-            raise ValueError("Learning path must contain between 1 and 10 sessions.")
+        if not (MIN_LEARNING_PATH_SESSIONS <= len(v) <= MAX_LEARNING_PATH_SESSIONS):
+            raise ValueError(
+                f"Learning path must contain between {MIN_LEARNING_PATH_SESSIONS} "
+                f"and {MAX_LEARNING_PATH_SESSIONS} sessions."
+            )
         return v
+
+
+# ---------------------------------------------------------------------------
+# Plan feedback schemas (used by LearningPlanFeedbackSimulator)
+# ---------------------------------------------------------------------------
+
+class PlanFeedbackDimensions(BaseModel):
+    progression: str = ""   # default empty; always overwritten by deterministic audit
+    engagement: str
+    personalization: str
+
+
+class LearnerPlanFeedback(BaseModel):
+    feedback: PlanFeedbackDimensions
+    suggestions: PlanFeedbackDimensions
+    is_acceptable: bool = Field(default=True)
+    issues: List[str] = Field(default_factory=list)
+    improvement_directives: str = Field(default="")
+
+    @field_validator("improvement_directives", mode="before")
+    @classmethod
+    def coerce_improvement_directives(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            parts = [str(item).strip() for item in value if str(item).strip()]
+            return "\n".join(parts)
+        return str(value).strip()
+
+
+class LLMQualityOutput(BaseModel):
+    """Internal schema: LLM assesses ONLY engagement and personalization."""
+    feedback: PlanFeedbackDimensions
+    suggestions: PlanFeedbackDimensions
+    quality_issues: List[str] = Field(default_factory=list)
+    quality_directives: str = Field(default="")
+
+    @field_validator("quality_directives", mode="before")
+    @classmethod
+    def coerce_quality_directives(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return "\n".join(str(item).strip() for item in value if str(item).strip())
+        return str(value).strip()
+
+
+# ---------------------------------------------------------------------------
+# Ground-truth profile schemas (used by GroundTruthProfileCreator)
+# ---------------------------------------------------------------------------
+
+class GroundTruthProfileResult(BaseModel):
+    """Schema for ground-truth profile generation/progression output."""
+    learner_profile: Dict[str, Any]
+
+
+def parse_ground_truth_profile_result(data: Any) -> GroundTruthProfileResult:
+    """Validate LLM output of ground-truth profile creation/progression."""
+    return GroundTruthProfileResult.model_validate(data)

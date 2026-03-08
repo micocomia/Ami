@@ -1,5 +1,5 @@
 :root {
-    --primary: #007bff;
+    --primary: #51C8DD;
     --secondary: #6c757d;
     --success: #28a745;
     --info: #17a2b8;
@@ -14,7 +14,7 @@
 
 
 h1, h2, h3, h4, h5, h6 {
-    color: #007bff !important;
+    color: #51C8DD !important;
 }
 
 

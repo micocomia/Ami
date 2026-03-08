@@ -13,11 +13,15 @@ frontend/assets/validation_dataset
 frontend/.env
 backend/.env
 backend/data/
+data/
 .env
 
 pids/
 .DS_Store
 frontend/config.py
+
+# Local diagrams
+docs/diagrams/
 
 # IDE and tooling
 .idea/

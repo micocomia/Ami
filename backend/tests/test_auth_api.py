@@ -29,10 +29,16 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_DATA_DIR", data_dir)
     monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
     monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_USER_STATES_PATH", data_dir / "user_states.json")
+    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
+    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
+    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
+    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
     monkeypatch.setattr(store, "_profiles", {})
     monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_user_states", {})
+    monkeypatch.setattr(store, "_goals", {})
+    monkeypatch.setattr(store, "_learning_content_cache", {})
+    monkeypatch.setattr(store, "_session_activity", {})
+    monkeypatch.setattr(store, "_mastery_history", {})
 
 
 @pytest.fixture(autouse=True)
@@ -57,13 +63,13 @@ def client():
 
 def _register(client, username="testuser", password="secret123"):
     """Register a user and return (status_code, response_json)."""
-    resp = client.post("/auth/register", json={"username": username, "password": password})
+    resp = client.post("/v1/auth/register", json={"username": username, "password": password})
     return resp.status_code, resp.json()
 
 
 def _login(client, username="testuser", password="secret123"):
     """Login a user and return (status_code, response_json)."""
-    resp = client.post("/auth/login", json={"username": username, "password": password})
+    resp = client.post("/v1/auth/login", json={"username": username, "password": password})
     return resp.status_code, resp.json()
 
 
@@ -84,12 +90,12 @@ class TestRegisterEndpoint:
         assert username == "alice"
 
     def test_register_short_username_rejected(self, client):
-        resp = client.post("/auth/register", json={"username": "ab", "password": "password123"})
+        resp = client.post("/v1/auth/register", json={"username": "ab", "password": "password123"})
         assert resp.status_code == 400
         assert "3 characters" in resp.json()["detail"]
 
     def test_register_short_password_rejected(self, client):
-        resp = client.post("/auth/register", json={"username": "alice", "password": "12345"})
+        resp = client.post("/v1/auth/register", json={"username": "alice", "password": "12345"})
         assert resp.status_code == 400
         assert "6 characters" in resp.json()["detail"]
 
@@ -149,23 +155,23 @@ class TestAuthMeEndpoint:
     def test_auth_me_with_valid_token(self, client):
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
-        resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         assert resp.json()["username"] == "alice"
 
     def test_auth_me_with_invalid_token(self, client):
-        resp = client.get("/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
+        resp = client.get("/v1/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
         assert resp.status_code == 401
 
     def test_auth_me_with_no_token(self, client):
-        resp = client.get("/auth/me")
+        resp = client.get("/v1/auth/me")
         assert resp.status_code == 401
 
     def test_auth_me_after_login(self, client):
         _register(client, "alice", "password123")
         _, login_data = _login(client, "alice", "password123")
         token = login_data["token"]
-        resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         assert resp.json()["username"] == "alice"
 
@@ -178,32 +184,32 @@ class TestDeleteAccountEndpoint:
     def test_delete_account_success(self, client):
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
-        resp = client.delete("/auth/user", headers={"Authorization": f"Bearer {token}"})
+        resp = client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
     def test_delete_account_removes_user_from_auth_store(self, client):
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
-        client.delete("/auth/user", headers={"Authorization": f"Bearer {token}"})
+        client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {token}"})
         assert auth_store.get_user("alice") is None
 
     def test_delete_account_removes_all_user_data(self, client):
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
 
-        # Create some user data (profiles, events, user state)
+        # Create some user data (profiles, events, goals)
         store.upsert_profile("alice", 0, {"goal": "Python"})
         store.upsert_profile("alice", 1, {"goal": "Rust"})
         store.append_event("alice", {"type": "page_view"})
-        store.put_user_state("alice", {"goals": []})
+        store.create_goal("alice", {"learning_goal": "Python"})
 
-        client.delete("/auth/user", headers={"Authorization": f"Bearer {token}"})
+        client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {token}"})
 
         assert store.get_profile("alice", 0) is None
         assert store.get_profile("alice", 1) is None
         assert store.get_events("alice") == []
-        assert store.get_user_state("alice") is None
+        assert store.get_all_goals_for_user("alice") == []
 
     def test_delete_account_preserves_other_users_data(self, client):
         _register(client, "alice", "password123")
@@ -212,27 +218,27 @@ class TestDeleteAccountEndpoint:
 
         store.upsert_profile("alice", 0, {"goal": "Python"})
         store.upsert_profile("bob", 0, {"goal": "Go"})
-        store.put_user_state("bob", {"theme": "dark"})
+        store.create_goal("bob", {"learning_goal": "Go"})
 
-        client.delete("/auth/user", headers={"Authorization": f"Bearer {alice_data['token']}"})
+        client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {alice_data['token']}"})
 
         # Bob's data should be untouched
         assert store.get_profile("bob", 0) == {"goal": "Go"}
-        assert store.get_user_state("bob") == {"theme": "dark"}
+        assert len(store.get_all_goals_for_user("bob")) == 1
         assert auth_store.get_user("bob") is not None
 
     def test_delete_account_with_invalid_token(self, client):
-        resp = client.delete("/auth/user", headers={"Authorization": "Bearer bad.token"})
+        resp = client.delete("/v1/auth/user", headers={"Authorization": "Bearer bad.token"})
         assert resp.status_code == 401
 
     def test_delete_account_with_no_token(self, client):
-        resp = client.delete("/auth/user")
+        resp = client.delete("/v1/auth/user")
         assert resp.status_code == 401
 
     def test_login_fails_after_account_deletion(self, client):
         _, reg_data = _register(client, "alice", "password123")
         token = reg_data["token"]
-        client.delete("/auth/user", headers={"Authorization": f"Bearer {token}"})
+        client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {token}"})
 
         # Login should now fail
         status, _ = _login(client, "alice", "password123")
@@ -257,22 +263,22 @@ class TestFullAuthLifecycle:
         login_token = login_data["token"]
 
         # 3. Verify via /auth/me
-        resp = client.get("/auth/me", headers={"Authorization": f"Bearer {login_token}"})
+        resp = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {login_token}"})
         assert resp.status_code == 200
         assert resp.json()["username"] == "alice"
 
         # 4. Create some user data
         store.upsert_profile("alice", 0, {"goal": "Learn Python"})
-        store.put_user_state("alice", {"if_complete_onboarding": True})
+        store.create_goal("alice", {"learning_goal": "Learn Python"})
 
         # 5. Delete account
-        resp = client.delete("/auth/user", headers={"Authorization": f"Bearer {login_token}"})
+        resp = client.delete("/v1/auth/user", headers={"Authorization": f"Bearer {login_token}"})
         assert resp.status_code == 200
 
         # 6. Verify account is gone
         assert auth_store.get_user("alice") is None
         assert store.get_profile("alice", 0) is None
-        assert store.get_user_state("alice") is None
+        assert store.get_all_goals_for_user("alice") == []
 
         # 7. Login should fail
         status, _ = _login(client, "alice", "password123")

@@ -1,5 +1,5 @@
 :root {
-    --primary: #007bff;
+    --primary: #51C8DD;
     --secondary: #6c757d;
     --success: #28a745;
     --info: #17a2b8;
@@ -14,7 +14,7 @@
 
 
 h1, h2, h3, h4, h5, h6 {
-    color: #007bff !important;
+    color: #51C8DD !important;
 }
 
 section[data-testid='stSidebar'] {
@@ -73,7 +73,7 @@ header[data-testid="stHeader"] {
 
 [data-testid="stSidebarUserContent"] [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdown"] a {
     text-decoration: none; 
-    color: #1a73e8;  
+    color: #51C8DD;  
     transition: color 0.3s ease, box-shadow 0.3s ease;;  
 }
 

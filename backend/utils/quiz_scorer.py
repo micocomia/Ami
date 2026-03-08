@@ -126,6 +126,22 @@ def get_mastery_threshold_for_session(
     return threshold_map.get(level_name, default)
 
 
+def is_strong_success(
+    score_pct: float,
+    threshold: float,
+    margin: float = 10.0,
+    max_score: float = 100.0,
+) -> bool:
+    """Return True if score reflects a strong mastery success.
+
+    Strong success means the learner is mastered and at least ``margin`` above
+    threshold, capped by ``max_score`` so high thresholds still allow a perfect
+    score to count.
+    """
+    target = min(float(max_score), float(threshold) + float(margin))
+    return float(score_pct) >= float(threshold) and float(score_pct) >= target
+
+
 def get_quiz_mix_for_session(
     session: Dict[str, Any],
     quiz_mix_config: Dict[str, Any],

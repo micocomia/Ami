@@ -1,22 +1,16 @@
-"""Tests for FSLSM deterministic post-processing overrides.
-
-Run from the repo root:
-    python -m pytest backend/tests/test_fslsm_overrides.py -v
-"""
+"""Tests for deterministic FSLSM structural overrides."""
 
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 from modules.learning_plan_generator.agents.learning_path_scheduler import (
-    _apply_fslsm_overrides,
+    apply_fslsm_structural_overrides,
 )
 
 
-def _make_profile(processing=0.0, perception=0.0, input_dim=0.0, understanding=0.0):
-    """Helper to create a learner profile dict with given FSLSM dimensions."""
+def _profile(*, processing=0.0, perception=0.0, understanding=0.0, input_dim=0.0):
     return {
         "learning_preferences": {
             "fslsm_dimensions": {
@@ -29,126 +23,83 @@ def _make_profile(processing=0.0, perception=0.0, input_dim=0.0, understanding=0
     }
 
 
-def _make_learning_path(num_sessions=3, proficiency="intermediate"):
-    """Helper to create a learning path dict with N sessions."""
-    sessions = []
-    for i in range(num_sessions):
-        sessions.append({
-            "id": f"Session {i+1}",
-            "title": f"Session {i+1}",
-            "abstract": "Test session",
-            "if_learned": False,
-            "associated_skills": ["Skill A"],
-            "desired_outcome_when_completed": [
-                {"name": "Skill A", "level": proficiency}
-            ],
-        })
-    return {"learning_path": sessions}
+def _session(name: str, *, learned: bool = False, sequence_hint=None):
+    return {
+        "id": name,
+        "title": name,
+        "abstract": f"{name} abstract",
+        "if_learned": learned,
+        "associated_skills": ["Skill A"],
+        "desired_outcome_when_completed": [{"name": "Skill A", "level": "beginner"}],
+        "has_checkpoint_challenges": False,
+        "thinking_time_buffer_minutes": 0,
+        "session_sequence_hint": sequence_hint,
+        "navigation_mode": "linear",
+    }
 
 
-class TestFSLSMOverrides:
+class TestFSLSMStructuralOverrides:
 
-    def test_active_learner_gets_checkpoint_challenges(self):
-        """Active (processing <= -0.7) should set has_checkpoint_challenges=True."""
-        profile = _make_profile(processing=-0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["has_checkpoint_challenges"] is True
+    def test_intuitive_perception_forces_theory_first(self):
+        sessions = [_session("Session 1", sequence_hint="application-first")]
 
-    def test_reflective_learner_gets_thinking_time(self):
-        """Reflective (processing >= 0.7) should set thinking_time_buffer_minutes >= 10."""
-        profile = _make_profile(processing=0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["thinking_time_buffer_minutes"] >= 10
-
-    def test_sensing_gets_application_first(self):
-        """Sensing (perception <= -0.7) should set session_sequence_hint='application-first'."""
-        profile = _make_profile(perception=-0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["session_sequence_hint"] == "application-first"
-
-    def test_intuitive_gets_theory_first(self):
-        """Intuitive (perception >= 0.7) should set session_sequence_hint='theory-first'."""
-        profile = _make_profile(perception=0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["session_sequence_hint"] == "theory-first"
-
-    def test_sequential_gets_linear_nav(self):
-        """Sequential (understanding <= -0.7) should set navigation_mode='linear'."""
-        profile = _make_profile(understanding=-0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["navigation_mode"] == "linear"
-
-    def test_global_gets_free_nav(self):
-        """Global (understanding >= 0.7) should set navigation_mode='free'."""
-        profile = _make_profile(understanding=0.7)
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["navigation_mode"] == "free"
-
-    def test_neutral_gets_defaults(self):
-        """All dimensions at 0 should yield default values."""
-        profile = _make_profile()
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session.get("has_checkpoint_challenges") is not True
-            assert session.get("thinking_time_buffer_minutes", 0) == 0
-            assert session.get("session_sequence_hint") is None
-            assert session["navigation_mode"] == "linear"
-
-    def test_overrides_apply_to_all_sessions(self):
-        """All sessions in the path should be affected, not just the first."""
-        profile = _make_profile(processing=-0.7, understanding=0.7)
-        path = _make_learning_path(num_sessions=5)
-        result = _apply_fslsm_overrides(path, profile)
-        assert len(result["learning_path"]) == 5
-        for session in result["learning_path"]:
-            assert session["has_checkpoint_challenges"] is True
-            assert session["navigation_mode"] == "free"
-
-    def test_mastery_threshold_by_proficiency_beginner(self):
-        """Beginner proficiency session should get 60% threshold."""
-        profile = _make_profile()
-        path = _make_learning_path(proficiency="beginner")
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["mastery_threshold"] == 60
-
-    def test_mastery_threshold_by_proficiency_expert(self):
-        """Expert proficiency session should get 90% threshold."""
-        profile = _make_profile()
-        path = _make_learning_path(proficiency="expert")
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["mastery_threshold"] == 90
-
-    def test_empty_profile_uses_defaults(self):
-        """Empty profile should yield default values without errors."""
-        result = _apply_fslsm_overrides(_make_learning_path(), {})
-        for session in result["learning_path"]:
-            assert session["navigation_mode"] == "linear"
-
-    def test_combined_dimensions(self):
-        """Multiple active dimensions should all apply simultaneously."""
-        profile = _make_profile(
-            processing=-0.7,    # active -> checkpoint challenges
-            perception=0.7,     # intuitive -> theory-first
-            understanding=0.7,  # global -> free navigation
+        result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(perception=1.0),
         )
-        path = _make_learning_path()
-        result = _apply_fslsm_overrides(path, profile)
-        for session in result["learning_path"]:
-            assert session["has_checkpoint_challenges"] is True
-            assert session["session_sequence_hint"] == "theory-first"
-            assert session["navigation_mode"] == "free"
+
+        assert result[0]["session_sequence_hint"] == "theory-first"
+
+    def test_balanced_perception_clears_stale_sequence_hint(self):
+        sessions = [_session("Session 1", sequence_hint="application-first")]
+
+        result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(perception=0.0),
+        )
+
+        assert result[0]["session_sequence_hint"] is None
+
+    def test_reschedule_preserves_learned_sessions(self):
+        sessions = [
+            _session("Session 1", learned=True, sequence_hint="application-first"),
+            _session("Session 2", learned=False, sequence_hint="application-first"),
+        ]
+
+        result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(perception=1.0),
+            preserve_learned=True,
+        )
+
+        assert result[0]["session_sequence_hint"] == "application-first"
+        assert result[1]["session_sequence_hint"] == "theory-first"
+
+    def test_processing_and_understanding_fields_are_aligned(self):
+        sessions = [_session("Session 1")]
+
+        result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(processing=0.8, perception=-0.8, understanding=0.6),
+        )
+
+        assert result[0]["has_checkpoint_challenges"] is False
+        assert result[0]["thinking_time_buffer_minutes"] == 10
+        assert result[0]["session_sequence_hint"] == "application-first"
+        assert result[0]["navigation_mode"] == "free"
+        assert result[0]["input_mode_hint"] == "mixed"
+
+    def test_input_mode_hint_visual_and_verbal(self):
+        sessions = [_session("Session 1")]
+
+        visual_result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(input_dim=-0.8),
+        )
+        verbal_result = apply_fslsm_structural_overrides(
+            sessions,
+            _profile(input_dim=0.8),
+        )
+
+        assert visual_result[0]["input_mode_hint"] == "visual"
+        assert verbal_result[0]["input_mode_hint"] == "verbal"

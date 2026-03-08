@@ -1,0 +1,106 @@
+/**
+ * Re-export API types from local api-types.ts
+ */
+export type {
+  BaseRequest,
+  ApiErrorBody,
+  AuthRegisterRequest,
+  AuthLoginRequest,
+  AuthTokenResponse,
+  AuthMeResponse,
+  QuizMix,
+  FslsmDimensionConfig,
+  AppConfig,
+  PersonaInfo,
+  PersonasResponse,
+  // Core domain
+  LearnerProfile,
+  LearningPathSession,
+  AgentMetadata,
+  // Goals
+  GoalAggregate,
+  GoalsListResponse,
+  GoalCreateRequest,
+  GoalUpdateRequest,
+  GoalRuntimeState,
+  GoalRuntimeStateSession,
+  // User state (legacy)
+  UserState,
+  SessionLearningTime,
+  DocumentCache,
+  UserStateResponse,
+  UserStatePutRequest,
+  // Events
+  BehaviorEventRequest,
+  LogEventResponse,
+  GetEventsResponse,
+  // Profile
+  ProfileGetResponse,
+  ProfilePutRequest,
+  SyncProfileResponse,
+  AutoProfileUpdateRequest,
+  AutoProfileUpdateResponse,
+  LearnerProfileResponse,
+  LearningPreferencesUpdateRequest,
+  LearnerInformationUpdateRequest,
+  CognitiveStatusUpdateRequest,
+  // Behavioral metrics
+  BehavioralMetricsResponse,
+  QuizMixResponse,
+  SessionMasteryItem,
+  SessionMasteryStatusResponse,
+  // Dashboard metrics
+  DashboardMetricsResponse,
+  // Mastery
+  QuizAnswersPayload,
+  MasteryEvaluationRequest,
+  ShortAnswerFeedbackItem,
+  OpenEndedFeedbackItem,
+  MasteryEvaluationResponse,
+  // Quiz
+  QuizQuestionBase,
+  DocumentQuiz,
+  // Learning content
+  ContentSection,
+  ContentViewModel,
+  LearningContentResponse,
+  GenerateLearningContentRequest,
+  // Session activity
+  SessionActivityRequest,
+  SessionActivityResponse,
+  CompleteSessionRequest,
+  CompleteSessionResponse,
+  SubmitContentFeedbackRequest,
+  SubmitContentFeedbackResponse,
+  // Goal & skill gap
+  RefineLearningGoalRequest,
+  RefineLearningGoalResponse,
+  SkillGapIdentificationRequest,
+  IdentifySkillGapResponse,
+  BiasAuditRequest,
+  CreateLearnerProfileRequest,
+  CreateLearnerProfileResponse,
+  ValidateProfileFairnessRequest,
+  // Learning path
+  ScheduleLearningPathRequest,
+  ScheduleLearningPathResponse,
+  AgenticLearningPathRequest,
+  ScheduleLearningPathAgenticResponse,
+  AdaptLearningPathRequest,
+  AdaptLearningPathResponse,
+  // Content generation (legacy names)
+  IntegrateLearningDocumentRequest,
+  IntegrateLearningDocumentResponse,
+  GenerateDocumentQuizzesRequest,
+  GenerateDocumentQuizzesResponse,
+  TailorKnowledgeContentRequest,
+  TailorKnowledgeContentResponse,
+  ExploreKnowledgePointsRequest,
+  DraftKnowledgePointsRequest,
+  DraftKnowledgePointsResponse,
+  // Chat
+  ChatWithTutorRequest,
+  ChatWithTutorResponse,
+  // PDF
+  ExtractPdfTextResponse,
+} from './api-types';
