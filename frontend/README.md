@@ -259,6 +259,7 @@ frontend/
   .streamlit/config.toml     # Streamlit defaults (theme/server)
 
   pages/
+    login.py                 # Authentication (sign-in / register)
     onboarding.py            # Persona + goal input; FSLSM profile inferred
     skill_gap.py             # Gap identification and schedule handoff
     goal_management.py       # Goal CRUD and activation
@@ -280,10 +281,11 @@ frontend/
 Ensure backend is running and reachable at `BACKEND_ENDPOINT`, with these endpoint groups available:
 
 - Auth: `/auth/*`
-- Goals/Profile: `/goals/*`, `/profile/*`, `/sync-profile/*`
+- Goals/Profile: `/goals/*`, `/profile/*`, `/sync-profile/*`, `/propagate-profile/*`
 - Learning runtime/content: `/goal-runtime-state/*`, `/learning-content/*`, `/session-activity`, `/complete-session`
 - Generation/planning: `/identify-skill-gap-with-info`, `/schedule-learning-path-agentic`, `/generate-learning-content`, `/chat-with-tutor`
 - Analytics: `/dashboard-metrics/*`, `/behavioral-metrics/*`
+- Events: `/events/log`, `/events/{user_id}`
 
 Backend docs: `http://localhost:8000/docs`
 

@@ -1,6 +1,6 @@
 <div align="center">
   <p align="center">
-    <img src="resources/Logo.png" alt="Ami Logo" width="200"/>
+    <img src="assets/Logo.png" alt="Ami Logo" width="200"/>
   </p> 
    <p><b>Ami: Adaptive Mentoring Intelligence</b></p>
   <p>A cognitive-style adaptive AI tutor — an enhanced fork of GenMentor (WWW 2025)</p>
@@ -86,7 +86,7 @@ Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the 
 
 <div align="center">
   <p align="center">
-    <img src="resources/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
+    <img src="assets/g5-framework.png" alt="System Architecture" width="700" style="box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-radius: 8px;"/>
   </p>
 </div>
 
@@ -194,12 +194,12 @@ BACKEND_PORT=8000 ./scripts/start_all.sh
 
 ```text
 Ami/
-  backend/       # FastAPI backend, modules, configs, tests, docker files
-  frontend/      # Streamlit frontend, pages/components/utils, tests, docker files
-  docs/          # design notes, migration docs, testing guides
-  scripts/       # local dev startup/stop scripts
-  resources/     # architecture diagrams and MVP screenshots
-  data/          # runtime data artifacts (vectorstore db files, user JSON)
+  backend/          # FastAPI backend, modules, configs, tests, evals, docker files; runtime data in backend/data/
+  frontend/         # Streamlit frontend, pages/components/utils, tests, docker files
+  frontend-react/   # React SPA (Beta release, in active development)
+  docs/             # design notes, migration docs, testing guides
+  scripts/          # local dev startup/stop scripts
+  assets/        # architecture diagrams and Beta screenshots
 ```
 
 ## Project Context
@@ -226,25 +226,25 @@ The screenshots below show the current Beta interface and key adaptive behaviors
 
 ### 1. Login
 
-![Login](resources/Beta/0%20-%20Login.png)
+![Login](assets/Beta/0%20-%20Login.png)
 
 Login interface for returning users to authenticate and access personalized learning sessions.
 
 ### 2. Onboarding
 
-![Onboarding](resources/Beta/1%20-%20Onboarding.png)
+![Onboarding](assets/Beta/1%20-%20Onboarding.png)
 
 Onboarding flow where learners select a learning persona (maps to FSLSM dimensions), define a learning goal, and optionally upload a resume.
 
 ### 3. Skill Gap Identification
 
-![Skill gap analysis](resources/Beta/2A%20-%20Skill%20Gap.png)
+![Skill gap analysis](assets/Beta/2A%20-%20Skill%20Gap.png)
 
 Skill gap analysis grounded in verified course materials and the learner's stated background.
 
 | Verified Content Context | Bias Audit |
 |---|---|
-| ![Skill gap with verified content](resources/Beta/2C%20-%20Skill%20Gap%20%28Verified%20Content%29.png) | ![Skill gap bias audit](resources/Beta/2B%20-%20Skill%20Gap%20%28Bias%29.png) |
+| ![Skill gap with verified content](assets/Beta/2C%20-%20Skill%20Gap%20%28Verified%20Content%29.png) | ![Skill gap bias audit](assets/Beta/2B%20-%20Skill%20Gap%20%28Bias%29.png) |
 
 Left: skill gap output grounded in indexed course materials via RAG.
 Right: `BiasAuditor` output flagging potentially biased assumptions in the skill gap analysis.
@@ -253,21 +253,19 @@ Right: `BiasAuditor` output flagging potentially biased assumptions in the skill
 
 | Active-Sensing-Visual-Sequential Persona | Reflective-Intuitive-Verbal-Global Persona |
 |---|---|
-| ![Learning path visual persona](resources/Beta/3A%20-%20Learning%20Path%20%28Active-Sensing-Visual-Sequential%29.png) | ![Learning path verbal persona](resources/Beta/3B%20-%20Learning%20Path%20%28Reflective-Intuitive-Verbal-Global%29.png) |
+| ![Learning path visual persona](assets/Beta/3A%20-%20Learning%20Path%20%28Active-Sensing-Visual-Sequential%29.png) | ![Learning path verbal persona](assets/Beta/3B%20-%20Learning%20Path%20%28Reflective-Intuitive-Verbal-Global%29.png) |
 
 Learning paths personalized by FSLSM profile. Session sequencing and scope are adapted to the learner's cognitive style and SOLO level.
 
 ### 5. Learning Session and Content Delivery
 
-| Visual Persona (Part 1) | Visual Persona (Part 2) |
-|---|---|
-| ![Learning session visual 1](resources/Beta/4A.I%20-%20Learning%20Session%20%28Active-Sensing-Visual-Sequential%29.png) | ![Learning session visual 2](resources/Beta/4A.II%20-%20Learning%20Session%20%28Active-Sensing-Visual-Sequential%29.png) |
+![Learning session visual persona](assets/Beta/4A.I%20-%20Learning%20Session%20%28Active-Sensing-Visual-Sequential%29.png)
 
-![Learning session verbal](resources/Beta/4B.I%20-%20Learning%20Session%20%28Reflective-Intuitive-Verbal-Global%29.png)
+![Learning session verbal](assets/Beta/4B.I%20-%20Learning%20Session%20%28Reflective-Intuitive-Verbal-Global%29.png)
 
 Content delivery for a verbal/reflective persona, prioritizing narrative explanation and sequential structure.
 
-![Plan quality](resources/Beta/4C%20-%20Plan%20Quality.png)
+![Plan quality](assets/Beta/4C%20-%20Plan%20Quality.png)
 
 Plan quality reflexion output: the agentic scheduler evaluates and refines the learning path via embedded plan feedback simulation before presenting it to the learner.
 
@@ -275,18 +273,18 @@ Plan quality reflexion output: the agentic scheduler evaluates and refines the l
 
 | Beginner-Level Quiz | Intermediate-Level Quiz |
 |---|---|
-| ![Beginner quiz](resources/Beta/5A%20-%20Quiz%20%28Beginner%29.png) | ![Intermediate quiz](resources/Beta/5B%20-%20Quiz%20%28Intermediate%29.png) |
+| ![Beginner quiz](assets/Beta/5A%20-%20Quiz%20%28Beginner%29.png) | ![Intermediate quiz](assets/Beta/5B%20-%20Quiz%20%28Intermediate%29.png) |
 
 Left: quiz calibrated for foundational (pre-structural/uni-structural) SOLO level.
 Right: quiz calibrated for intermediate (multi-structural/relational) SOLO level.
 
-![SOLO-based open-ended assessment](resources/Beta/5C.%20Quiz%20-%20Assessment%20using%20SOLO.png)
+![SOLO-based open-ended assessment](assets/Beta/5C.%20Quiz%20-%20Assessment%20using%20SOLO.png)
 
 Open-ended response assessment graded by an LLM judge aligned with SOLO taxonomy rubrics.
 
 ### 7. Ami Chatbot Tutor
 
-![Ami chatbot](resources/Beta/6%20-%20Chatbot.png)
+![Ami chatbot](assets/Beta/6%20-%20Chatbot.png)
 
 Conversational tutor ("Ami") with request-time tool assembly: session content retrieval, verified-content RAG, web search, media search, and signal-gated FSLSM preference updates.
 
@@ -294,7 +292,7 @@ Conversational tutor ("Ami") with request-time tool assembly: session content re
 
 | Learner Information and Cognitive Status | Learning Preferences and Patterns |
 |---|---|
-| ![Learner profile info and cognitive status](resources/Beta/7%20-%20Learner%20Profile%20%28Learner%20Information%20and%20Cognitive%20Status%29.png) | ![Learner profile preferences and patterns](resources/Beta/7B%20-%20Learner%20Profile%20%28Preferences%20and%20Patterns%29.png) |
+| ![Learner profile info and cognitive status](assets/Beta/7%20-%20Learner%20Profile%20%28Learner%20Information%20and%20Cognitive%20Status%29.png) | ![Learner profile preferences and patterns](assets/Beta/7B%20-%20Learner%20Profile%20%28Preferences%20and%20Patterns%29.png) |
 
 Left: current cognitive status (SOLO level) and learner background.
 Right: FSLSM learning style dimensions and behavioral signals accumulated from sessions.
@@ -303,19 +301,19 @@ Right: FSLSM learning style dimensions and behavioral signals accumulated from s
 
 | FSLSM Edit | Learner Information Edit |
 |---|---|
-| ![Edit FSLSM profile](resources/Beta/8A%20-%20Edit%20Profile%20%28FSLSM%29.png) | ![Edit learner information](resources/Beta/8B%20-%20Edit%20Profile%20%28Learner%20Information%29.png) |
+| ![Edit FSLSM profile](assets/Beta/8A%20-%20Edit%20Profile%20%28FSLSM%29.png) | ![Edit learner information](assets/Beta/8B%20-%20Edit%20Profile%20%28Learner%20Information%29.png) |
 
 FSLSM dimension updates and personal/background information updates are separated into distinct edit flows to prevent unintended cross-field changes.
 
 ### 10. Goal Management
 
-![Goal management page](resources/Beta/9%20-%20Goal%20Management.png)
+![Goal management page](assets/Beta/9%20-%20Goal%20Management.png)
 
 Goal Management page for creating, selecting, and switching among multiple learning goals.
 
 ### 11. Learning Analytics
 
-![Learning analytics dashboard](resources/Beta/10%20-%20Analytics%20Dashboard.png)
+![Learning analytics dashboard](assets/Beta/10%20-%20Analytics%20Dashboard.png)
 
 Learning Analytics dashboard showing progress, performance, and engagement metrics over time.
 

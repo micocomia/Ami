@@ -297,6 +297,17 @@ If omitted, backend uses configured defaults.
 - contextual identifiers (`user_id`, `goal_id`, `session_index`)
 - `return_metadata` mode for structured tutor responses (`response`, `profile_updated`, optional updated profile payload)
 
+## Interactive API Documentation
+
+The backend exposes a full Swagger UI at runtime:
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **OpenAPI schema**: `http://localhost:8000/openapi.json`
+
+All endpoints are listed and can be tested directly from the browser. Endpoints are split into **Public** (no auth required) and **Protected** (requires `Authorization: Bearer <token>` header) sections.
+
+![FastAPI endpoint documentation](assets/fastapi_endpoints.png)
+
 ## API Endpoint Map
 
 ### Auth
@@ -315,6 +326,7 @@ If omitted, backend uses configured defaults.
 - `GET /profile/{user_id}`
 - `PUT /profile/{user_id}/{goal_id}`
 - `POST /sync-profile/{user_id}/{goal_id}`
+- `POST /propagate-profile/{user_id}/{goal_id}`
 - `POST /profile/auto-update`
 
 ### Runtime and Content
@@ -357,8 +369,8 @@ If omitted, backend uses configured defaults.
 
 - `GET /config`
 - `GET /personas`
-- `POST /extract-pdf-text`
 - `GET /list-llm-models`
+- `POST /extract-pdf-text`
 - `POST /events/log`
 - `GET /events/{user_id}`
 - `DELETE /user-data/{user_id}`
@@ -368,8 +380,9 @@ If omitted, backend uses configured defaults.
 ### Chat with tutor
 
 ```bash
-curl -X POST "http://localhost:8000/chat-with-tutor" \
+curl -X POST "http://localhost:8000/v1/chat-with-tutor" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{
     "messages": "[{\"role\":\"user\",\"content\":\"Help me learn recursion\"}]",
     "learner_profile": "{}",
@@ -381,7 +394,7 @@ curl -X POST "http://localhost:8000/chat-with-tutor" \
 ### Agentic schedule learning path
 
 ```bash
-curl -X POST "http://localhost:8000/schedule-learning-path-agentic" \
+curl -X POST "http://localhost:8000/v1/schedule-learning-path-agentic" \
   -H "Content-Type: application/json" \
   -d '{
     "learner_profile": "{\"learning_goal\":\"Learn Python\"}",
@@ -425,14 +438,15 @@ backend/
     schemas.py
 
   base/
+    base_agent.py
+    dataclass.py
     llm_factory.py
-    search_rag.py
     rag_factory.py
     embedder_factory.py
     searcher_factory.py
+    search_rag.py
     verified_content_manager.py
     verified_content_loader.py
-    base_agent.py
 
   services/
     content_prefetch.py
