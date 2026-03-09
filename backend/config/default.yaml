@@ -11,8 +11,8 @@ llm:
   base_url: null
 
 embedding:
-  provider: huggingface
-  model_name: sentence-transformers/all-mpnet-base-v2
+  provider: openai
+  model_name: text-embedding-3-small
 
 search:
   provider: duckduckgo
@@ -20,8 +20,14 @@ search:
   loader_type: web
 
 vectorstore:
+  type: azure_ai_search
   persist_directory: data/vectorstore
-  collection_name: non-verified-content
+  collection_name: ami-web-results
+
+azure_search:
+  endpoint: ""        # overridden by AZURE_SEARCH_ENDPOINT env var
+  key: ""             # overridden by AZURE_SEARCH_KEY env var
+  verified_index_name: ami-verified-content
 
 rag:
   chunk_size: 1000

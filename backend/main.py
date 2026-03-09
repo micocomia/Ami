@@ -115,9 +115,15 @@ def _load_stores():
     store.load()
     auth_store.load()
     if search_rag_manager.verified_content_manager:
-        search_rag_manager.verified_content_manager.sync_verified_content(
-            app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
-        )
+        try:
+            search_rag_manager.verified_content_manager.sync_verified_content(
+                app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
+            )
+        except Exception as e:
+            logger.warning(
+                f"Verified content sync failed at startup: {e}. "
+                "Retrieval will use whatever is currently in the index."
+            )
 
 
 def _parse_jsonish(value: Any, default: Any = None):

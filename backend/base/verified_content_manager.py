@@ -34,16 +34,23 @@ class VerifiedContentManager:
         text_splitter: TextSplitter,
         persist_directory: str = "./data/vectorstore",
         collection_name: str = "verified_content",
+        vectorstore_type: str = "azure_ai_search",
+        azure_endpoint: Optional[str] = None,
+        azure_key: Optional[str] = None,
     ):
         self.embedder = embedder
         self.text_splitter = text_splitter
         self.persist_directory = persist_directory
         self.collection_name = collection_name
+        self.azure_endpoint = azure_endpoint or os.environ.get("AZURE_SEARCH_ENDPOINT", "")
+        self.azure_key = azure_key or os.environ.get("AZURE_SEARCH_KEY", "")
         self.vectorstore: VectorStore = VectorStoreFactory.create(
-            vectorstore_type="chroma",
+            vectorstore_type=vectorstore_type,
             collection_name=collection_name,
             persist_directory=persist_directory,
             embedder=embedder,
+            azure_endpoint=self.azure_endpoint,
+            azure_key=self.azure_key,
         )
 
     @staticmethod
@@ -52,8 +59,8 @@ class VerifiedContentManager:
     ) -> "VerifiedContentManager":
         config = ensure_config_dict(config)
         embedder = EmbedderFactory.create(
-            model=config.get("embedder", {}).get("model_name", "sentence-transformers/all-mpnet-base-v2"),
-            model_provider=config.get("embedder", {}).get("provider", "huggingface"),
+            model=config.get("embedding", {}).get("model_name", "text-embedding-3-small"),
+            model_provider=config.get("embedding", {}).get("provider", "openai"),
         )
         verified_cfg = config.get("verified_content", {})
         text_splitter = TextSplitterFactory.create(
@@ -61,11 +68,17 @@ class VerifiedContentManager:
             chunk_size=verified_cfg.get("chunk_size", 500),
             chunk_overlap=config.get("rag", {}).get("chunk_overlap", 0),
         )
+        azure_cfg = config.get("azure_search", {})
+        index_name = azure_cfg.get("verified_index_name",
+                     verified_cfg.get("collection_name", "ami-verified-content"))
         return VerifiedContentManager(
             embedder=embedder,
             text_splitter=text_splitter,
             persist_directory=config.get("vectorstore", {}).get("persist_directory", "./data/vectorstore"),
-            collection_name=verified_cfg.get("collection_name", "verified_content"),
+            collection_name=index_name,
+            vectorstore_type="azure_ai_search",
+            azure_endpoint=azure_cfg.get("endpoint") or os.environ.get("AZURE_SEARCH_ENDPOINT"),
+            azure_key=azure_cfg.get("key") or os.environ.get("AZURE_SEARCH_KEY"),
         )
 
     def _manifest_path(self) -> str:
@@ -156,40 +169,31 @@ class VerifiedContentManager:
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, sort_keys=True)
 
+    def _get_azure_search_client(self):
+        from azure.search.documents import SearchClient
+        from azure.core.credentials import AzureKeyCredential
+        return SearchClient(
+            endpoint=self.azure_endpoint,
+            index_name=self.collection_name,
+            credential=AzureKeyCredential(self.azure_key),
+        )
+
+    def _get_document_count(self) -> int:
+        try:
+            return self._get_azure_search_client().get_document_count()
+        except Exception as e:
+            logger.warning(f"Could not get document count from Azure Search: {e}")
+            return -1  # unknown → sync_verified_content falls through to manifest check
+
     def _clear_collection(self) -> None:
-        # Preferred path: drop and recreate collection handle.
-        if hasattr(self.vectorstore, "delete_collection"):
-            try:
-                self.vectorstore.delete_collection()
-                self.vectorstore = VectorStoreFactory.create(
-                    vectorstore_type="chroma",
-                    collection_name=self.collection_name,
-                    persist_directory=self.persist_directory,
-                    embedder=self.embedder,
-                )
-                return
-            except Exception as e:
-                logger.warning(f"delete_collection() failed for '{self.collection_name}': {e}")
-
-        # Fallback: delete all entries in-place.
-        try:
-            if hasattr(self.vectorstore, "_collection"):
-                self.vectorstore._collection.delete(where={})
-                return
-        except Exception as e:
-            logger.warning(f"_collection.delete(where={{}}) failed for '{self.collection_name}': {e}")
-
-        # Last-resort fallback: enumerate IDs and delete.
-        try:
-            ids: List[str] = []
-            if hasattr(self.vectorstore, "get"):
-                payload = self.vectorstore.get(include=[])
-                if isinstance(payload, dict):
-                    ids = payload.get("ids", []) or []
-            if ids and hasattr(self.vectorstore, "delete"):
-                self.vectorstore.delete(ids=ids)
-        except Exception as e:
-            raise RuntimeError(f"Unable to clear collection '{self.collection_name}': {e}") from e
+        client = self._get_azure_search_client()
+        results = list(client.search("*", select=["id"]))
+        if results:
+            for i in range(0, len(results), 1000):
+                client.delete_documents(documents=[{"id": r["id"]} for r in results[i:i+1000]])
+            logger.info(f"Cleared {len(results)} docs from '{self.collection_name}'")
+        else:
+            logger.info(f"Index '{self.collection_name}' was already empty")
 
     def sync_verified_content(self, base_dir: str, *, force: bool = False) -> Dict[str, Any]:
         """Sync verified-content index to disk resources.
@@ -198,7 +202,7 @@ class VerifiedContentManager:
         """
         current_manifest = self._build_manifest(base_dir)
         stored_manifest = self._load_manifest()
-        existing_count = self.vectorstore._collection.count()
+        existing_count = self._get_document_count()
 
         reason = "unchanged"
         should_reindex = force
@@ -207,6 +211,14 @@ class VerifiedContentManager:
         elif existing_count == 0:
             should_reindex = True
             reason = "empty_collection"
+        elif existing_count < 0:
+            # Count unknown (Azure unavailable) — rely on manifest
+            if stored_manifest is None:
+                should_reindex = True
+                reason = "missing_manifest"
+            elif stored_manifest.get("manifest_hash") != current_manifest.get("manifest_hash"):
+                should_reindex = True
+                reason = "manifest_changed"
         elif stored_manifest is None:
             should_reindex = True
             reason = "missing_manifest"
@@ -244,7 +256,7 @@ class VerifiedContentManager:
 
     def index_verified_content(self, base_dir: str) -> int:
         """Loads, splits, and adds verified content to vectorstore. Skips if collection already has documents."""
-        existing_count = self.vectorstore._collection.count()
+        existing_count = self._get_document_count()
         if existing_count > 0:
             logger.info(
                 f"Verified content collection '{self.collection_name}' already has "
@@ -297,7 +309,7 @@ class VerifiedContentManager:
         for doc in split_docs:
             if "source_type" not in doc.metadata:
                 doc.metadata["source_type"] = "verified_content"
-            # ChromaDB only accepts str, int, float, bool, or None metadata values.
+            # Azure AI Search only accepts flat primitive metadata values.
             # Docling injects complex nested dicts/lists — strip them out.
             doc.metadata = {
                 k: v for k, v in doc.metadata.items()
@@ -308,8 +320,8 @@ class VerifiedContentManager:
             logger.warning("No verified content chunks available to index after preprocessing.")
             return 0
 
-        self.vectorstore.add_documents(split_docs, embedding_function=self.embedder)
-        final_count = self.vectorstore._collection.count()
+        self.vectorstore.add_documents(split_docs)
+        final_count = self._get_document_count()
         logger.info(
             f"Indexed {len(split_docs)} verified content chunks into "
             f"'{self.collection_name}' (total: {final_count})"
@@ -319,10 +331,10 @@ class VerifiedContentManager:
     def retrieve(self, query: str, k: int = 5) -> List[Document]:
         """Similarity search against the verified content collection."""
         try:
-            count = self.vectorstore._collection.count()
+            count = self._get_document_count()
             if count == 0:
                 return []
-            results = self.vectorstore.similarity_search(query, k=min(k, count))
+            results = self.vectorstore.similarity_search(query, k=k)
             return results
         except Exception as e:
             logger.error(f"Error retrieving from verified content: {e}")
@@ -342,10 +354,10 @@ class VerifiedContentManager:
     ) -> List[Document]:
         """Similarity search with optional metadata constraints and lightweight reranking."""
         try:
-            count = self.vectorstore._collection.count()
+            count = self._get_document_count()
             if count == 0:
                 return []
-            fetch_k = min(count, max(k * 8, 40))
+            fetch_k = max(k * 8, 40)
             candidates = self.vectorstore.similarity_search(query, k=fetch_k)
         except Exception as e:
             logger.error(f"Error retrieving filtered verified content: {e}")
