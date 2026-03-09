@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from utils.state import (
     change_selected_goal_id,
@@ -75,7 +76,9 @@ except Exception:
 from components.chatbot import render_chatbot
 
 st.set_page_config(page_title="Ami", page_icon="./assets/avatar.png", layout="wide")
-st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
+css_path = os.path.join(os.path.dirname(__file__), "assets/css/main.css")
+with open(css_path) as f:
+    st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
 if not st.session_state.get("logged_in", False):
     st.navigation([st.Page("pages/login.py", title="Login", url_path="login")], position="hidden").run()
