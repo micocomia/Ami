@@ -23,6 +23,7 @@ section[data-testid="stSidebar"] { display: none !important; }
     box-shadow: 0 4px 24px rgba(0,0,0,0.12) !important;
     padding: 16px 20px !important;
 }
+
 </style>""", unsafe_allow_html=True)
 
 _, logo_col, _ = st.columns([1, 2, 1])
