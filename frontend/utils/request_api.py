@@ -1,4 +1,5 @@
 import json
+import os
 import httpx
 import streamlit as st
 from typing import Optional
@@ -281,7 +282,8 @@ def chat_with_tutor(
     if learner_information is not None:
         data["learner_information"] = _normalize_learner_information(learner_information)
 
-    response = make_post_request(API_NAMES["chat_with_tutor"], data, "./assets/data_example/ai)tutor_chat.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/ai)tutor_chat.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["chat_with_tutor"], data, mock_path)
     if not response:
         return None
     if return_metadata:
@@ -311,7 +313,8 @@ def identify_skill_gap(
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/skill_gap.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["identify_skill_gap"], data, mock_path)
     if not response:
         return None, None, None, None
     return (
@@ -375,7 +378,8 @@ def create_learner_profile(
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["create_profile"], data, "./assets/data_example/learner_profile.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learner_profile.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["create_profile"], data, mock_path)
     return response.get("learner_profile") if response else None
 
 def update_learner_profile(learner_profile, learner_interactions, learner_information="", session_information="", user_id=None, goal_id=None):
@@ -389,7 +393,8 @@ def update_learner_profile(learner_profile, learner_interactions, learner_inform
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["update_profile"], data, "./assets/data_example/learner_profile.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learner_profile.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["update_profile"], data, mock_path)
     return response.get("learner_profile") if response else None
 
 
@@ -531,7 +536,8 @@ def generate_learning_content(
         data["goal_id"] = int(goal_id)
     if session_index is not None:
         data["session_index"] = int(session_index)
-    response = make_post_request(API_NAMES["generate_learning_content"], data, "./assets/data_example/learning_document.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learning_document.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["generate_learning_content"], data, mock_path)
     if not response:
         return None
     if isinstance(response, dict) and isinstance(response.get("learning_content"), dict):

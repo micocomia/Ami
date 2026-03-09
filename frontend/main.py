@@ -75,7 +75,8 @@ except Exception:
 
 from components.chatbot import render_chatbot
 
-st.set_page_config(page_title="Ami", page_icon="./assets/avatar.png", layout="wide")
+icon_path = os.path.join(os.path.dirname(__file__), "assets/avatar.png")
+st.set_page_config(page_title="Ami", page_icon=icon_path, layout="wide")
 css_path = os.path.join(os.path.dirname(__file__), "assets/css/main.css")
 with open(css_path) as f:
     st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -22,7 +23,9 @@ from utils.document_parser import parse_document_for_section_view
 from components.content_bias import render_content_bias_banners
 
 
-st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
+css_path = os.path.join(os.path.dirname(__file__), "../assets/css/main.css")
+with open(css_path) as f:
+    st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
 
 def _current_backend_public_base() -> str:
@@ -299,7 +302,7 @@ def render_content_preparation(goal):
     session_uid = get_current_session_uid()
     if use_mock_data:
         st.warning("Using mock data for knowledge document.")
-        file_path = "./assets/data_example/knowledge_document.json"
+        file_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/knowledge_document.json")
         learning_content = load_knowledge_point_content(file_path)
         _cache_learning_content(session_uid, learning_content)
         try:
