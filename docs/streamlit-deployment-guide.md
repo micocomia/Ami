@@ -60,6 +60,15 @@ Community Cloud does not always pick up `[theme]` settings from `.streamlit/conf
 
 Azure Container Instances (ACI) runs a Docker container directly without managing servers or clusters. The image is stored in Azure Container Registry (ACR).
 
+The backend requires four Azure services to run:
+
+| Service | Purpose | Resources created |
+|---|---|---|
+| **Azure AI Search** | Vector store for RAG | 2 indexes: `ami-verified-content`, `ami-web-results` |
+| **Azure Cosmos DB** | User data persistence | 1 database: `ami-userdata` with 8 containers (auto-created) |
+| **Azure Blob Storage** | Audio, diagrams, manifests | 3 containers: `ami-audio`, `ami-diagrams`, `ami-manifests` |
+| **Azure AI Document Intelligence** | Parse PDFs/PPTX for indexing (pre-deploy only) | 1 resource (S0 SKU) |
+
 ### Step 1: Log in to Azure
 
 ```bash
@@ -70,15 +79,23 @@ Opens a browser for authentication. Required before running any `az` commands.
 
 ### Step 2: Register required namespaces
 
-Azure subscriptions need to explicitly opt in to each service namespace. Run both and wait for `"Registered"` before proceeding.
+Azure subscriptions need to explicitly opt in to each service namespace. Run all of these and wait for `"Registered"` before proceeding.
 
 ```bash
 az provider register --namespace Microsoft.ContainerRegistry
 az provider register --namespace Microsoft.ContainerInstance
+az provider register --namespace Microsoft.Search
+az provider register --namespace Microsoft.DocumentDB
+az provider register --namespace Microsoft.Storage
+az provider register --namespace Microsoft.CognitiveServices
 
 # Check status (repeat until "Registered")
 az provider show --namespace Microsoft.ContainerRegistry --query registrationState
 az provider show --namespace Microsoft.ContainerInstance --query registrationState
+az provider show --namespace Microsoft.Search --query registrationState
+az provider show --namespace Microsoft.DocumentDB --query registrationState
+az provider show --namespace Microsoft.Storage --query registrationState
+az provider show --namespace Microsoft.CognitiveServices --query registrationState
 ```
 
 This typically takes 5-10 minutes per namespace.
@@ -99,7 +116,128 @@ Azure Container Registry (ACR) is a private Docker image registry hosted on Azur
 az acr create --resource-group ami-rg --name amiregistry --sku Basic --admin-enabled true
 ```
 
-### Step 5: Build the Docker image locally
+### Step 5: Create Azure AI Search
+
+Azure AI Search is used as the vector store for RAG. The `standard` SKU is required for vector search support.
+
+```bash
+az search service create \
+  --resource-group ami-rg \
+  --name ami-dti5902-search \
+  --sku standard \
+  --location eastus
+```
+
+Retrieve the admin key — you'll need it as `AZURE_SEARCH_KEY`:
+
+```bash
+az search admin-key show --resource-group ami-rg --service-name ami-search --query primaryKey -o tsv
+```
+
+The endpoint will be: `https://ami-dti5902-search.search.windows.net`
+
+The two search indexes (`ami-verified-content`, `ami-web-results`) are created automatically the first time the backend runs.
+
+### Step 6: Create Azure Cosmos DB
+
+Cosmos DB stores all user data (accounts, goals, profiles, learning content, etc.).
+
+```bash
+az cosmosdb create \
+  --resource-group ami-rg \
+  --name ami-dti5902-cosmos \
+  --kind GlobalDocumentDB \
+  --locations regionName=eastus isZoneRedundant=false \
+  --default-consistency-level Session
+```
+
+Retrieve the connection string — you'll need it as `AZURE_COSMOS_CONNECTION_STRING`:
+
+```bash
+az cosmosdb keys list \
+  --resource-group ami-rg \
+  --name ami-dti5902-cosmos \
+  --type connection-strings \
+  --query "connectionStrings[0].connectionString" -o tsv
+```
+
+The database (`ami-userdata`) and all 8 containers are created automatically the first time the backend connects.
+
+### Step 7: Create Azure Blob Storage
+
+Blob Storage holds generated audio files, diagrams, and content manifests.
+
+```bash
+az storage account create \
+  --resource-group ami-rg \
+  --name amidti5902storage \
+  --location eastus \
+  --sku Standard_LRS
+```
+
+Retrieve the connection string — you'll need it as `AZURE_STORAGE_CONNECTION_STRING`:
+
+```bash
+az storage account show-connection-string \
+  --resource-group ami-rg \
+  --name amidti5902storage \
+  --query connectionString -o tsv
+```
+
+The three storage containers (`ami-audio`, `ami-diagrams`, `ami-manifests`) are created automatically on first use. A fourth container (`ami-course-content`) is created automatically when you run the preindex script in Step 9.
+
+### Step 8: Create Azure AI Document Intelligence
+
+Document Intelligence parses PDFs and PPTX files during pre-indexing. It is called from your local machine before deployment — the container itself does not need to call it at runtime once the index is populated.
+
+```bash
+az cognitiveservices account create \
+  --resource-group ami-rg \
+  --name ami-dti5902-document-intelligence \
+  --kind FormRecognizer \
+  --sku S0 \
+  --location eastus \
+  --yes
+```
+
+Retrieve the endpoint and key — you'll need them as `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` and `AZURE_DOCUMENT_INTELLIGENCE_KEY`:
+
+```bash
+az cognitiveservices account show \
+  --resource-group ami-rg \
+  --name ami-dti5902-document-intelligence \
+  --query properties.endpoint -o tsv
+
+az cognitiveservices account keys list \
+  --resource-group ami-rg \
+  --name ami-dti5902-document-intelligence \
+  --query key1 -o tsv
+```
+
+### Step 9: Pre-index verified course content
+
+Run the indexing script **locally** before building the Docker image. The script:
+1. Uploads all PDFs/PPTX/JSON/text files from `resources/verified-course-content/` to the `ami-course-content` Blob Storage container
+2. Calls Azure AI Document Intelligence to parse PDFs and PPTX files (via SAS URL — no local model needed)
+3. Embeds and indexes everything into Azure AI Search
+4. Saves a snapshot hash to `ami-manifests` so the container skips re-indexing if content is unchanged on startup
+
+Ensure your `backend/.env` has all five Azure vars set, then:
+
+```bash
+conda activate ami-backend && cd backend
+python scripts/preindex_verified_content.py
+```
+
+The script logs `Pre-index complete` when done. Confirm the `ami-verified-content` index and the `ami-course-content` blob container were created in the Azure portal before proceeding.
+
+To re-index without re-uploading (if files are already in blob storage):
+
+```bash
+python scripts/preindex_verified_content.py --skip-upload
+```
+
+### Step 11: Build the Docker image locally
 
 Build the backend image for the `linux/amd64` platform. This is required because:
 - Mac (Apple Silicon) builds ARM images by default
@@ -117,7 +255,7 @@ docker build --platform linux/amd64 \
 - `./backend` — build context (files available during the build)
 - `-t` — tags the image with the ACR registry URL
 
-### Step 6: Push the image to ACR
+### Step 12: Push the image to ACR
 
 Log in to ACR so Docker can authenticate, then push the image.
 
@@ -128,9 +266,9 @@ docker push amiregistry.azurecr.io/ami-backend:latest
 
 This uploads all image layers to your private registry on Azure.
 
-### Step 7: Deploy to Azure Container Instances
+### Step 13: Deploy to Azure Container Instances
 
-Creates and starts a container from your image. Replace all `your_key` values with actual keys from `backend/.env`.
+Creates and starts a container from your image. Replace all placeholder values with the actual keys collected in the steps above.
 
 ```bash
 az container create \
@@ -146,10 +284,16 @@ az container create \
   --cpu 2 \
   --os-type Linux \
   --environment-variables \
-    OPENAI_API_KEY=your_key \
-    JWT_SECRET=your_key \
-    SERPER_API_KEY=your_key \
-    BRAVE_API_KEY=your_key
+    OPENAI_API_KEY=your_openai_key \
+    JWT_SECRET=your_jwt_secret \
+    SERPER_API_KEY=your_serper_key \
+    BRAVE_API_KEY=your_brave_key \
+    AZURE_SEARCH_ENDPOINT=https://ami-search.search.windows.net \
+    AZURE_SEARCH_KEY=your_search_admin_key \
+    AZURE_COSMOS_CONNECTION_STRING="AccountEndpoint=https://ami-cosmos.documents.azure.com:443/;AccountKey=your_key==" \
+    AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=amistorage;AccountKey=your_key;EndpointSuffix=core.windows.net" \
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://ami-document-intelligence.cognitiveservices.azure.com/ \
+    AZURE_DOCUMENT_INTELLIGENCE_KEY=your_di_key
 ```
 
 **Parameter explanations:**
@@ -164,6 +308,20 @@ az container create \
 | `--os-type Linux` | Required — must match the image OS |
 | `--environment-variables` | Injects secrets as env vars (equivalent to `.env` file) |
 
+**Environment variable reference:**
+| Variable | Where to get it |
+|---|---|
+| `OPENAI_API_KEY` | platform.openai.com |
+| `JWT_SECRET` | Any random secret string |
+| `SERPER_API_KEY` | serper.dev |
+| `BRAVE_API_KEY` | api.search.brave.com |
+| `AZURE_SEARCH_ENDPOINT` | `https://ami-search.search.windows.net` |
+| `AZURE_SEARCH_KEY` | Step 5 output |
+| `AZURE_COSMOS_CONNECTION_STRING` | Step 6 output |
+| `AZURE_STORAGE_CONNECTION_STRING` | Step 7 output |
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | Step 8 output |
+| `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Step 8 output |
+
 Your backend will be available at:
 ```
 http://ami-backend.eastus.azurecontainer.io:8000
@@ -174,7 +332,7 @@ API docs at:
 http://ami-backend.eastus.azurecontainer.io:8000/docs
 ```
 
-### Step 8: Verify the deployment
+### Step 14: Verify the deployment
 
 ```bash
 az container show --resource-group ami-rg --name ami-backend --query instanceView.state
@@ -184,6 +342,52 @@ Should return `"Running"`. If it shows `"Failed"`, check logs:
 
 ```bash
 az container logs --resource-group ami-rg --name ami-backend
+```
+
+Common startup errors and their causes:
+- `ValueError: AZURE_COSMOS_CONNECTION_STRING not set` — missing or malformed Cosmos connection string
+- `ValueError: AZURE_SEARCH_ENDPOINT not set` — missing AI Search endpoint or key
+- `ValueError: AZURE_STORAGE_CONNECTION_STRING not set` — missing Blob Storage connection string
+
+---
+
+## Re-indexing (after adding new course content)
+
+Source files live in `ami-course-content` Blob Storage. The backend detects changes via a lightweight snapshot hash computed from blob metadata (name, etag, size, last-modified) — no file content reads required.
+
+### Option A: Preindex script (upload new files + re-index)
+
+Add new PDFs or PPTX files to `resources/verified-course-content/<course>/<category>/`, then run:
+
+```bash
+conda activate ami-backend && cd backend
+python scripts/preindex_verified_content.py
+```
+
+This uploads the new files to `ami-course-content`, re-indexes everything into Azure AI Search, and updates the snapshot hash in `ami-manifests`. **A container restart is required** to pick up new content — the backend checks the snapshot hash at startup.
+
+### Option B: Manual upload via Azure portal or CLI
+
+Upload new files directly to the `ami-course-content` container under the correct path:
+`{course_code}_{course_name}_{term}/{category}/{filename}`
+
+Then restart the container. On startup, the backend detects the blob metadata has changed, clears the old index, and re-indexes automatically.
+
+```bash
+az container restart --resource-group ami-rg --name ami-backend
+```
+
+### Restarting the container
+
+```bash
+az container restart --resource-group ami-rg --name ami-backend
+```
+
+Check logs to confirm successful re-indexing:
+
+```bash
+az container logs --resource-group ami-rg --name ami-backend
+# Look for: "Verified content sync completed"
 ```
 
 ---
@@ -217,5 +421,22 @@ User Browser
     └──▶ Azure Container Instances (backend)
               FastAPI on port 8000
               Image stored in Azure Container Registry
-              Env vars injected at container creation
+              │
+              ├──▶ Azure AI Search
+              │         ami-verified-content (course RAG)
+              │         ami-web-results (web search RAG)
+              │
+              ├──▶ Azure Cosmos DB
+              │         ami-userdata database
+              │         8 containers (auto-created)
+              │
+              └──▶ Azure Blob Storage
+                        ami-audio
+                        ami-diagrams
+                        ami-manifests
+
+Local machine (pre-deploy only)
+    └──▶ Azure AI Document Intelligence
+              Parses PDFs/PPTX → Azure AI Search (ami-verified-content)
+              Manifest saved to Blob Storage (ami-manifests)
 ```

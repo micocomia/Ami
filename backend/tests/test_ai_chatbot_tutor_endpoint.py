@@ -13,36 +13,6 @@ from utils import auth_store, store  # noqa: E402
 from modules.ai_chatbot_tutor.utils import safe_update_learning_preferences  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _isolate_store(tmp_path, monkeypatch):
-    data_dir = tmp_path / "store_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
-    monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
-    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
-    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
-    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
-    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
-    monkeypatch.setattr(store, "_profiles", {})
-    monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_profile_snapshots", {})
-    monkeypatch.setattr(store, "_goals", {})
-    monkeypatch.setattr(store, "_learning_content_cache", {})
-    monkeypatch.setattr(store, "_session_activity", {})
-    monkeypatch.setattr(store, "_mastery_history", {})
-
-
-@pytest.fixture(autouse=True)
-def _isolate_auth_store(tmp_path, monkeypatch):
-    data_dir = tmp_path / "auth_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(auth_store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(auth_store, "_USERS_PATH", data_dir / "users.json")
-    monkeypatch.setattr(auth_store, "_users", {})
-
-
 @pytest.fixture()
 def client():
     from main import app

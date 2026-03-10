@@ -6,49 +6,11 @@ Run from the repo root:
 
 import sys
 import os
-import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from utils import store, auth_store, auth_jwt
-
-
-# ---------------------------------------------------------------------------
-# Fixtures – redirect each module's file paths to a temporary directory
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def _isolate_store(tmp_path, monkeypatch):
-    """Point store module at a temp directory and reset its in-memory state."""
-    data_dir = tmp_path / "store_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
-    monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
-    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
-    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
-    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
-    monkeypatch.setattr(store, "_profiles", {})
-    monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_goals", {})
-    monkeypatch.setattr(store, "_learning_content_cache", {})
-    monkeypatch.setattr(store, "_session_activity", {})
-    monkeypatch.setattr(store, "_mastery_history", {})
-    # Isolate snapshot state
-    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
-    monkeypatch.setattr(store, "_profile_snapshots", {})
-
-
-@pytest.fixture(autouse=True)
-def _isolate_auth_store(tmp_path, monkeypatch):
-    """Point auth_store module at a temp directory and reset its in-memory state."""
-    data_dir = tmp_path / "auth_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(auth_store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(auth_store, "_USERS_PATH", data_dir / "users.json")
-    monkeypatch.setattr(auth_store, "_users", {})
 
 
 # ===================================================================
@@ -88,22 +50,6 @@ class TestProfilePersistence:
         assert alice_profiles[0]["goal"] == "Python"
         assert alice_profiles[1]["goal"] == "Rust"
 
-    def test_profiles_persisted_to_disk(self):
-        store.upsert_profile("alice", 0, {"goal": "Python"})
-
-        raw = json.loads(store._PROFILES_PATH.read_text(encoding="utf-8"))
-        assert "alice:0" in raw
-        assert raw["alice:0"]["goal"] == "Python"
-
-    def test_load_restores_profiles_from_disk(self):
-        store.upsert_profile("alice", 0, {"goal": "Python"})
-        # Simulate a restart: clear in-memory data, then load from disk
-        store._profiles.clear()
-        assert store.get_profile("alice", 0) is None
-
-        store.load()
-        assert store.get_profile("alice", 0)["goal"] == "Python"
-
 
 # ===================================================================
 # store.py – profile snapshot persistence
@@ -140,19 +86,6 @@ class TestProfileSnapshotPersistence:
         # Should not raise
         store.delete_profile_snapshot("nobody", 99)
 
-    def test_snapshot_persisted_to_disk(self):
-        store.save_profile_snapshot("alice", 0, {"v": "snap"})
-        raw = json.loads(store._PROFILE_SNAPSHOTS_PATH.read_text(encoding="utf-8"))
-        assert "alice:0" in raw
-        assert raw["alice:0"]["v"] == "snap"
-
-    def test_load_restores_snapshot_from_disk(self):
-        store.save_profile_snapshot("alice", 0, {"v": "snap"})
-        store._profile_snapshots.clear()
-        assert store.get_profile_snapshot("alice", 0) is None
-        store.load()
-        assert store.get_profile_snapshot("alice", 0) == {"v": "snap"}
-
 
 # ===================================================================
 # store.py – event persistence
@@ -183,21 +116,6 @@ class TestEventPersistence:
         assert len(events) == 200
         # oldest events should be trimmed
         assert events[0]["i"] == 10
-
-    def test_events_persisted_to_disk(self):
-        store.append_event("alice", {"type": "click"})
-
-        raw = json.loads(store._EVENTS_PATH.read_text(encoding="utf-8"))
-        assert "alice" in raw
-        assert raw["alice"][0]["type"] == "click"
-
-    def test_load_restores_events_from_disk(self):
-        store.append_event("alice", {"type": "click"})
-        store._events.clear()
-        assert store.get_events("alice") == []
-
-        store.load()
-        assert len(store.get_events("alice")) == 1
 
     def test_events_isolated_between_users(self):
         store.append_event("alice", {"type": "a"})
@@ -237,22 +155,6 @@ class TestAuthStore:
         with pytest.raises(ValueError, match="already exists"):
             auth_store.create_user("alice", "otherpass")
 
-    def test_users_persisted_to_disk(self):
-        auth_store.create_user("alice", "secret123")
-
-        raw = json.loads(auth_store._USERS_PATH.read_text(encoding="utf-8"))
-        assert "alice" in raw
-        assert raw["alice"]["username"] == "alice"
-
-    def test_load_restores_users_from_disk(self):
-        auth_store.create_user("alice", "secret123")
-        auth_store._users.clear()
-        assert auth_store.get_user("alice") is None
-
-        auth_store.load()
-        assert auth_store.get_user("alice") is not None
-        assert auth_store.verify_password("alice", "secret123") is True
-
     def test_multiple_users(self):
         auth_store.create_user("alice", "pass1")
         auth_store.create_user("bob", "pass2")
@@ -269,15 +171,6 @@ class TestAuthStore:
 
     def test_delete_user_nonexistent_returns_false(self):
         assert auth_store.delete_user("nobody") is False
-
-    def test_delete_user_persisted_to_disk(self):
-        auth_store.create_user("alice", "secret123")
-        auth_store.delete_user("alice")
-
-        # reload from disk and verify user is gone
-        auth_store._users.clear()
-        auth_store.load()
-        assert auth_store.get_user("alice") is None
 
 
 # ===================================================================

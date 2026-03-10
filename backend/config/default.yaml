@@ -21,13 +21,22 @@ search:
 
 vectorstore:
   type: azure_ai_search
-  persist_directory: data/vectorstore
   collection_name: ami-web-results
+
+blob_storage:
+  connection_string: ""    # overridden by AZURE_STORAGE_CONNECTION_STRING env var
+  manifests_container: ami-manifests
+  audio_container: ami-audio
+  diagrams_container: ami-diagrams
+  course_content_container: ami-course-content  # source PDFs/PPTX for verified content indexing
 
 azure_search:
   endpoint: ""        # overridden by AZURE_SEARCH_ENDPOINT env var
   key: ""             # overridden by AZURE_SEARCH_KEY env var
   verified_index_name: ami-verified-content
+
+cosmos:
+  database_name: ami-userdata  # connection string overridden by AZURE_COSMOS_CONNECTION_STRING env var
 
 rag:
   chunk_size: 1000
@@ -36,7 +45,6 @@ rag:
   max_workers: 3
 
 verified_content:
-  base_dir: resources/verified-course-content
   collection_name: verified_content
   chunk_size: 500
   enabled: true

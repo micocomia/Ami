@@ -97,14 +97,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-from fastapi.staticfiles import StaticFiles
-_BACKEND_ROOT = Path(__file__).resolve().parent
-_AUDIO_DIR = _BACKEND_ROOT / "data" / "audio"
-_DIAGRAMS_DIR = _BACKEND_ROOT / "data" / "diagrams"
-_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static/audio", StaticFiles(directory=str(_AUDIO_DIR)), name="audio")
-_DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
 from pydantic import BaseModel, ValidationError
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
@@ -116,9 +108,7 @@ def _load_stores():
     auth_store.load()
     if search_rag_manager.verified_content_manager:
         try:
-            search_rag_manager.verified_content_manager.sync_verified_content(
-                app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
-            )
+            search_rag_manager.verified_content_manager.sync_verified_content()
         except Exception as e:
             logger.warning(
                 f"Verified content sync failed at startup: {e}. "
@@ -1224,9 +1214,13 @@ async def adapt_learning_path(request: AdaptLearningPathRequest, current_user: s
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Allow origins from FRONTEND_ORIGIN env var (comma-separated for multiple origins).
+# Defaults to "*" for local development. In production (ACI), set to the
+# Streamlit Community Cloud URL, e.g. "https://your-app.streamlit.app".
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("FRONTEND_ORIGIN", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

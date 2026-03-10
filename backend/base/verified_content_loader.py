@@ -2,7 +2,6 @@ import os
 import re
 import json
 import logging
-import warnings
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -92,7 +91,7 @@ def load_file(file_path: str) -> List[Document]:
         if ext == ".json":
             return _load_json(file_path)
         elif ext in (".pdf", ".pptx"):
-            return _load_with_docling(file_path)
+            return _load_with_azure_di(file_path)
         else:
             return _load_text(file_path)
     except Exception as e:
@@ -117,71 +116,41 @@ def _load_json(file_path: str) -> List[Document]:
     return [doc]
 
 
-_converter = None
+def _load_with_azure_di(file_path: str = None, url_source: str = None) -> List[Document]:
+    """Use Azure AI Document Intelligence to parse PDF and PPTX files, one Document per page.
 
+    Pass either ``file_path`` (local path, used by the preindex script) or
+    ``url_source`` (SAS URL, used when the source lives in Blob Storage).
+    """
+    from langchain_community.document_loaders import AzureAIDocumentIntelligenceLoader
 
-def _get_converter():
-    """Return a shared DocumentConverter singleton (avoids expensive re-init per file)."""
-    global _converter
-    if _converter is None:
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-        from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
+    endpoint = os.environ.get("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "")
+    key = os.environ.get("AZURE_DOCUMENT_INTELLIGENCE_KEY", "")
 
-        pipeline_options = PdfPipelineOptions(allow_external_plugins=True)
-        _converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-            }
-        )
-    return _converter
-
-
-def _load_with_docling(file_path: str) -> List[Document]:
-    """Use DoclingLoader for PDF and PPTX files with DOC_CHUNKS mode for page metadata."""
-    from langchain_docling import DoclingLoader
-    from langchain_docling.loader import ExportType
-
-    loader = DoclingLoader(
+    loader = AzureAIDocumentIntelligenceLoader(
+        api_endpoint=endpoint,
+        api_key=key,
         file_path=file_path,
-        converter=_get_converter(),
-        export_type=ExportType.DOC_CHUNKS,
+        url_source=url_source,
+        api_model="prebuilt-layout",
+        mode="page",
     )
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="Token indices sequence length is longer than the specified maximum sequence length",
-        )
-        docs = loader.load()
+    docs = loader.load()
 
     for doc in docs:
-        # Extract page_number from dl_meta or top-level page_no
-        page_number = doc.metadata.pop("page_no", None)
-        if page_number is None:
-            dl_meta = doc.metadata.get("dl_meta")
-            if isinstance(dl_meta, dict):
-                for item in dl_meta.get("doc_items", []):
-                    for prov in item.get("prov", []):
-                        if "page_no" in prov:
-                            page_number = prov["page_no"]
-                            break
-                    if page_number is not None:
-                        break
-            elif isinstance(dl_meta, str):
-                try:
-                    meta_dict = json.loads(dl_meta)
-                    for item in meta_dict.get("doc_items", []):
-                        for prov in item.get("prov", []):
-                            if "page_no" in prov:
-                                page_number = prov["page_no"]
-                                break
-                        if page_number is not None:
-                            break
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        # Normalize page_number — Azure DI sets it directly; fall back to None
+        page_number = doc.metadata.get("page_number")
+        if page_number is not None:
+            try:
+                page_number = int(page_number)
+            except (ValueError, TypeError):
+                page_number = None
         doc.metadata["page_number"] = page_number
-        # Remove dl_meta — it's a complex structure not useful to store raw
-        doc.metadata.pop("dl_meta", None)
+        # Strip any non-primitive metadata values (dicts/lists) Azure DI may add
+        doc.metadata = {
+            k: v for k, v in doc.metadata.items()
+            if isinstance(v, (str, int, float, bool)) or v is None
+        }
 
     return docs
 
@@ -199,6 +168,28 @@ def _load_text(file_path: str) -> List[Document]:
         metadata={"source": file_path},
     )
     return [doc]
+
+
+def _load_blob_text(content: bytes, blob_name: str) -> List[Document]:
+    """Decode bytes from Blob Storage as plain text (.py / .txt / .md)."""
+    text = content.decode("utf-8", errors="replace")
+    if not text.strip():
+        return []
+    return [Document(page_content=text, metadata={"source": blob_name})]
+
+
+def _load_blob_json(content: bytes, blob_name: str) -> List[Document]:
+    """Parse JSON bytes from Blob Storage and extract the ``content`` field."""
+    try:
+        data = json.loads(content.decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"Failed to parse JSON blob '{blob_name}': {e}")
+        return []
+    text = data.get("content", "")
+    title = data.get("title", "")
+    if not text.strip():
+        return []
+    return [Document(page_content=text, metadata={"title": title, "source": blob_name})]
 
 
 def _load_and_tag(file_path: str, metadata: Dict[str, Any]) -> List[Document]:
@@ -248,7 +239,7 @@ def load_course_documents(
 def load_all_verified_content(base_dir: str, max_workers: int = 4) -> List[Document]:
     """Top-level function returning flat list of Document objects from all courses.
 
-    Files are loaded in parallel using a thread pool to speed up Docling conversion.
+    Files are loaded in parallel using a thread pool to speed up Azure DI API calls.
     """
     courses = scan_courses(base_dir)
 

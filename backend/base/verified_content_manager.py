@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-import stat
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Union
 
 from omegaconf import DictConfig
@@ -17,37 +17,47 @@ from base.rag_factory import TextSplitterFactory, VectorStoreFactory
 from base.verified_content_loader import (
     SKIP_FILES,
     SUPPORTED_EXTENSIONS,
-    load_all_verified_content,
+    CONTENT_CATEGORIES,
+    _extract_lecture_number,
+    _effective_content_category,
+    _load_blob_text,
+    _load_blob_json,
+    _load_with_azure_di,
     scan_courses,
 )
 from utils.config import ensure_config_dict
 
 logger = logging.getLogger(__name__)
 
+_SNAPSHOT_BLOB_NAME = "verified-content-snapshot.hash"
+
 
 class VerifiedContentManager:
-    MANIFEST_VERSION = 1
 
     def __init__(
         self,
         embedder: Embeddings,
         text_splitter: TextSplitter,
-        persist_directory: str = "./data/vectorstore",
         collection_name: str = "verified_content",
         vectorstore_type: str = "azure_ai_search",
         azure_endpoint: Optional[str] = None,
         azure_key: Optional[str] = None,
+        blob_client=None,
+        manifests_container: str = "ami-manifests",
+        course_content_container: str = "ami-course-content",
     ):
         self.embedder = embedder
         self.text_splitter = text_splitter
-        self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.azure_endpoint = azure_endpoint or os.environ.get("AZURE_SEARCH_ENDPOINT", "")
         self.azure_key = azure_key or os.environ.get("AZURE_SEARCH_KEY", "")
+        self.blob_client = blob_client
+        self.manifests_container = manifests_container
+        self.course_content_container = course_content_container
         self.vectorstore: VectorStore = VectorStoreFactory.create(
             vectorstore_type=vectorstore_type,
             collection_name=collection_name,
-            persist_directory=persist_directory,
+            persist_directory=".",
             embedder=embedder,
             azure_endpoint=self.azure_endpoint,
             azure_key=self.azure_key,
@@ -57,6 +67,7 @@ class VerifiedContentManager:
     def from_config(
         config: Union[DictConfig, Dict[str, Any]],
     ) -> "VerifiedContentManager":
+        from base.blob_storage import BlobStorageClient
         config = ensure_config_dict(config)
         embedder = EmbedderFactory.create(
             model=config.get("embedding", {}).get("model_name", "text-embedding-3-small"),
@@ -71,103 +82,84 @@ class VerifiedContentManager:
         azure_cfg = config.get("azure_search", {})
         index_name = azure_cfg.get("verified_index_name",
                      verified_cfg.get("collection_name", "ami-verified-content"))
+        blob_cfg = config.get("blob_storage", {})
+        conn_str = blob_cfg.get("connection_string") or os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
+        blob_client = BlobStorageClient(conn_str) if conn_str else None
         return VerifiedContentManager(
             embedder=embedder,
             text_splitter=text_splitter,
-            persist_directory=config.get("vectorstore", {}).get("persist_directory", "./data/vectorstore"),
             collection_name=index_name,
             vectorstore_type="azure_ai_search",
             azure_endpoint=azure_cfg.get("endpoint") or os.environ.get("AZURE_SEARCH_ENDPOINT"),
             azure_key=azure_cfg.get("key") or os.environ.get("AZURE_SEARCH_KEY"),
+            blob_client=blob_client,
+            manifests_container=blob_cfg.get("manifests_container", "ami-manifests"),
+            course_content_container=blob_cfg.get("course_content_container", "ami-course-content"),
         )
 
-    def _manifest_path(self) -> str:
-        safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", self.collection_name)
-        return os.path.join(self.persist_directory, f"{safe_name}_manifest.json")
+    # ── Snapshot-hash helpers ──────────────────────────────────────────────
 
     @staticmethod
-    def _hash_file(file_path: str) -> str:
-        digest = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _compute_snapshot_hash(blobs) -> str:
+        """Deterministic SHA256 hash from blob metadata. Does not read file content."""
+        sorted_blobs = sorted(blobs, key=lambda b: b.name)
+        entries = [
+            [
+                b.name,
+                str(b.etag).strip('"'),  # Azure ETags include surrounding double-quotes
+                b.size,
+                b.last_modified.isoformat() if b.last_modified else "",
+            ]
+            for b in sorted_blobs
+        ]
+        payload = json.dumps(entries, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
-    @staticmethod
-    def _iter_supported_files(base_dir: str) -> List[str]:
-        if not os.path.isdir(base_dir):
-            return []
-        paths: List[str] = []
-        for root, _dirs, files in os.walk(base_dir):
-            for fname in files:
-                if fname in SKIP_FILES or fname.startswith("."):
-                    continue
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in SUPPORTED_EXTENSIONS:
-                    continue
-                paths.append(os.path.join(root, fname))
-        return sorted(paths)
-
-    def _build_manifest(self, base_dir: str) -> Dict[str, Any]:
-        files: List[Dict[str, Any]] = []
-        base_dir_abs = os.path.abspath(base_dir)
-        for file_path in self._iter_supported_files(base_dir_abs):
-            try:
-                file_stat = os.stat(file_path, follow_symlinks=False)
-            except OSError as e:
-                logger.warning(f"Skipping unreadable verified content file '{file_path}': {e}")
-                continue
-
-            if not stat.S_ISREG(file_stat.st_mode):
-                logger.warning(f"Skipping non-regular verified content file '{file_path}'")
-                continue
-
-            try:
-                file_hash = self._hash_file(file_path)
-            except OSError as e:
-                logger.warning(f"Skipping unreadable verified content file '{file_path}': {e}")
-                continue
-
-            rel_path = os.path.relpath(file_path, base_dir_abs).replace(os.sep, "/")
-            files.append(
-                {
-                    "path": rel_path,
-                    "size": file_stat.st_size,
-                    "mtime_ns": file_stat.st_mtime_ns,
-                    "sha256": file_hash,
-                }
-            )
-
-        hash_input = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        manifest_hash = hashlib.sha256(hash_input).hexdigest()
-        return {
-            "version": self.MANIFEST_VERSION,
-            "collection_name": self.collection_name,
-            "base_dir": base_dir_abs,
-            "file_count": len(files),
-            "manifest_hash": manifest_hash,
-            "files": files,
-        }
-
-    def _load_manifest(self) -> Optional[Dict[str, Any]]:
-        manifest_path = self._manifest_path()
-        if not os.path.exists(manifest_path):
+    def _get_stored_hash(self) -> Optional[str]:
+        """Download stored snapshot hash from blob storage. Returns None if absent."""
+        if not self.blob_client:
+            return None
+        data = self.blob_client.download(self.manifests_container, _SNAPSHOT_BLOB_NAME)
+        if data is None:
             return None
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                return None
-            return data
+            return data.decode("utf-8").strip()
         except Exception as e:
-            logger.warning(f"Failed to load verified content manifest '{manifest_path}': {e}")
+            logger.warning(f"Failed to decode stored snapshot hash: {e}")
             return None
 
-    def _save_manifest(self, manifest: Dict[str, Any]) -> None:
-        os.makedirs(self.persist_directory, exist_ok=True)
-        manifest_path = self._manifest_path()
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2, sort_keys=True)
+    def _store_hash(self, h: str) -> None:
+        """Upload snapshot hash to blob storage."""
+        if not self.blob_client:
+            logger.warning("No blob client configured — snapshot hash not saved")
+            return
+        self.blob_client.upload(
+            self.manifests_container,
+            _SNAPSHOT_BLOB_NAME,
+            h.encode("utf-8"),
+            content_type="text/plain",
+        )
+        logger.info(f"Saved snapshot hash to '{self.manifests_container}/{_SNAPSHOT_BLOB_NAME}'")
+
+    def _list_source_blobs(self) -> list:
+        """List blobs in the course-content container, filtered to supported extensions."""
+        if not self.blob_client:
+            logger.warning("No blob client configured — cannot list source blobs")
+            return []
+        blobs = self.blob_client.list_blobs(self.course_content_container)
+        filtered = []
+        for b in blobs:
+            fname = b.name.split("/")[-1] if "/" in b.name else b.name
+            if fname in SKIP_FILES or fname.startswith("."):
+                continue
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                continue
+            filtered.append(b)
+        logger.info(f"Found {len(filtered)} supported blobs in '{self.course_content_container}'")
+        return filtered
+
+    # ── Azure Search helpers ───────────────────────────────────────────────
 
     def _get_azure_search_client(self):
         from azure.search.documents import SearchClient
@@ -183,7 +175,7 @@ class VerifiedContentManager:
             return self._get_azure_search_client().get_document_count()
         except Exception as e:
             logger.warning(f"Could not get document count from Azure Search: {e}")
-            return -1  # unknown → sync_verified_content falls through to manifest check
+            return -1  # unknown → sync falls through to hash check
 
     def _clear_collection(self) -> None:
         client = self._get_azure_search_client()
@@ -195,13 +187,18 @@ class VerifiedContentManager:
         else:
             logger.info(f"Index '{self.collection_name}' was already empty")
 
-    def sync_verified_content(self, base_dir: str, *, force: bool = False) -> Dict[str, Any]:
-        """Sync verified-content index to disk resources.
+    # ── Sync ──────────────────────────────────────────────────────────────
 
-        Reindexes the verified collection when files are added, deleted, or updated.
+    def sync_verified_content(self, *, force: bool = False) -> Dict[str, Any]:
+        """Sync verified-content index to blob storage.
+
+        Lists blobs in the course-content container, computes a snapshot hash
+        from their metadata, and re-indexes only when the hash has changed or
+        the collection is empty.  No local files are required.
         """
-        current_manifest = self._build_manifest(base_dir)
-        stored_manifest = self._load_manifest()
+        blobs = self._list_source_blobs()
+        computed_hash = self._compute_snapshot_hash(blobs)
+        stored_hash = self._get_stored_hash()
         existing_count = self._get_document_count()
 
         reason = "unchanged"
@@ -212,71 +209,146 @@ class VerifiedContentManager:
             should_reindex = True
             reason = "empty_collection"
         elif existing_count < 0:
-            # Count unknown (Azure unavailable) — rely on manifest
-            if stored_manifest is None:
+            # Count unknown (Azure unavailable) — rely on hash
+            if stored_hash is None:
                 should_reindex = True
-                reason = "missing_manifest"
-            elif stored_manifest.get("manifest_hash") != current_manifest.get("manifest_hash"):
+                reason = "missing_hash"
+            elif stored_hash != computed_hash:
                 should_reindex = True
-                reason = "manifest_changed"
-        elif stored_manifest is None:
+                reason = "hash_changed"
+        elif stored_hash is None:
             should_reindex = True
-            reason = "missing_manifest"
-        elif stored_manifest.get("manifest_hash") != current_manifest.get("manifest_hash"):
+            reason = "missing_hash"
+        elif stored_hash != computed_hash:
             should_reindex = True
-            reason = "manifest_changed"
+            reason = "hash_changed"
 
         if not should_reindex:
             logger.info(
                 f"Verified content unchanged for collection '{self.collection_name}' "
-                f"({current_manifest.get('file_count', 0)} file(s)); skipping re-index."
+                f"({len(blobs)} blob(s)); skipping re-index."
             )
             return {
                 "reindexed": False,
                 "reason": reason,
                 "collection_count": existing_count,
-                "manifest_hash": current_manifest.get("manifest_hash"),
+                "snapshot_hash": computed_hash,
             }
 
         if existing_count > 0:
             self._clear_collection()
 
-        indexed_count = self.index_verified_content(base_dir)
-        self._save_manifest(current_manifest)
+        indexed_count = self.index_verified_content(blobs)
+        self._store_hash(computed_hash)
         logger.info(
             f"Verified content sync completed for '{self.collection_name}' "
-            f"(reason={reason}, indexed={indexed_count}, files={current_manifest.get('file_count', 0)})."
+            f"(reason={reason}, indexed={indexed_count}, blobs={len(blobs)})."
         )
         return {
             "reindexed": True,
             "reason": reason,
             "collection_count": indexed_count,
-            "manifest_hash": current_manifest.get("manifest_hash"),
+            "snapshot_hash": computed_hash,
         }
 
-    def index_verified_content(self, base_dir: str) -> int:
-        """Loads, splits, and adds verified content to vectorstore. Skips if collection already has documents."""
-        existing_count = self._get_document_count()
-        if existing_count > 0:
-            logger.info(
-                f"Verified content collection '{self.collection_name}' already has "
-                f"{existing_count} documents. Skipping indexing."
-            )
-            return existing_count
+    def index_verified_content(self, blobs) -> int:
+        """Load blobs from the course-content container, split, and add to vectorstore."""
+        if not blobs:
+            logger.warning("No source blobs to index.")
+            return 0
 
-        documents = load_all_verified_content(base_dir)
-        if not documents:
+        def _process_blob(blob):
+            parts = blob.name.split("/")
+            if len(parts) < 3:
+                logger.debug(f"Skipping blob with unexpected path: {blob.name}")
+                return []
+
+            course_folder = parts[0]
+            category = parts[1]
+            fname = parts[-1]
+
+            if category not in CONTENT_CATEGORIES:
+                return []
+
+            # Parse course metadata from folder: {code}_{name}_{term}
+            folder_parts = course_folder.split("_", 2)
+            if len(folder_parts) >= 3:
+                course_code = folder_parts[0]
+                course_name = folder_parts[1].replace("-", " ")
+                term = folder_parts[2].replace("-", " ")
+            elif len(folder_parts) == 2:
+                course_code = folder_parts[0]
+                course_name = folder_parts[1].replace("-", " ")
+                term = "unknown"
+            else:
+                course_code = course_folder
+                course_name = course_folder
+                term = "unknown"
+
+            ext = os.path.splitext(fname)[1].lower()
+            lecture_number = _extract_lecture_number(fname)
+            effective_category = _effective_content_category(category, fname)
+
+            try:
+                if ext in (".pdf", ".pptx"):
+                    sas_url = self.blob_client.generate_sas_url(
+                        self.course_content_container, blob.name
+                    )
+                    docs = _load_with_azure_di(url_source=sas_url)
+                elif ext == ".json":
+                    content_bytes = self.blob_client.download(
+                        self.course_content_container, blob.name
+                    )
+                    if content_bytes is None:
+                        return []
+                    docs = _load_blob_json(content_bytes, blob.name)
+                else:
+                    # .py, .txt, .md
+                    content_bytes = self.blob_client.download(
+                        self.course_content_container, blob.name
+                    )
+                    if content_bytes is None:
+                        return []
+                    docs = _load_blob_text(content_bytes, blob.name)
+            except Exception as e:
+                logger.error(f"Failed to load blob '{blob.name}': {e}")
+                return []
+
+            for doc in docs:
+                doc.metadata.update({
+                    "source_type": "verified_content",
+                    "course_code": course_code,
+                    "course_name": course_name,
+                    "term": term,
+                    "content_category": effective_category,
+                    "file_name": fname,
+                    "lecture_number": lecture_number,
+                })
+            return docs
+
+        all_documents: List[Document] = []
+        max_workers = min(4, max(1, len(blobs)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_blob, blob): blob for blob in blobs}
+            for future in as_completed(futures):
+                blob = futures[future]
+                try:
+                    docs = future.result()
+                    all_documents.extend(docs)
+                except Exception as e:
+                    logger.error(f"Failed processing blob '{blob.name}': {e}")
+
+        if not all_documents:
             logger.warning("No verified content documents found to index.")
             return 0
 
-        documents = [doc for doc in documents if len(doc.page_content.strip()) > 0]
-        split_docs = self.text_splitter.split_documents(documents)
+        all_documents = [doc for doc in all_documents if len(doc.page_content.strip()) > 0]
+        split_docs = self.text_splitter.split_documents(all_documents)
         prefilter_count = len(split_docs)
 
         def is_low_signal_chunk(doc: Document) -> bool:
             text = (doc.page_content or "").strip().lower()
             file_name = str((doc.metadata or {}).get("file_name", "")).lower()
-            # Keep code files available for reference retrieval.
             if file_name.endswith(".py"):
                 return False
             if not text:
@@ -289,7 +361,6 @@ class VerifiedContentManager:
             ]
             if any(m in text for m in boilerplate_markers):
                 return True
-            # Filter generic title/agenda pages that add little topical signal.
             if text.startswith("welcome!") or ("today" in text and "course info" in text):
                 return True
             alpha_chars = sum(1 for ch in text if ch.isalpha())
@@ -299,8 +370,6 @@ class VerifiedContentManager:
         if filtered_docs:
             split_docs = filtered_docs
         else:
-            # Never index an empty list due to over-aggressive filtering;
-            # keep original chunks as a safe fallback.
             logger.warning(
                 "Low-signal filtering removed all verified chunks; "
                 f"falling back to unfiltered set ({prefilter_count} chunk(s))."
@@ -309,8 +378,7 @@ class VerifiedContentManager:
         for doc in split_docs:
             if "source_type" not in doc.metadata:
                 doc.metadata["source_type"] = "verified_content"
-            # Azure AI Search only accepts flat primitive metadata values.
-            # Docling injects complex nested dicts/lists — strip them out.
+            # Azure AI Search requires flat primitive metadata values
             doc.metadata = {
                 k: v for k, v in doc.metadata.items()
                 if isinstance(v, (str, int, float, bool)) or v is None
@@ -327,6 +395,8 @@ class VerifiedContentManager:
             f"'{self.collection_name}' (total: {final_count})"
         )
         return final_count
+
+    # ── Retrieval ─────────────────────────────────────────────────────────
 
     def retrieve(self, query: str, k: int = 5) -> List[Document]:
         """Similarity search against the verified content collection."""
@@ -403,7 +473,7 @@ class VerifiedContentManager:
             if len(t) > 1
         }
 
-        def score(doc: Document) -> tuple[int, int]:
+        def score(doc: Document) -> tuple:
             meta = doc.metadata or {}
             meta_text = " ".join([
                 str(meta.get("title", "")),
