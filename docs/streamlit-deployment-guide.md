@@ -33,13 +33,31 @@ Streamlit builds and hosts the app automatically. Any future `git push` to the c
 
 ### Step 2: Set the backend URL
 
-Once the backend is deployed (Part 2), update `frontend/config.py`:
+Once the backend is deployed (Part 2), set the backend URLs in **Streamlit Community Cloud app secrets** instead of hardcoding them in `frontend/config.py`.
 
-```python
-BACKEND_ENDPOINT = "http://<your-container-dns>.eastus.azurecontainer.io:8000"
+Open your Streamlit app settings and add:
+
+```toml
+BACKEND_ENDPOINT = "http://<your-container-dns>.eastus.azurecontainer.io:8000/"
+BACKEND_PUBLIC_ENDPOINT = "http://<your-container-dns>.eastus.azurecontainer.io:8000/"
 ```
 
-Push to GitHub — Streamlit redeploys automatically.
+`frontend/config.py` already reads `BACKEND_ENDPOINT` and `BACKEND_PUBLIC_ENDPOINT` from environment variables, so no code change is required.
+
+Use:
+- `BACKEND_ENDPOINT` for Streamlit server-side API calls
+- `BACKEND_PUBLIC_ENDPOINT` for browser-facing media URLs (audio, diagrams, static assets)
+
+If you later place the backend behind a public HTTPS endpoint, update both values to that HTTPS URL.
+
+Push to GitHub or restart the app from Community Cloud after updating secrets.
+
+**Community Cloud + HTTP-only backends can break browser-loaded media.**
+The Streamlit app itself can call an HTTP backend server-side, but audio/image/static URLs rendered into the browser use `BACKEND_PUBLIC_ENDPOINT`. If the frontend is served over HTTPS and `BACKEND_PUBLIC_ENDPOINT` is plain HTTP, browsers may block those media requests as mixed content.
+
+If that happens:
+- keep `BACKEND_ENDPOINT` pointed at the reachable backend origin for server-side API calls
+- put the backend behind an HTTPS-capable public endpoint for `BACKEND_PUBLIC_ENDPOINT`
 
 ### Known Issues
 
@@ -131,7 +149,7 @@ az search service create \
 Retrieve the admin key — you'll need it as `AZURE_SEARCH_KEY`:
 
 ```bash
-az search admin-key show --resource-group ami-rg --service-name ami-search --query primaryKey -o tsv
+az search admin-key show --resource-group ami-rg --service-name ami-dti5902-search --query primaryKey -o tsv
 ```
 
 The endpoint will be: `https://ami-dti5902-search.search.windows.net`

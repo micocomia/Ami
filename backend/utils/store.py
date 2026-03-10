@@ -142,6 +142,33 @@ def get_all_profiles_for_user(user_id: str) -> Dict[int, Dict[str, Any]]:
     return result
 
 
+def seed_new_goal_profile_shared_fields(user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy shared preference fields from any existing goal into a new goal profile.
+
+    New-goal creation should inherit the learner's current FSLSM dimensions and
+    behavioral patterns rather than keeping the profiler's fresh baseline values.
+    """
+    seeded = copy.deepcopy(profile) if isinstance(profile, dict) else {}
+    if not seeded:
+        return seeded
+
+    source_prefs = None
+    source_behavioral = None
+    for existing in get_all_profiles_for_user(user_id).values():
+        if source_prefs is None and isinstance(existing.get("learning_preferences"), dict):
+            source_prefs = copy.deepcopy(existing.get("learning_preferences"))
+        if source_behavioral is None and isinstance(existing.get("behavioral_patterns"), dict):
+            source_behavioral = copy.deepcopy(existing.get("behavioral_patterns"))
+        if source_prefs is not None and source_behavioral is not None:
+            break
+
+    if source_prefs is not None:
+        seeded["learning_preferences"] = source_prefs
+    if source_behavioral is not None:
+        seeded["behavioral_patterns"] = source_behavioral
+    return seeded
+
+
 # ---------------------------------------------------------------------------
 # Profile snapshots (pre-update copies used for adaptation comparison)
 # ---------------------------------------------------------------------------

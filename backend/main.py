@@ -688,6 +688,7 @@ async def create_goal(user_id: str, request: GoalCreateRequest, current_user: st
     learner_profile = payload.pop("learner_profile", None)
     goal = store.create_goal(user_id, payload)
     if isinstance(learner_profile, dict) and learner_profile:
+        learner_profile = store.seed_new_goal_profile_shared_fields(user_id, learner_profile)
         store.upsert_profile(user_id, goal["id"], learner_profile)
         gdn = learner_profile.get("goal_display_name", "")
         if gdn:

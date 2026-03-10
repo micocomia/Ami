@@ -195,6 +195,49 @@ class TestMergeSharedProfileFields:
         assert dims["fslsm_input"] == -0.4
         assert dims["fslsm_understanding"] == 0.9
 
+    def test_seed_new_goal_profile_inherits_shared_preferences(self):
+        """New-goal creation should inherit the user's existing FSLSM dimensions."""
+        existing_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        existing_behavioral = {"engagement_level": "high", "session_frequency": "daily"}
+        fresh_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_input": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+        store.upsert_profile(
+            "alice",
+            0,
+            _make_profile(
+                learning_preferences=existing_prefs,
+                behavioral_patterns=existing_behavioral,
+            ),
+        )
+
+        seeded = store.seed_new_goal_profile_shared_fields(
+            "alice",
+            _make_profile(
+                learning_preferences=fresh_prefs,
+                behavioral_patterns={"engagement_level": "low"},
+            ),
+        )
+
+        dims = seeded["learning_preferences"]["fslsm_dimensions"]
+        assert dims["fslsm_processing"] == -0.8
+        assert dims["fslsm_perception"] == 0.6
+        assert dims["fslsm_input"] == -0.4
+        assert dims["fslsm_understanding"] == 0.9
+        assert seeded["behavioral_patterns"]["engagement_level"] == "high"
+
 
 # ===================================================================
 # TestPropagatePreferences
@@ -303,3 +346,48 @@ class TestSyncEndpoint:
         """Returns 404 if target goal has no profile."""
         resp = client.post("/v1/sync-profile/alice/99")
         assert resp.status_code == 404
+
+    def test_create_goal_endpoint_inherits_existing_shared_preferences(self, client):
+        """POST /goals should seed the new goal profile from existing shared prefs."""
+        store.upsert_profile(
+            "alice",
+            0,
+            _make_profile(
+                learning_preferences={
+                    "fslsm_dimensions": {
+                        "fslsm_processing": -0.8,
+                        "fslsm_perception": 0.6,
+                        "fslsm_input": -0.4,
+                        "fslsm_understanding": 0.9,
+                    }
+                },
+                behavioral_patterns={"engagement_level": "high"},
+            ),
+        )
+
+        resp = client.post(
+            "/v1/goals/alice",
+            json={
+                "learning_goal": "Second goal",
+                "learner_profile": _make_profile(
+                    learning_preferences={
+                        "fslsm_dimensions": {
+                            "fslsm_processing": 0.0,
+                            "fslsm_perception": 0.0,
+                            "fslsm_input": 0.0,
+                            "fslsm_understanding": 0.0,
+                        }
+                    },
+                    behavioral_patterns={"engagement_level": "low"},
+                ),
+            },
+        )
+
+        assert resp.status_code == 200
+        created_profile = resp.json()["learner_profile"]
+        dims = created_profile["learning_preferences"]["fslsm_dimensions"]
+        assert dims["fslsm_processing"] == -0.8
+        assert dims["fslsm_perception"] == 0.6
+        assert dims["fslsm_input"] == -0.4
+        assert dims["fslsm_understanding"] == 0.9
+        assert created_profile["behavioral_patterns"]["engagement_level"] == "high"
