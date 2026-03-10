@@ -1,5 +1,7 @@
 import os
 import sys
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -207,10 +209,11 @@ def test_no_progress_quality_loop_exits_early(
     )
 
     mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_repair.return_value = {"title": "Topic A", "content": _SINGLE_SECTION_CONTENT}
     mock_draft.return_value = [
         {
             "title": "Topic A",
-            "content": "## Topic A\n\nDetailed explanation of topic A with enough prose to pass deterministic checks.\n",
+            "content": _SINGLE_SECTION_CONTENT,
         }
     ]
     mock_draft_eval.return_value = {
@@ -305,7 +308,389 @@ def test_parallel_draft_repair_runs_all_failed_drafts(
 
     # All 3 failed drafts must have been repaired
     assert mock_repair_fn.call_count == 3
+    assert all(call.kwargs.get("use_search") is False for call in mock_repair_fn.call_args_list)
     assert "document" in result
+
+
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.filter_media_resources_with_llm")
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_draft_terminal_failure_still_runs_required_stages(
+    mock_explore,
+    mock_draft,
+    mock_repair_fn,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+    mock_filter_media,
+    mock_find_media,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    kps = [
+        {"name": "Topic A", "role": "foundational", "solo_level": "beginner"},
+        {"name": "Topic B", "role": "supporting", "solo_level": "beginner"},
+        {"name": "Topic C", "role": "supporting", "solo_level": "beginner"},
+    ]
+    prose = "## {title}\n\nEnough instructional prose for deterministic checks."
+    mock_explore.return_value = kps
+    mock_draft.return_value = [{"title": kp["name"], "content": prose.format(title=kp["name"])} for kp in kps]
+    mock_repair_fn.side_effect = lambda *_args, **kwargs: {
+        "title": kwargs.get("knowledge_point", {}).get("name", "X"),
+        "content": prose.format(title=kwargs.get("knowledge_point", {}).get("name", "X")),
+    }
+    # Keep acceptance ratio below threshold even after one repair pass.
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": False, "issues": ["Weak"], "improvement_directives": "Expand."},
+                {"draft_id": "draft-2", "is_acceptable": False, "issues": ["Weak"], "improvement_directives": "Expand."},
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-1", "is_acceptable": False, "issues": ["Still weak"], "improvement_directives": "Expand more."},
+                {"draft_id": "draft-2", "is_acceptable": False, "issues": ["Still weak"], "improvement_directives": "Expand more."},
+            ]
+        },
+    ]
+    mock_integrate.return_value = "## Topic A\n\nIntegrated best-effort content."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+    mock_find_media.return_value = []
+    mock_filter_media.return_value = []
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": -0.8,
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session Fast Exit"},
+        with_quiz=False,
+        search_rag_manager=MagicMock(search_runner=MagicMock()),
+        use_search=True,
+    )
+
+    assert mock_integrate.call_count == 1
+    assert mock_integrated_eval.call_count == 1
+    assert mock_find_media.call_count == 1
+    assert "Integrated best-effort content" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_conditional_draft_llm_eval_skips_low_risk_drafts(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_integrate.return_value = "## Branching Basics\n\nIntegrated low-risk content."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Low Risk"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_draft_eval.call_count == 0
+    assert mock_integrate.call_count == 1
+
+
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.filter_media_resources_with_llm")
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.find_media_resources")
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_conditional_draft_llm_eval_runs_for_contract_risk(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+    mock_find_media,
+    mock_filter_media,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [
+        {
+            "title": "Branching Basics",
+            "content": _SINGLE_SECTION_CONTENT,
+        }
+    ]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    mock_integrate.return_value = "## Branching Basics\n\nIntegrated content."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+    mock_find_media.return_value = []
+    mock_filter_media.return_value = []
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": -0.8,
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session Visual Risk"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_draft_eval.call_count >= 1
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_conditional_draft_llm_eval_runs_for_advanced_depth_risk(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    advanced_kp = [{"name": "Optimization Tradeoffs", "role": "practical", "solo_level": "intermediate"}]
+    mock_explore.return_value = advanced_kp
+    mock_draft.return_value = [
+        {
+            "title": "Optimization Tradeoffs",
+            "content": (
+                "## Optimization Tradeoffs\n\n"
+                "Optimization balances execution cost, maintainability, and correctness in practical systems with "
+                "concrete tradeoffs, implementation constraints, and evidence-driven decisions."
+            ),
+        }
+    ]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    mock_integrate.return_value = "## Optimization Tradeoffs\n\nIntegrated content."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Advanced Risk"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_draft_eval.call_count == 1
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_final_evaluator_retries_once_on_transient_error(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    mock_integrate.return_value = "## Branching Basics\n\nIntegrated content."
+    mock_integrated_eval.side_effect = [RuntimeError("temporary"), _PASSING_EVAL]
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Retry"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_integrated_eval.call_count == 2
+    assert mock_integrate.call_count == 1
+    assert "Integrated content" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_non_safety_contract_issues_soft_fail_without_retry(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    mock_integrate.return_value = "## Branching Basics\n\nIntegrated content."
+    mock_integrated_eval.return_value = {
+        "is_acceptable": False,
+        "issues": [
+            "There are no Mermaid diagrams or tables present, which is required for the strong visual input mode.",
+            "The checkpoint challenges are present but could be better integrated for the processing mode.",
+        ],
+        "improvement_directives": "Add Mermaid/table and improve checkpoint placement.",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "medium",
+    }
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": -0.8,
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session Soft Contract"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_integrated_eval.call_count == 1
+    assert mock_integrate.call_count == 1
+    assert "Integrated content" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_draft_targeted_repair_uses_search_for_factual_gaps(
+    mock_explore,
+    mock_draft,
+    mock_repair,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_repair.return_value = {"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {
+                    "draft_id": "draft-0",
+                    "is_acceptable": False,
+                    "issues": ["The claim needs source support."],
+                    "improvement_directives": "Add citations and verify factual accuracy with sources.",
+                }
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+            ]
+        },
+    ]
+    mock_integrate.return_value = "## Branching Basics\n\nIntegrated content."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        {
+            "learning_preferences": {
+                "fslsm_dimensions": {
+                    "fslsm_input": -0.8,
+                    "fslsm_processing": 0.0,
+                    "fslsm_perception": 0.0,
+                    "fslsm_understanding": 0.0,
+                }
+            }
+        },
+        {},
+        {"title": "Session Factual Repair"},
+        with_quiz=False,
+        use_search=True,
+    )
+
+    assert mock_repair.call_count == 1
+    assert mock_repair.call_args.kwargs["use_search"] is True
 
 
 @patch(_MOCK_DRAFT_EVAL)
@@ -427,7 +812,7 @@ def test_deterministic_audit_rejects_narrative_only_section():
 @patch(_MOCK_DRAFT_ONE)
 @patch(_MOCK_DRAFT)
 @patch(_MOCK_EXPLORE)
-def test_quality_loop_normalizes_section_redraft_to_integration_retry(
+def test_quality_loop_applies_targeted_section_redraft_once(
     mock_explore,
     mock_draft,
     mock_redraft_one,
@@ -435,8 +820,7 @@ def test_quality_loop_normalizes_section_redraft_to_integration_retry(
     mock_integrated_eval,
     mock_draft_eval,
 ):
-    """Fix 5: when evaluator returns section_redraft, pipeline normalizes to integrator_only.
-    Section drafts must NOT be re-called; the integrator must be retried with feedback."""
+    """When evaluator returns section_redraft, pipeline redrafts only affected drafts once, then reintegrates."""
     from modules.content_generator.orchestrators.content_generation_pipeline import (
         generate_learning_content_with_llm,
     )
@@ -454,12 +838,19 @@ def test_quality_loop_normalizes_section_redraft_to_integration_retry(
     initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
     improved_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\nImproved second section with stronger depth."
     mock_integrate.side_effect = [initial_doc, improved_doc]
+    mock_redraft_one.return_value = {
+        "title": "Applications",
+        "content": (
+            "## Applications\n\n"
+            "Revised instructional prose for applications with clearer depth and examples."
+        ),
+    }
     mock_integrated_eval.side_effect = [
         {
             "is_acceptable": False,
             "issues": ["Section 1 needs clearer instructional depth."],
             "improvement_directives": "Improve depth of section 1.",
-            "repair_scope": "section_redraft",   # Fix 5: normalized to integrator_only
+            "repair_scope": "section_redraft",
             "affected_section_indices": [1],
             "severity": "medium",
         },
@@ -475,12 +866,234 @@ def test_quality_loop_normalizes_section_redraft_to_integration_retry(
         use_search=False,
     )
 
-    # Fix 5: section redraft must NOT be called — scope normalized to integrator_only
-    assert mock_redraft_one.call_count == 0
-    # Integrator called twice: initial + 1 retry
+    assert mock_redraft_one.call_count == 1
+    assert mock_redraft_one.call_args.kwargs["use_search"] is False
     assert mock_integrate.call_count == 2
-    # Improved document returned
     assert "Improved second section" in result["document"]
+    assert mock_integrate.call_args_list[1].kwargs["integration_feedback"] == "Improve depth of section 1."
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_quality_loop_revalidates_targeted_redraft_before_reintegration(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _TWO_KPS
+    mock_draft.return_value = _TWO_KP_DRAFTS
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+        ]
+    }
+    prose = "Detailed instructional prose for concept with concrete examples and clear rationale."
+    initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
+    retry_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\nRetry integration still uses validated drafts."
+    mock_integrate.side_effect = [initial_doc, retry_doc]
+    mock_redraft_one.return_value = {"title": "Applications", "content": "## Applications"}
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": ["Section 1 needs clearer instructional depth."],
+            "improvement_directives": "Improve depth of section 1.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [1],
+            "severity": "medium",
+        },
+        _PASSING_EVAL,
+    ]
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Revalidate Redraft"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 1
+    assert mock_draft_eval.call_count == 1
+    assert mock_integrate.call_count == 2
+    assert mock_integrate.call_args_list[1].kwargs["knowledge_drafts"][1]["content"] == _TWO_KP_DRAFTS[1]["content"]
+    assert "Retry integration still uses validated drafts" in result["document"]
+
+
+@patch("modules.content_generator.orchestrators.content_generation_pipeline.map_integrated_sections_to_draft_ids")
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_quality_loop_parallelizes_multiple_targeted_redrafts(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+    mock_map_sections,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _TWO_KPS
+    mock_draft.return_value = _TWO_KP_DRAFTS
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            ]
+        },
+    ]
+    prose = "Detailed instructional prose for concept with concrete examples and clear rationale."
+    initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
+    revised_doc = (
+        "## Foundations\n\nImproved foundations.\n\n"
+        "## Applications\n\nImproved applications."
+    )
+    mock_integrate.side_effect = [initial_doc, revised_doc]
+    mock_map_sections.return_value = {0: ["draft-0"], 1: ["draft-1"]}
+    state = {"active": 0, "max_active": 0}
+    state_lock = threading.Lock()
+
+    def _parallel_redraft(*_args, **kwargs):
+        with state_lock:
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+        time.sleep(0.05)
+        with state_lock:
+            state["active"] -= 1
+        title = kwargs.get("knowledge_point", {}).get("name", "Updated")
+        return {
+            "title": title,
+            "content": (
+                f"## {title}\n\n"
+                f"Revised instructional prose for {title.lower()} with clearer depth, applied examples, and explicit reasoning."
+            ),
+        }
+
+    mock_redraft_one.side_effect = _parallel_redraft
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": ["Section 0 needs clearer instructional depth.", "Section 1 needs clearer instructional depth."],
+            "improvement_directives": "Improve depth of sections 0 and 1.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [0, 1],
+            "severity": "medium",
+        },
+        _PASSING_EVAL,
+    ]
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Parallel Redraft"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 2
+    assert state["max_active"] > 1
+    assert mock_draft_eval.call_count == 2
+    assert mock_integrate.call_count == 2
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_section_redraft_is_capped_to_one_round(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _TWO_KPS
+    mock_draft.return_value = _TWO_KP_DRAFTS
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+        ]
+    }
+    prose = "Detailed instructional prose for concept with concrete examples and clear rationale."
+    initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
+    revised_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\nRevised prose after targeted redraft."
+    mock_integrate.side_effect = [initial_doc, revised_doc]
+    mock_redraft_one.return_value = {"title": "Applications", "content": revised_doc}
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": ["Section needs more depth."],
+            "improvement_directives": "Increase depth.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [1],
+            "severity": "medium",
+        },
+        {
+            "is_acceptable": False,
+            "issues": ["Section still needs more depth."],
+            "improvement_directives": "Increase depth.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [1],
+            "severity": "medium",
+        },
+    ]
+
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Redraft Cap"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 1
+    assert mock_integrate.call_count == 2
+
+
+def test_integrator_prompts_require_citation_marker_preservation():
+    from modules.content_generator.prompts.learning_document_integrator import (
+        integrated_document_generator_system_prompt,
+        section_synthesis_system_prompt,
+    )
+
+    assert "Do NOT renumber, delete, or invent citation markers" in integrated_document_generator_system_prompt
+    assert "Do NOT renumber, remove, or invent citation markers" in section_synthesis_system_prompt
 
 
 @patch(_MOCK_DRAFT_EVAL)

@@ -34,6 +34,7 @@ Your role is to quality-check a single drafted knowledge section before it is in
 1. **Evaluate, Do Not Rewrite**: You must assess the draft and return a structured verdict. Do not rewrite the draft itself.
 2. **Check Structural Quality**:
    * The draft must contain substantive instructional content, not just headings or media placeholders.
+   * The draft should represent one core teaching section for one `knowledge_point`, with exactly one top-level `##` heading and any substructure placed under `###`/`####`.
    * Each `##` section must contain real teaching content or meaningful `###` subsections with explanatory prose beneath them.
    * Flag drafts that are skeletal, repetitive, incoherent, or empty.
 3. **Check Learner Fit**:

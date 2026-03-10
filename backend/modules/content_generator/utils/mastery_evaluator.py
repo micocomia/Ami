@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.learner_profiler.utils import fslsm_adaptation
-from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session, is_strong_success
+from modules.content_generator.utils.quiz_scorer import (
+    build_quiz_feedback,
+    compute_quiz_score,
+    get_mastery_threshold_for_session,
+    is_strong_success,
+)
 from utils.solo_evaluator import evaluate_free_text_response, evaluate_short_answer_response
 
 
@@ -29,6 +34,7 @@ def evaluate_mastery_submission(
         - updated_adaptation_state: adaptation state with evidence windows updated
         - short_answer_feedback: list of per-question feedback dicts
         - open_ended_feedback: list of per-question feedback dicts
+        - quiz_feedback: deterministic + LLM-enhanced per-question explanation payload
     """
     short_answer_feedback: List[Dict[str, Any]] = []
     open_ended_feedback: List[Dict[str, Any]] = []
@@ -114,6 +120,11 @@ def evaluate_mastery_submission(
         profile, updated_adaptation_state, daily_cap=adaptation_daily_cap
     )
     updated_adaptation_state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    quiz_feedback = build_quiz_feedback(
+        quiz_data=quiz_data,
+        user_answers=quiz_answers,
+        llm_evaluations=llm_evaluations if llm_evaluations else None,
+    )
 
     return {
         "score_percentage": round(score_pct, 1),
@@ -126,4 +137,5 @@ def evaluate_mastery_submission(
         "updated_adaptation_state": updated_adaptation_state,
         "short_answer_feedback": short_answer_feedback,
         "open_ended_feedback": open_ended_feedback,
+        "quiz_feedback": quiz_feedback,
     }

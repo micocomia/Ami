@@ -223,6 +223,7 @@ class OrchestrationQualityTrace(BaseModel):
     draft_records: List[DraftQualityRecord] = Field(default_factory=list)
     integration_records: List[IntegratedQualityRecord] = Field(default_factory=list)
     draft_evaluator_status: str = "ok"
+    draft_llm_skipped_count: int = 0
     quality_checkpoint_passed: bool = False
     draft_stage_degraded: bool = False
     accepted_draft_ratio: float = 0.0
@@ -231,6 +232,11 @@ class OrchestrationQualityTrace(BaseModel):
     final_failure_reason: str = ""
     severity: Literal["low", "medium", "high"] = "low"
     stage_timings_ms: dict[str, float] = Field(default_factory=dict)
+    evaluator_exception_count: int = 0
+    evaluator_retry_count: int = 0
+    early_exit_reason: str = ""
+    skipped_stages: List[str] = Field(default_factory=list)
+    contract_soft_fail_issues: List[str] = Field(default_factory=list)
 
 
 class ContentSection(BaseModel):

@@ -1074,6 +1074,10 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
     session["mastery_score"] = result["score_percentage"]
     session["is_mastered"] = result["is_mastered"]
     session["mastery_threshold"] = result["threshold"]
+    session["mastery_feedback"] = {
+        "quiz_feedback": result.get("quiz_feedback", {}),
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+    }
     learning_path[request.session_index] = session
     store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
 
@@ -1093,9 +1097,12 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
         "correct_count": result["correct_count"],
         "total_count": result["total_count"],
         "session_id": session.get("id", ""),
+        "updated_session": session,
         "plan_adaptation_suggested": bool(runtime_adaptation.get("suggested", False)),
         "fslsm_adjustments": result["fslsm_adjustments"],
     }
+    if result.get("quiz_feedback"):
+        response["quiz_feedback"] = result["quiz_feedback"]
     if result["short_answer_feedback"]:
         response["short_answer_feedback"] = result["short_answer_feedback"]
     if result["open_ended_feedback"]:
@@ -1103,11 +1110,30 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
     return response
 
 
+@protected_router.post("/reset-mastery-attempt", summary="Clear a session's persisted mastery attempt so the learner can retake the quiz")
+async def reset_mastery_attempt(request: ResetMasteryAttemptRequest, current_user: str = Depends(get_current_user)):
+    """Clear mastery score/status/feedback for a specific session."""
+    _assert_owns(current_user, request.user_id)
+    goal = _goal_or_404(request.user_id, request.goal_id)
+
+    learning_path = goal.get("learning_path", [])
+    if request.session_index < 0 or request.session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = dict(learning_path[request.session_index])
+    for key in ("mastery_score", "is_mastered", "mastery_threshold", "mastery_feedback"):
+        session.pop(key, None)
+
+    learning_path[request.session_index] = session
+    store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
+    return {"ok": True, "updated_session": session}
+
+
 @protected_router.get("/quiz-mix/{user_id}", summary="Get the SOLO Taxonomy-aligned question type distribution for a session's quiz")
 async def get_quiz_mix(user_id: str, goal_id: int, session_index: int, current_user: str = Depends(get_current_user)):
     """Return the question type counts for a session based on its proficiency level."""
     _assert_owns(current_user, user_id)
-    from utils.quiz_scorer import get_quiz_mix_for_session
+    from modules.content_generator.utils.quiz_scorer import get_quiz_mix_for_session
 
     goal = _goal_or_404(user_id, goal_id)
 

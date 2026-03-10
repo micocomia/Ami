@@ -10,7 +10,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from utils.quiz_scorer import (
+from modules.content_generator.utils.quiz_scorer import (
+    build_quiz_feedback,
     compute_quiz_score,
     get_mastery_threshold_for_session,
     get_quiz_mix_for_session,
@@ -267,6 +268,82 @@ class TestComputeQuizScoreWithLLMEvaluations:
         correct, total, pct = compute_quiz_score(quiz, answers, None)
         assert total == 2
         assert correct == pytest.approx(0.0)
+
+
+class TestBuildQuizFeedback:
+    FEEDBACK_QUIZ = {
+        "single_choice_questions": [
+            {"question": "Q1", "options": ["A", "B", "C"], "correct_option": 1, "explanation": ""},
+        ],
+        "multiple_choice_questions": [
+            {"question": "Q2", "options": ["A", "B", "C"], "correct_options": [0, 2], "explanation": ""},
+        ],
+        "true_false_questions": [
+            {"question": "Q3", "correct_answer": True, "explanation": ""},
+        ],
+        "short_answer_questions": [
+            {"question": "Q4", "expected_answer": "Python", "explanation": ""},
+        ],
+        "open_ended_questions": [
+            {"question": "Q5", "rubric": "...", "example_answer": "Reference answer", "explanation": ""},
+        ],
+    }
+
+    def test_feedback_marks_incorrect_objective_answers(self):
+        answers = {
+            "single_choice_questions": ["A"],
+            "multiple_choice_questions": [["A", "B"]],
+            "true_false_questions": ["False"],
+            "short_answer_questions": ["Java"],
+            "open_ended_questions": ["Some attempt"],
+        }
+        evals = {
+            "short_answer_evaluations": [{"is_correct": False, "feedback": "Missed the key concept."}],
+            "open_ended_evaluations": [{"solo_level": "relational", "score": 0.75, "feedback": "Good synthesis."}],
+        }
+        feedback = build_quiz_feedback(self.FEEDBACK_QUIZ, answers, evals)
+
+        sc = feedback["single_choice_questions"][0]
+        assert sc["is_correct"] is False
+        assert sc["user_answer"] == "A"
+        assert sc["correct_answer"] == "B"
+        assert "correct answer" in sc["reason"]
+
+        mc = feedback["multiple_choice_questions"][0]
+        assert mc["is_correct"] is False
+        assert mc["correct_answer"] == ["A", "C"]
+        assert "missing: C" in mc["reason"]
+        assert "incorrect selections: B" in mc["reason"]
+
+        tf = feedback["true_false_questions"][0]
+        assert tf["is_correct"] is False
+        assert tf["correct_answer"] == "True"
+
+        sa = feedback["short_answer_questions"][0]
+        assert sa["is_correct"] is False
+        assert sa["feedback"] == "Missed the key concept."
+        assert sa["reason"] == "Missed the key concept."
+
+        oe = feedback["open_ended_questions"][0]
+        assert oe["reference_answer"] == "Reference answer"
+        assert oe["solo_level"] == "relational"
+        assert oe["score"] == pytest.approx(0.75)
+
+    def test_feedback_marks_missing_answers(self):
+        answers = {
+            "single_choice_questions": [None],
+            "multiple_choice_questions": [[]],
+            "true_false_questions": [None],
+            "short_answer_questions": [None],
+            "open_ended_questions": [None],
+        }
+        feedback = build_quiz_feedback(self.FEEDBACK_QUIZ, answers)
+
+        assert feedback["single_choice_questions"][0]["reason"] == "No answer provided."
+        assert feedback["multiple_choice_questions"][0]["reason"] == "No answer provided."
+        assert feedback["true_false_questions"][0]["reason"] == "No answer provided."
+        assert feedback["short_answer_questions"][0]["reason"] == "No answer provided."
+        assert feedback["open_ended_questions"][0]["feedback"] == "No answer provided."
 
 
 class TestGetMasteryThreshold:

@@ -22,6 +22,7 @@ from modules.content_generator.agents.learning_document_integrator import (
     build_inline_assets_plan,
     integrate_learning_document_parallel,
     integrate_learning_document_with_llm,
+    map_integrated_sections_to_draft_ids,
 )
 from modules.content_generator.agents.media_relevance_evaluator import filter_media_resources_with_llm
 from modules.content_generator.agents.narrative_resource_generator import generate_narrative_resources_with_llm
@@ -71,8 +72,9 @@ _MAX_BATCH_CHARS = 18_000
 _MAX_SINGLE_DRAFT_CHARS = 6_000
 _MAX_DRAFT_RETRIES = 1
 _MAX_KNOWLEDGE_POINTS = 4  # cap explorer output; prefer 3–4 deep points over 5+ shallow ones
-_MAX_QUALITY_ROUNDS = 3
+_MAX_QUALITY_ROUNDS = 2
 _MAX_INTEGRATOR_RETRIES = _MAX_QUALITY_ROUNDS - 1  # all rounds used for integration retries
+_MAX_SECTION_REDRAFT_ROUNDS = 1
 _MIN_ACCEPTABLE_DRAFT_RATIO = 0.7
 
 
@@ -452,7 +454,73 @@ def _apply_batched_draft_eval(
     if not deterministic_pass_records:
         return
 
-    batches = _build_draft_batches(deterministic_pass_records)
+    contract = session_adaptation_contract if isinstance(session_adaptation_contract, Mapping) else {}
+    input_mode = str(((contract.get("input") or {}) if isinstance(contract.get("input"), Mapping) else {}).get("mode", "")).strip().lower()
+    processing_mode = str(((contract.get("processing") or {}) if isinstance(contract.get("processing"), Mapping) else {}).get("mode", "")).strip().lower()
+    understanding_mode = str(((contract.get("understanding") or {}) if isinstance(contract.get("understanding"), Mapping) else {}).get("mode", "")).strip().lower()
+
+    llm_eval_candidates: list[dict[str, Any]] = []
+    skipped_count = 0
+    for record in deterministic_pass_records:
+        draft = record.get("draft", {}) if isinstance(record.get("draft"), dict) else {}
+        knowledge_point = record.get("knowledge_point", {}) if isinstance(record.get("knowledge_point"), Mapping) else {}
+        content = str(draft.get("content", "") or "")
+        lowered = content.lower()
+        knowledge_role = str(knowledge_point.get("role", "") or "").strip().lower()
+        knowledge_solo = str(knowledge_point.get("solo_level", "") or "").strip().lower()
+        needs_llm_eval = False
+
+        # Complexity and structure risk.
+        if len(deterministic_pass_records) > 3 or len(content) > 2200:
+            needs_llm_eval = True
+        if re.search(r"^##\s+(introduction|overview|conclusion|recap|summary)\b", content, flags=re.IGNORECASE | re.MULTILINE):
+            needs_llm_eval = True
+        if len(re.findall(r"^###\s+.+$", content, flags=re.MULTILINE)) >= 6:
+            needs_llm_eval = True
+
+        # Contract-sensitive quick risk checks.
+        if input_mode == "strong_visual":
+            has_mermaid = "```mermaid" in lowered
+            has_table = bool(re.search(r"^\s*\|.*\|\s*$", content, flags=re.MULTILINE))
+            if not (has_mermaid and has_table):
+                needs_llm_eval = True
+        elif input_mode == "mild_visual":
+            has_visual_layout = (
+                "```mermaid" in lowered
+                or bool(re.search(r"^\s*\|.*\|\s*$", content, flags=re.MULTILINE))
+                or bool(re.search(r"!\[[^\]]*\]\([^)]+\)", content))
+            )
+            if not has_visual_layout:
+                needs_llm_eval = True
+        elif input_mode in {"mild_verbal", "strong_verbal"}:
+            if re.search(r"\bsee (the )?(figure|diagram|table|image)\b", lowered):
+                needs_llm_eval = True
+
+        if processing_mode == "active" and "checkpoint" not in lowered and "try it" not in lowered:
+            needs_llm_eval = True
+        if understanding_mode == "sequential" and re.search(r"\b(later|upcoming|we will cover|before we learn)\b", lowered):
+            needs_llm_eval = True
+        if understanding_mode == "global" and str(record.get("draft_id", "")).strip() == "draft-0":
+            needs_llm_eval = True
+        if knowledge_role in {"practical", "strategic"}:
+            needs_llm_eval = True
+        if knowledge_solo in {"intermediate", "advanced", "expert"}:
+            needs_llm_eval = True
+
+        if needs_llm_eval:
+            llm_eval_candidates.append(record)
+        else:
+            skipped_count += 1
+            record["llm_pass"] = True
+            record["issues"] = []
+            record["directives"] = ""
+            record["status"] = "accepted_fastpath"
+
+    trace["draft_llm_skipped_count"] = int(trace.get("draft_llm_skipped_count", 0)) + skipped_count
+    if not llm_eval_candidates:
+        return
+
+    batches = _build_draft_batches(llm_eval_candidates)
     for batch_index, batch in enumerate(batches):
         payload_drafts = [
             {
@@ -538,6 +606,7 @@ def generate_learning_content_with_llm(
         "draft_records": [],
         "integration_records": [],
         "draft_evaluator_status": "ok",
+        "draft_llm_skipped_count": 0,
         "quality_checkpoint_passed": False,
         "draft_stage_degraded": False,
         "accepted_draft_ratio": 0.0,
@@ -546,6 +615,11 @@ def generate_learning_content_with_llm(
         "fallback_mode": None,
         "final_failure_reason": "",
         "severity": "low",
+        "evaluator_exception_count": 0,
+        "evaluator_retry_count": 0,
+        "early_exit_reason": "",
+        "skipped_stages": [],
+        "contract_soft_fail_issues": [],
     }
     integration_records: list[dict[str, Any]] = []
     draft_records: list[dict[str, Any]] = []
@@ -657,6 +731,11 @@ def generate_learning_content_with_llm(
                 if directives:
                     feedback_lines.append(directives)
                 evaluator_feedback = "\n".join(line for line in feedback_lines if line).strip()
+                feedback_lower = evaluator_feedback.lower()
+                needs_retrieval_refresh = any(
+                    marker in feedback_lower
+                    for marker in ("citation", "source", "reference", "fact", "accuracy", "inaccurate", "hallucinat")
+                )
                 try:
                     revised = draft_knowledge_point_with_llm(
                         llm,
@@ -665,7 +744,7 @@ def generate_learning_content_with_llm(
                         learning_session=learning_session,
                         knowledge_points=knowledge_points,
                         knowledge_point=record.get("knowledge_point", {}),
-                        use_search=use_search,
+                        use_search=bool(use_search and needs_retrieval_refresh),
                         session_adaptation_contract=session_adaptation_contract,
                         fast_llm=_fast_llm,
                         max_revision_passes=0,
@@ -866,23 +945,26 @@ def generate_learning_content_with_llm(
             session_adaptation_contract=session_adaptation_contract,
             integration_feedback=integration_feedback,
         )
-        # Use the parallel integrator only when callers explicitly provide
-        # a distinct fast model. Auto-created support models should not change
-        # the default integration path.
         if _explicit_fast_llm and _fast_llm is not None and _fast_llm is not llm:
-            return integrate_learning_document_parallel(fast_llm=_fast_llm, **_common_kwargs)
+            try:
+                return integrate_learning_document_parallel(fast_llm=_fast_llm, **_common_kwargs)
+            except Exception as exc:
+                logger.warning("Parallel integration failed, falling back to monolithic integrator: %s", exc)
         return integrate_learning_document_with_llm(llm, **_common_kwargs)
+
+    quality_rounds = 0
+    integrator_retries = 0
+    section_redraft_rounds = 0
+    final_integration_eval: dict[str, Any] = _integrated_eval_fallback()
+    quality_checkpoint_passed = False
 
     with _time_stage(trace, "integration"):
         learning_document = _integrate_document("")
 
-    quality_rounds = 0
-    integrator_retries = 0
-    final_integration_eval: dict[str, Any] = _integrated_eval_fallback()
-
     with _time_stage(trace, "final_quality_checkpoint"):
         _prev_quality_fingerprint: Optional[tuple] = None
         _prev_issue_count: int = 0
+        last_actionable_eval: Optional[dict[str, Any]] = None
         while quality_rounds < _MAX_QUALITY_ROUNDS:
             quality_rounds += 1
             _check_cancel(cancel_event)
@@ -905,18 +987,101 @@ def generate_learning_content_with_llm(
                     "affected_section_indices": list(deterministic_doc_eval.get("affected_section_indices", [])),
                     "severity": str(deterministic_doc_eval.get("severity", "high") or "high"),
                 }
+                last_actionable_eval = dict(final_integration_eval)
             else:
-                try:
-                    final_integration_eval = evaluate_integrated_document_with_llm(
-                        _fast_llm,
-                        learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
-                        learning_session=learning_session if isinstance(learning_session, Mapping) else {},
-                        knowledge_points=selected_knowledge_points,
-                        session_adaptation_contract=session_adaptation_contract,
-                        document=learning_document,
-                    )
-                except Exception:
-                    final_integration_eval = _integrated_eval_fallback()
+                for eval_attempt in range(2):
+                    try:
+                        final_integration_eval = evaluate_integrated_document_with_llm(
+                            _fast_llm,
+                            learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                            learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                            knowledge_points=selected_knowledge_points,
+                            session_adaptation_contract=session_adaptation_contract,
+                            document=learning_document,
+                        )
+                        break
+                    except Exception as exc:
+                        trace["evaluator_exception_count"] = int(trace.get("evaluator_exception_count", 0)) + 1
+                        if eval_attempt == 0:
+                            trace["evaluator_retry_count"] = int(trace.get("evaluator_retry_count", 0)) + 1
+                            logger.warning("Integrated evaluator failed (attempt 1), retrying once: %s", exc)
+                            continue
+                        logger.warning("Integrated evaluator failed after retry: %s", exc)
+                        if last_actionable_eval is not None:
+                            final_integration_eval = {
+                                "is_acceptable": False,
+                                "issues": list(last_actionable_eval.get("issues", [])),
+                                "improvement_directives": str(
+                                    last_actionable_eval.get("improvement_directives", "")
+                                    or "Reintegrate with clearer section flow and stronger learner-profile fit."
+                                ),
+                                "repair_scope": str(last_actionable_eval.get("repair_scope", "integrator_only")),
+                                "affected_section_indices": list(last_actionable_eval.get("affected_section_indices", [])),
+                                "severity": str(last_actionable_eval.get("severity", "medium") or "medium"),
+                            }
+                        else:
+                            final_integration_eval = _integrated_eval_fallback()
+
+                if not final_integration_eval.get("is_acceptable", False):
+                    current_issues = [str(issue) for issue in final_integration_eval.get("issues", []) if str(issue).strip()]
+                    soft_contract_issues = [
+                        issue
+                        for issue in current_issues
+                        if any(
+                            marker in issue.lower()
+                            for marker in (
+                                "mermaid",
+                                "table",
+                                "tts-friendly",
+                                "processing and perception",
+                                "session adaptation contract",
+                                "application-first",
+                                "theory-first",
+                                "checkpoint",
+                                "visual",
+                                "audio mode",
+                                "input mode",
+                            )
+                        )
+                    ]
+                    hard_signal_issues = [
+                        issue
+                        for issue in current_issues
+                        if any(
+                            marker in issue.lower()
+                            for marker in (
+                                "coherence",
+                                "transition",
+                                "empty",
+                                "placeholder",
+                                "no top-level",
+                                "core section count mismatch",
+                                "generic scaffolding",
+                                "lacks instructional",
+                            )
+                        )
+                    ]
+                    if soft_contract_issues and not hard_signal_issues and len(soft_contract_issues) == len(current_issues):
+                        existing_soft = [str(item) for item in trace.get("contract_soft_fail_issues", [])]
+                        trace["contract_soft_fail_issues"] = list(dict.fromkeys(existing_soft + soft_contract_issues))
+                        logger.info("Soft-failing non-safety contract issues: %s", soft_contract_issues)
+                        final_integration_eval = {
+                            "is_acceptable": True,
+                            "issues": [],
+                            "improvement_directives": "",
+                            "repair_scope": "integrator_only",
+                            "affected_section_indices": [],
+                            "severity": "medium",
+                        }
+                    else:
+                        if current_issues or str(final_integration_eval.get("improvement_directives", "")).strip():
+                            last_actionable_eval = {
+                                "issues": current_issues,
+                                "improvement_directives": str(final_integration_eval.get("improvement_directives", "") or ""),
+                                "repair_scope": str(final_integration_eval.get("repair_scope", "integrator_only")),
+                                "affected_section_indices": list(final_integration_eval.get("affected_section_indices", [])),
+                                "severity": str(final_integration_eval.get("severity", "medium") or "medium"),
+                            }
 
             integration_records.append(
                 {
@@ -933,10 +1098,6 @@ def generate_learning_content_with_llm(
                 break
 
             repair_scope = str(final_integration_eval.get("repair_scope", "integrator_only"))
-            # Fix 5: section_redraft and full_restart are not permitted in the quality loop.
-            # Drafts are already approved; the integrator re-flows them with feedback instead.
-            if repair_scope in ("section_redraft", "full_restart_required"):
-                repair_scope = "integrator_only"
             directives = str(final_integration_eval.get("improvement_directives", "") or "").strip()
             _current_issue_count = len(final_integration_eval.get("issues", []))
             _current_fingerprint = (repair_scope, directives)
@@ -956,6 +1117,174 @@ def generate_learning_content_with_llm(
                 integrator_retries += 1
                 learning_document = _integrate_document(directives)
                 continue
+
+            if repair_scope == "section_redraft" and section_redraft_rounds < _MAX_SECTION_REDRAFT_ROUNDS:
+                affected_section_indices = [
+                    int(idx)
+                    for idx in final_integration_eval.get("affected_section_indices", [])
+                    if isinstance(idx, int) and idx >= 0
+                ]
+                if affected_section_indices:
+                    section_to_draft_ids = map_integrated_sections_to_draft_ids(learning_document, selected_draft_records)
+                    targeted_draft_ids: list[str] = []
+                    for section_index in affected_section_indices:
+                        for draft_id in section_to_draft_ids.get(section_index, []):
+                            if draft_id not in targeted_draft_ids:
+                                targeted_draft_ids.append(draft_id)
+                    if not targeted_draft_ids:
+                        for section_index in affected_section_indices:
+                            if section_index < len(selected_draft_records):
+                                fallback_draft_id = str(selected_draft_records[section_index].get("draft_id", ""))
+                                if fallback_draft_id and fallback_draft_id not in targeted_draft_ids:
+                                    targeted_draft_ids.append(fallback_draft_id)
+
+                    if targeted_draft_ids:
+                        section_redraft_rounds += 1
+                        targeted_lookup = {
+                            str(record.get("draft_id", "")): record
+                            for record in selected_draft_records
+                            if isinstance(record, dict)
+                        }
+                        targeted_applied: list[str] = []
+                        targeted_skipped: list[str] = []
+                        targeted_candidates: list[dict[str, Any]] = []
+                        targeted_snapshots: dict[str, dict[str, Any]] = {}
+                        issues = list(final_integration_eval.get("issues", []))
+
+                        def _redraft_targeted_record(record: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]], Optional[str]]:
+                            draft_id = str(record.get("draft_id", ""))
+                            feedback_lines = [line for line in issues if line]
+                            if directives:
+                                feedback_lines.append(directives)
+                            evaluator_feedback = "\n".join(feedback_lines).strip()
+                            feedback_lower = evaluator_feedback.lower()
+                            needs_retrieval_refresh = any(
+                                marker in feedback_lower
+                                for marker in ("citation", "source", "reference", "fact", "accuracy", "inaccurate", "hallucinat")
+                            )
+                            try:
+                                revised = draft_knowledge_point_with_llm(
+                                    llm,
+                                    learner_profile=learner_profile,
+                                    learning_path=learning_path,
+                                    learning_session=learning_session,
+                                    knowledge_points=selected_knowledge_points,
+                                    knowledge_point=record.get("knowledge_point", {}),
+                                    use_search=bool(use_search and needs_retrieval_refresh),
+                                    session_adaptation_contract=session_adaptation_contract,
+                                    fast_llm=_fast_llm,
+                                    max_revision_passes=0,
+                                    run_quality_gate=False,
+                                    evaluator_feedback=evaluator_feedback,
+                                    search_rag_manager=search_rag_manager,
+                                    goal_context=goal_context,
+                                )
+                            except Exception as exc:
+                                return draft_id, None, str(exc)
+                            revised_draft = revised if isinstance(revised, dict) else {"title": "", "content": str(revised)}
+                            return draft_id, revised_draft, None
+
+                        targeted_records = []
+                        for draft_id in targeted_draft_ids:
+                            record = targeted_lookup.get(draft_id)
+                            if not isinstance(record, dict):
+                                targeted_skipped.append(draft_id)
+                                continue
+                            if int(record.get("attempt_count", 1)) >= 2:
+                                targeted_skipped.append(draft_id)
+                                continue
+                            targeted_records.append(record)
+                            targeted_snapshots[draft_id] = {
+                                "draft": dict(record.get("draft", {})) if isinstance(record.get("draft"), dict) else record.get("draft"),
+                                "deterministic_pass": record.get("deterministic_pass"),
+                                "llm_pass": record.get("llm_pass"),
+                                "issues": list(record.get("issues", [])),
+                                "directives": str(record.get("directives", "") or ""),
+                                "status": str(record.get("status", "")),
+                                "attempt_count": int(record.get("attempt_count", 1)),
+                            }
+
+                        repair_workers = min(4, len(targeted_records))
+                        targeted_results: list[tuple[str, Optional[dict[str, Any]], Optional[str]]] = []
+                        if repair_workers <= 1:
+                            for record in targeted_records:
+                                targeted_results.append(_redraft_targeted_record(record))
+                        else:
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=repair_workers) as repair_pool:
+                                future_map = {
+                                    repair_pool.submit(_redraft_targeted_record, record): str(record.get("draft_id", ""))
+                                    for record in targeted_records
+                                }
+                                for future in concurrent.futures.as_completed(future_map):
+                                    targeted_results.append(future.result())
+
+                        for draft_id, revised_draft, error_message in targeted_results:
+                            record = targeted_lookup.get(draft_id)
+                            if not isinstance(record, dict):
+                                targeted_skipped.append(draft_id)
+                                continue
+                            if error_message is not None:
+                                logger.warning("Targeted section redraft failed for %s: %s", draft_id, error_message)
+                                targeted_skipped.append(draft_id)
+                                continue
+                            record["draft"] = revised_draft if isinstance(revised_draft, dict) else {"title": "", "content": ""}
+                            record["attempt_count"] = int(record.get("attempt_count", 1)) + 1
+                            record["status"] = "pending_targeted_redraft_audit"
+                            targeted_candidates.append(record)
+
+                        if targeted_candidates:
+                            _apply_deterministic_draft_audit(targeted_candidates)
+                            _apply_batched_draft_eval(
+                                _fast_llm,
+                                learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                                learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                                session_adaptation_contract=session_adaptation_contract,
+                                records=targeted_candidates,
+                                trace=trace,
+                            )
+
+                        for record in targeted_candidates:
+                            draft_id = str(record.get("draft_id", ""))
+                            if _draft_is_acceptable(record):
+                                record["status"] = "accepted_targeted_redraft"
+                                targeted_applied.append(draft_id)
+                                continue
+                            snapshot = targeted_snapshots.get(draft_id, {})
+                            record["draft"] = snapshot.get("draft", record.get("draft"))
+                            record["deterministic_pass"] = snapshot.get("deterministic_pass", True)
+                            record["llm_pass"] = snapshot.get("llm_pass", True)
+                            record["issues"] = list(snapshot.get("issues", []))
+                            record["directives"] = str(snapshot.get("directives", "") or "")
+                            record["status"] = "failed_targeted_redraft_validation"
+                            record["attempt_count"] = int(snapshot.get("attempt_count", 1))
+                            targeted_skipped.append(draft_id)
+
+                        selected_knowledge_drafts = [r.get("draft", {}) for r in selected_draft_records]
+                        trace.setdefault("targeted_repairs", []).append(
+                            {
+                                "attempt_count": quality_rounds,
+                                "repair_scope": "section_redraft",
+                                "affected_section_indices": affected_section_indices,
+                                "targeted_draft_ids": targeted_draft_ids,
+                                "applied_draft_ids": targeted_applied,
+                                "skipped_draft_ids": targeted_skipped,
+                            }
+                        )
+                        logger.info(
+                            "Applied targeted section redraft attempt=%s sections=%s targeted=%s applied=%s skipped=%s",
+                            quality_rounds,
+                            affected_section_indices,
+                            targeted_draft_ids,
+                            targeted_applied,
+                            targeted_skipped,
+                        )
+                        if targeted_applied:
+                            learning_document = _integrate_document(directives)
+                            continue
+                if integrator_retries < _MAX_INTEGRATOR_RETRIES:
+                    integrator_retries += 1
+                    learning_document = _integrate_document(directives)
+                    continue
 
             trace["fallback_mode"] = "best_effort"
             if not trace.get("final_failure_reason"):
@@ -989,7 +1318,7 @@ def generate_learning_content_with_llm(
     def _build_quiz() -> dict:
         with _time_stage(trace, "quiz_generation"):
             if quiz_mix_config:
-                from utils.quiz_scorer import get_quiz_mix_for_session as _get_quiz_mix
+                from modules.content_generator.utils.quiz_scorer import get_quiz_mix_for_session as _get_quiz_mix
 
                 session_dict = (
                     learning_session

@@ -197,6 +197,12 @@ class MasteryEvaluationRequest(BaseModel):
     quiz_answers: Dict[str, Any]
 
 
+class ResetMasteryAttemptRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
+
+
 class BehavioralMetricsResponse(BaseModel):
     user_id: str
     goal_id: Optional[int] = None

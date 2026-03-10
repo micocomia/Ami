@@ -161,6 +161,7 @@ API_NAMES = {
     "validate_profile_fairness": "validate-profile-fairness",
     "audit_content_bias": "audit-content-bias",
     "audit_chatbot_bias": "audit-chatbot-bias",
+    "reset_mastery_attempt": "reset-mastery-attempt",
 }
 
 
@@ -679,6 +680,17 @@ def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
         "quiz_answers": quiz_answers,
     }
     response = make_post_request("evaluate-mastery", data)
+    return response if response else None
+
+
+def reset_mastery_attempt(user_id, goal_id, session_index):
+    """Clear persisted mastery attempt for one session."""
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+    }
+    response = make_post_request(API_NAMES["reset_mastery_attempt"], data)
     return response if response else None
 
 
