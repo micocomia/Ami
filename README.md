@@ -10,7 +10,7 @@
 
 ## Overview
 
-This repository is a fork of [GenMentor](https://arxiv.org/pdf/2501.15749) (WWW 2025, Industry Track). Ami extends the original goal-oriented tutoring direction with explicit orchestration layers for quality control, reflexion pipelines, and production-style backend/frontend integration.
+This repository is a fork of [GenMentor](https://arxiv.org/pdf/2501.15749) (WWW 2025, Industry Track). Ami extends the original goal-oriented tutoring direction with explicit orchestration layers for quality control, reflexion pipelines, and production-style backend/frontend integration, including Azure-backed retrieval, storage, and runtime persistence.
 
 The system is grounded in two pedagogical frameworks:
 
@@ -131,10 +131,11 @@ Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the 
 
 ## Tech Stack
 
-- **Backend**: Python 3.13, FastAPI, LangChain, Hydra, ChromaDB
+- **Backend**: Python 3.13, FastAPI, LangChain, Hydra
 - **Frontend (current)**: Streamlit
 - **Frontend (Beta, in development)**: React SPA
-- **Retrieval**: Verified-content vector indexing (HuggingFace `all-mpnet-base-v2`) + web search wrappers
+- **Retrieval**: Azure AI Search indexes (`ami-verified-content`, `ami-web-results`) with OpenAI embeddings (`text-embedding-3-small`) + web search wrappers
+- **Cloud Services**: Azure AI Search, Azure Blob Storage, Azure Cosmos DB, Azure Document Intelligence
 - **Model Routing**: Provider/model overrides via `model_provider` and `model_name`
 - **Testing/Evaluation**: Pytest test suites, LLM-as-a-judge eval scripts (RAGAS-based for RAG, rubric-based for agent quality)
 
@@ -154,7 +155,16 @@ From repo root:
 cp backend/.env.example backend/.env
 ```
 
-Fill API keys and `JWT_SECRET` in `backend/.env`.
+Fill the required keys in `backend/.env`. For the current backend stack, that typically means:
+
+- `OPENAI_API_KEY`
+- `AZURE_SEARCH_ENDPOINT`
+- `AZURE_SEARCH_KEY`
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_COSMOS_CONNECTION_STRING`
+- `JWT_SECRET`
+
+Set `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` and `AZURE_DOCUMENT_INTELLIGENCE_KEY` as well if you plan to ingest or re-index verified course content from PDFs or slides.
 
 #### Step 2 - Start backend on port 8000 (recommended)
 

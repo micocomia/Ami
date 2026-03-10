@@ -194,6 +194,169 @@ def _required_core_draft_ids(records: list[dict[str, Any]]) -> set[str]:
     return set()
 
 
+def _draft_record_content(record: Mapping[str, Any]) -> str:
+    draft = record.get("draft", {}) if isinstance(record.get("draft"), Mapping) else {}
+    return str(draft.get("content", "") or "")
+
+
+def _content_capabilities(content: str) -> set[str]:
+    text = str(content or "")
+    lowered = text.lower()
+    has_mermaid = "```mermaid" in lowered
+    has_table = bool(re.search(r"^\s*\|.*\|\s*$", text, flags=re.MULTILINE))
+    has_visual_layout = (
+        has_mermaid
+        or has_table
+        or bool(re.search(r"!\[[^\]]*\]\([^)]+\)", text))
+        or bool(re.search(r"```(?:[a-zA-Z0-9_+-]+)?\n", text))
+    )
+    has_checkpoint = bool(re.search(r"\bcheckpoint challenge\b|\bcheckpoint\b|\btry it first\b|\btry it\b", lowered))
+    has_reflection = "reflection pause" in lowered
+
+    capabilities: set[str] = set()
+    if has_mermaid:
+        capabilities.add("mermaid")
+    if has_table:
+        capabilities.add("table")
+    if has_visual_layout:
+        capabilities.add("visual")
+    if has_checkpoint:
+        capabilities.add("checkpoint")
+    if has_reflection:
+        capabilities.add("reflection")
+    return capabilities
+
+
+def _draft_record_capabilities(record: Mapping[str, Any]) -> set[str]:
+    return _content_capabilities(_draft_record_content(record))
+
+
+def _draft_set_contract_coverage_issues(
+    records: list[dict[str, Any]],
+    session_adaptation_contract: Any,
+) -> list[str]:
+    contract = session_adaptation_contract if isinstance(session_adaptation_contract, Mapping) else {}
+    input_mode = str(((contract.get("input") or {}) if isinstance(contract.get("input"), Mapping) else {}).get("mode", "")).strip().lower()
+    processing_mode = str(((contract.get("processing") or {}) if isinstance(contract.get("processing"), Mapping) else {}).get("mode", "")).strip().lower()
+
+    combined = "\n\n".join(_draft_record_content(record) for record in records if isinstance(record, Mapping))
+    issues: list[str] = []
+    capabilities = _content_capabilities(combined)
+    has_mermaid = "mermaid" in capabilities
+    has_table = "table" in capabilities
+    has_visual_layout = "visual" in capabilities
+    has_checkpoint = "checkpoint" in capabilities
+    has_reflection = "reflection" in capabilities
+
+    if input_mode == "strong_visual":
+        if not has_mermaid:
+            issues.append("Accepted drafts are missing a Mermaid diagram required for strong_visual input mode.")
+        if not has_table:
+            issues.append("Accepted drafts are missing a markdown table required for strong_visual input mode.")
+    elif input_mode == "mild_visual" and not has_visual_layout:
+        issues.append("Accepted drafts are missing a structured visual element required for mild_visual input mode.")
+
+    if processing_mode == "active" and not has_checkpoint:
+        issues.append("Accepted drafts are missing a clearly labeled checkpoint required for active processing mode.")
+    elif processing_mode == "reflective" and not has_reflection:
+        issues.append("Accepted drafts are missing a clearly labeled Reflection Pause required for reflective processing mode.")
+
+    return issues
+
+
+def _normalized_integrated_eval_scope(evaluation: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(evaluation) if isinstance(evaluation, Mapping) else {}
+    repair_scope = str(normalized.get("repair_scope", "")).strip().lower()
+    if repair_scope not in {"full_restart_required", "section_redraft"}:
+        return normalized
+
+    issues = [str(issue).strip() for issue in normalized.get("issues", []) if str(issue).strip()]
+    if not issues:
+        return normalized
+
+    structural_markers = (
+        "mermaid",
+        "table",
+        "big picture",
+        "overview section",
+        "transition",
+        "summary",
+        "generic section",
+        "section title",
+        "top-level",
+        "heading",
+        "checkpoint",
+        "reflection pause",
+        "order",
+        "sequence",
+        "visual-only",
+        "tts-friendly",
+        "audio mode",
+        "learner profile",
+        "session adaptation contract",
+        "processing",
+        "perception",
+        "coherence",
+    )
+    hard_content_markers = (
+        "unsupported claim",
+        "inaccurate",
+        "hallucinat",
+        "empty",
+        "placeholder",
+        "lacks instructional",
+        "no instructional",
+        "factually",
+        "mislead",
+        "incorrect",
+        "wrong",
+        "instructional depth",
+        "missing explanation",
+        "unclear example",
+        "example detail",
+        "specific example",
+    )
+
+    lowered_issues = [issue.lower() for issue in issues]
+    if all(any(marker in issue for marker in structural_markers) for issue in lowered_issues) and not any(
+        any(marker in issue for marker in hard_content_markers) for issue in lowered_issues
+    ):
+        normalized["repair_scope"] = "integrator_only"
+        normalized["affected_section_indices"] = []
+        normalized["severity"] = str(normalized.get("severity", "high") or "high")
+    return normalized
+
+
+def _contract_coverage_rescue_capabilities(issues: list[str]) -> set[str]:
+    rescue_capabilities: set[str] = set()
+    for issue in issues:
+        lowered = str(issue).strip().lower()
+        if "mermaid diagram" in lowered:
+            rescue_capabilities.update({"mermaid", "visual"})
+        elif "markdown table" in lowered:
+            rescue_capabilities.update({"table", "visual"})
+        elif "structured visual element" in lowered:
+            rescue_capabilities.add("visual")
+    return rescue_capabilities
+
+
+def _select_contract_coverage_repair_candidates(
+    records: list[dict[str, Any]],
+    coverage_issues: list[str],
+) -> list[dict[str, Any]]:
+    rescue_capabilities = _contract_coverage_rescue_capabilities(coverage_issues)
+    if not rescue_capabilities:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for record in records:
+        if _draft_is_acceptable(record):
+            continue
+        if _draft_record_capabilities(record) & rescue_capabilities:
+            candidates.append(record)
+    return candidates
+
+
 def _fallback_knowledge_points(learning_session: Mapping[str, Any] | Any) -> list[dict[str, str]]:
     session_title = ""
     if isinstance(learning_session, Mapping):
@@ -605,6 +768,7 @@ def generate_learning_content_with_llm(
         "trace_id": uuid.uuid4().hex,
         "draft_records": [],
         "integration_records": [],
+        "session_adaptation_contract": {},
         "draft_evaluator_status": "ok",
         "draft_llm_skipped_count": 0,
         "quality_checkpoint_passed": False,
@@ -620,6 +784,7 @@ def generate_learning_content_with_llm(
         "early_exit_reason": "",
         "skipped_stages": [],
         "contract_soft_fail_issues": [],
+        "contract_coverage_issues": [],
     }
     integration_records: list[dict[str, Any]] = []
     draft_records: list[dict[str, Any]] = []
@@ -627,6 +792,9 @@ def generate_learning_content_with_llm(
     _explicit_fast_llm = fast_llm is not None
     _fast_llm = get_fast_llm(llm, fast_llm)
     session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
+    trace["session_adaptation_contract"] = (
+        dict(session_adaptation_contract) if isinstance(session_adaptation_contract, Mapping) else {}
+    )
 
     # 1. Explore knowledge points
     with _time_stage(trace, "explore_knowledge_points"):
@@ -721,15 +889,18 @@ def generate_learning_content_with_llm(
             trace=trace,
         )
 
-    failed_drafts = [r for r in draft_records if not _draft_is_acceptable(r)]
-    if failed_drafts and _MAX_DRAFT_RETRIES > 0:
-        # If there are failed drafts, retry creation in parallel
-        with _time_stage(trace, "draft_targeted_repair"):
-            def _repair_one_draft(record: dict) -> dict:
+    def _repair_draft_records(records: list[dict[str, Any]], *, extra_feedback: str = "", stage_name: str) -> None:
+        if not records:
+            return
+
+        with _time_stage(trace, stage_name):
+            def _repair_one_draft(record: dict[str, Any]) -> dict[str, Any]:
                 feedback_lines = list(record.get("issues", []))
                 directives = str(record.get("directives", "") or "").strip()
                 if directives:
                     feedback_lines.append(directives)
+                if extra_feedback:
+                    feedback_lines.append(extra_feedback)
                 evaluator_feedback = "\n".join(line for line in feedback_lines if line).strip()
                 feedback_lower = evaluator_feedback.lower()
                 needs_retrieval_refresh = any(
@@ -763,15 +934,19 @@ def generate_learning_content_with_llm(
                     record["status"] = "failed_repair"
                 return record
 
-            _repair_workers = min(4, len(failed_drafts))
-            if _repair_workers <= 1:
-                for record in failed_drafts:
+            repair_workers = min(4, len(records))
+            if repair_workers <= 1:
+                for record in records:
                     _repair_one_draft(record)
             else:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=_repair_workers) as _repair_pool:
-                    _repair_futures = {_repair_pool.submit(_repair_one_draft, r): i for i, r in enumerate(failed_drafts)}
-                    for fut in concurrent.futures.as_completed(_repair_futures):
-                        fut.result()  # propagate exceptions; record is mutated in-place
+                with concurrent.futures.ThreadPoolExecutor(max_workers=repair_workers) as repair_pool:
+                    repair_futures = {repair_pool.submit(_repair_one_draft, r): i for i, r in enumerate(records)}
+                    for future in concurrent.futures.as_completed(repair_futures):
+                        future.result()
+
+    failed_drafts = [r for r in draft_records if not _draft_is_acceptable(r)]
+    if failed_drafts and _MAX_DRAFT_RETRIES > 0:
+        _repair_draft_records(failed_drafts, stage_name="draft_targeted_repair")
 
         repaired_subset = failed_drafts
         with _time_stage(trace, "draft_repair_audit"):
@@ -801,6 +976,62 @@ def generate_learning_content_with_llm(
         trace["final_failure_reason"] = (
             f"Draft quality threshold not met (acceptable_ratio={acceptable_ratio:.2f}, required_core_present={has_required_core})."
         )
+
+    contract_coverage_issues = _draft_set_contract_coverage_issues(acceptable_drafts, session_adaptation_contract)
+    trace["contract_coverage_issues"] = contract_coverage_issues
+    if contract_coverage_issues:
+        # Keep pre-integration rescue narrow: only revive failed drafts that already carry
+        # the missing visual artifact. General contract-fit gaps are cheaper to repair at integration.
+        contract_repair_candidates = _select_contract_coverage_repair_candidates(
+            draft_records,
+            contract_coverage_issues,
+        )
+        if contract_repair_candidates:
+            coverage_feedback = "\n".join(contract_coverage_issues)
+            _repair_draft_records(
+                contract_repair_candidates,
+                extra_feedback=coverage_feedback,
+                stage_name="draft_contract_coverage_repair",
+            )
+            with _time_stage(trace, "draft_contract_coverage_audit"):
+                _apply_deterministic_draft_audit(contract_repair_candidates)
+            with _time_stage(trace, "draft_contract_coverage_llm_checkpoint"):
+                _apply_batched_draft_eval(
+                    _fast_llm,
+                    learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
+                    learning_session=learning_session if isinstance(learning_session, Mapping) else {},
+                    session_adaptation_contract=session_adaptation_contract,
+                    records=contract_repair_candidates,
+                    trace=trace,
+                )
+
+            acceptable_drafts = [r for r in draft_records if _draft_is_acceptable(r)]
+            acceptable_ids = {str(r.get("draft_id")) for r in acceptable_drafts}
+            has_required_core = required_core_ids.issubset(acceptable_ids)
+            acceptable_ratio = (len(acceptable_drafts) / len(draft_records)) if draft_records else 0.0
+            trace["accepted_draft_ratio"] = round(acceptable_ratio, 4)
+            trace["draft_stage_degraded"] = any(not _draft_is_acceptable(r) for r in draft_records)
+            draft_quality_terminal_failure = trace["draft_stage_degraded"]
+            trace["contract_coverage_issues"] = _draft_set_contract_coverage_issues(acceptable_drafts, session_adaptation_contract)
+            if trace["contract_coverage_issues"]:
+                logger.info("Draft contract coverage still missing after rescue: %s", trace["contract_coverage_issues"])
+        else:
+            logger.info(
+                "Skipping pre-integration contract rescue; no failed drafts directly cover missing artifacts: %s",
+                contract_coverage_issues,
+            )
+
+    if draft_quality_terminal_failure and (acceptable_ratio < _MIN_ACCEPTABLE_DRAFT_RATIO or not has_required_core):
+        trace["fallback_mode"] = "best_effort"
+        trace["severity"] = "high"
+        trace["final_failure_reason"] = (
+            f"Draft quality threshold not met (acceptable_ratio={acceptable_ratio:.2f}, required_core_present={has_required_core})."
+        )
+    elif str(trace.get("final_failure_reason", "")).startswith("Draft quality threshold not met"):
+        trace["final_failure_reason"] = ""
+        if trace.get("fallback_mode") == "best_effort" and not trace.get("explorer_terminal_failure"):
+            trace["fallback_mode"] = None
+            trace["severity"] = "low"
 
     selected_draft_records = acceptable_drafts
     selected_knowledge_points = [r.get("knowledge_point", {}) for r in selected_draft_records]
@@ -999,6 +1230,7 @@ def generate_learning_content_with_llm(
                             session_adaptation_contract=session_adaptation_contract,
                             document=learning_document,
                         )
+                        final_integration_eval = _normalized_integrated_eval_scope(final_integration_eval)
                         break
                     except Exception as exc:
                         trace["evaluator_exception_count"] = int(trace.get("evaluator_exception_count", 0)) + 1

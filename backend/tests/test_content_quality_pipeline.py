@@ -398,6 +398,329 @@ def test_draft_terminal_failure_still_runs_required_stages(
 @patch(_MOCK_INTEGRATE)
 @patch(_MOCK_DRAFT)
 @patch(_MOCK_EXPLORE)
+@patch(_MOCK_DRAFT_ONE)
+def test_contract_coverage_rescue_restores_required_visual_artifacts(
+    mock_redraft_one,
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    kps = [
+        {"name": "Foundations", "role": "foundational", "solo_level": "beginner"},
+        {"name": "Concept Map", "role": "practical", "solo_level": "intermediate"},
+        {"name": "Walkthrough", "role": "practical", "solo_level": "intermediate"},
+        {"name": "System Diagram", "role": "strategic", "solo_level": "advanced"},
+    ]
+    table_section = (
+        "## Foundations\n\n"
+        "Foundational explanation with enough instructional prose to satisfy deterministic checks and teach the learner clearly.\n\n"
+        "| Step | Purpose |\n| --- | --- |\n| 1 | Establish context |\n| 2 | Compare options |"
+    )
+    prose_section = (
+        "## Applications\n\n"
+        "Detailed instructional prose with examples, reasoning, and concrete steps that clearly explain the concept."
+    )
+    mermaid_problem = (
+        "## System Diagram\n\n"
+        "This section opens with useful framing, then explains how the system components interact in practice before the diagram.\n\n"
+        "```mermaid\ngraph TD\nA[Input] --> B[Decision]\n```\n\n"
+        "Additional explanation ties the diagram back to the learner task."
+    )
+    mermaid_fixed = (
+        "## System Diagram\n\n"
+        "This section starts with the big-picture purpose of the system and explains how the components work together before the diagram.\n\n"
+        "```mermaid\ngraph TD\nA[Input] --> B[Decision]\n```\n\n"
+        "Detailed explanatory prose after the diagram clarifies the practical meaning of each component and transition."
+    )
+
+    mock_explore.return_value = kps
+    mock_draft.return_value = [
+        {"title": "Foundations", "content": table_section},
+        {"title": "Concept Map", "content": prose_section.replace("Applications", "Concept Map")},
+        {"title": "Walkthrough", "content": prose_section.replace("Applications", "Walkthrough")},
+        {"title": "System Diagram", "content": mermaid_problem},
+    ]
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-2", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {
+                    "draft_id": "draft-3",
+                    "is_acceptable": False,
+                    "issues": ["Diagram-heavy and missing broader framing."],
+                    "improvement_directives": "Add broader framing and more explanatory prose around the diagram.",
+                },
+            ]
+        },
+        {
+            "evaluations": [
+                {
+                    "draft_id": "draft-3",
+                    "is_acceptable": False,
+                    "issues": ["Still not enough big-picture framing."],
+                    "improvement_directives": "Add clearer context before the diagram.",
+                }
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-3", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+            ]
+        },
+    ]
+    mock_redraft_one.side_effect = [
+        {"title": "System Diagram", "content": mermaid_problem},
+        {"title": "System Diagram", "content": mermaid_fixed},
+    ]
+    mock_integrate.return_value = (
+        "## Foundations\n\nIntegrated foundations.\n\n"
+        "## Concept Map\n\nIntegrated concept map.\n\n"
+        "## Walkthrough\n\nIntegrated walkthrough.\n\n"
+        "## System Diagram\n\nIntegrated document with required visuals retained."
+    )
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": -0.8,
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session Coverage Rescue"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 2
+    assert mock_draft_eval.call_count == 3
+    assert mock_integrate.call_count == 1
+    assert len(mock_integrate.call_args.kwargs["knowledge_drafts"]) == 4
+    assert "Integrated document" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+@patch(_MOCK_DRAFT_ONE)
+def test_contract_coverage_rescue_skips_unrelated_failed_drafts(
+    mock_redraft_one,
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    kps = [
+        {"name": "Foundations", "role": "foundational", "solo_level": "beginner"},
+        {"name": "Concept Map", "role": "practical", "solo_level": "intermediate"},
+        {"name": "Walkthrough", "role": "practical", "solo_level": "intermediate"},
+        {"name": "System Diagram", "role": "strategic", "solo_level": "advanced"},
+    ]
+    table_section = (
+        "## Foundations\n\n"
+        "Foundational explanation with enough instructional prose to satisfy deterministic checks and teach the learner clearly.\n\n"
+        "| Step | Purpose |\n| --- | --- |\n| 1 | Establish context |\n| 2 | Compare options |"
+    )
+    weak_prose = (
+        "## Walkthrough\n\n"
+        "Instructional prose that still needs clearer learner fit and stronger sequencing details."
+    )
+    mermaid_problem = (
+        "## System Diagram\n\n"
+        "This section opens with useful framing, then explains how the system components interact in practice before the diagram.\n\n"
+        "```mermaid\ngraph TD\nA[Input] --> B[Decision]\n```\n\n"
+        "Additional explanation ties the diagram back to the learner task."
+    )
+    mermaid_fixed = (
+        "## System Diagram\n\n"
+        "This section starts with the big-picture purpose of the system and explains how the components work together before the diagram.\n\n"
+        "```mermaid\ngraph TD\nA[Input] --> B[Decision]\n```\n\n"
+        "Detailed explanatory prose after the diagram clarifies the practical meaning of each component and transition."
+    )
+
+    mock_explore.return_value = kps
+    mock_draft.return_value = [
+        {"title": "Foundations", "content": table_section},
+        {"title": "Concept Map", "content": _TWO_KP_DRAFTS[1]["content"].replace("Applications", "Concept Map")},
+        {"title": "Walkthrough", "content": weak_prose},
+        {"title": "System Diagram", "content": mermaid_problem},
+    ]
+    mock_draft_eval.side_effect = [
+        {
+            "evaluations": [
+                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+                {
+                    "draft_id": "draft-2",
+                    "is_acceptable": False,
+                    "issues": ["Needs stronger learner-fit sequencing."],
+                    "improvement_directives": "Improve sequencing and learner fit.",
+                },
+                {
+                    "draft_id": "draft-3",
+                    "is_acceptable": False,
+                    "issues": ["Diagram-heavy and missing broader framing."],
+                    "improvement_directives": "Add broader framing and more explanatory prose around the diagram.",
+                },
+            ]
+        },
+        {
+            "evaluations": [
+                {
+                    "draft_id": "draft-2",
+                    "is_acceptable": False,
+                    "issues": ["Still needs stronger learner-fit sequencing."],
+                    "improvement_directives": "Improve sequencing and learner fit.",
+                },
+                {
+                    "draft_id": "draft-3",
+                    "is_acceptable": False,
+                    "issues": ["Still not enough big-picture framing."],
+                    "improvement_directives": "Add clearer context before the diagram.",
+                },
+            ]
+        },
+        {
+            "evaluations": [
+                {"draft_id": "draft-3", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+            ]
+        },
+    ]
+    redraft_calls = {"System Diagram": 0}
+
+    def _redraft_by_name(*_args, **kwargs):
+        name = kwargs.get("knowledge_point", {}).get("name", "")
+        if name == "Walkthrough":
+            return {"title": "Walkthrough", "content": weak_prose}
+        if name == "System Diagram":
+            redraft_calls["System Diagram"] += 1
+            content = mermaid_problem if redraft_calls["System Diagram"] == 1 else mermaid_fixed
+            return {"title": "System Diagram", "content": content}
+        raise AssertionError(f"Unexpected targeted repair for {name!r}")
+
+    mock_redraft_one.side_effect = _redraft_by_name
+    mock_integrate.return_value = (
+        "## Foundations\n\nIntegrated foundations.\n\n"
+        "## Concept Map\n\nIntegrated concept map.\n\n"
+        "## Walkthrough\n\nIntegrated walkthrough.\n\n"
+        "## System Diagram\n\nIntegrated document with required visuals retained."
+    )
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_input": -0.8,
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+    }
+    generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session Selective Coverage Rescue"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 3
+    assert [call.kwargs["knowledge_point"]["name"] for call in mock_redraft_one.call_args_list] == [
+        "Walkthrough",
+        "System Diagram",
+        "System Diagram",
+    ]
+    assert mock_draft_eval.call_count == 3
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_structural_full_restart_eval_is_downgraded_to_integrator_retry(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    mock_integrate.side_effect = [
+        "## Branching Basics\n\nInitial integrated content.",
+        "## Branching Basics\n\nRepaired integrated content.",
+    ]
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": [
+                "The document lacks a Mermaid diagram, which is required for the strong visual input mode.",
+                "The section transitions are not explicit enough for the sequential understanding mode.",
+                "The document does not contain a Big Picture or equivalent overview section before the core sections.",
+                "There are generic section titles like Summary that do not provide session-specific content.",
+            ],
+            "improvement_directives": "Add a Mermaid diagram, improve transitions, add Big Picture framing, and replace generic section titles.",
+            "repair_scope": "full_restart_required",
+            "affected_section_indices": [],
+            "severity": "high",
+        },
+        _PASSING_EVAL,
+    ]
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Structural Retry"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_integrated_eval.call_count == 2
+    assert mock_integrate.call_count == 2
+    assert mock_integrate.call_args_list[1].kwargs["integration_feedback"] == (
+        "Add a Mermaid diagram, improve transitions, add Big Picture framing, and replace generic section titles."
+    )
+    assert "Repaired integrated content" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
 def test_conditional_draft_llm_eval_skips_low_risk_drafts(
     mock_explore,
     mock_draft,
@@ -871,6 +1194,70 @@ def test_quality_loop_applies_targeted_section_redraft_once(
     assert mock_integrate.call_count == 2
     assert "Improved second section" in result["document"]
     assert mock_integrate.call_args_list[1].kwargs["integration_feedback"] == "Improve depth of section 1."
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_quality_loop_downgrades_structural_section_redraft_to_integrator_retry(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _TWO_KPS
+    mock_draft.return_value = _TWO_KP_DRAFTS
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+        ]
+    }
+    prose = "Detailed instructional prose for concept with concrete examples and clear rationale."
+    initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
+    repaired_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\nReintegrated content with clearer flow."
+    mock_integrate.side_effect = [initial_doc, repaired_doc]
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": [
+                "The document lacks coherence in transitions between sections.",
+                "The document does not fully align with the learner profile and session adaptation contract, particularly in the processing and perception dimensions.",
+                "The document contains a visual-only reference that is not TTS-friendly.",
+                "The Summary section is generic and does not provide session-specific content.",
+            ],
+            "improvement_directives": "Improve transitions, align the document to the session adaptation contract, replace visual-only references, and revise the Summary section.",
+            "repair_scope": "section_redraft",
+            "affected_section_indices": [0, 1],
+            "severity": "high",
+        },
+        _PASSING_EVAL,
+    ]
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Structural Section Redraft"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert mock_redraft_one.call_count == 0
+    assert mock_integrate.call_count == 2
+    assert mock_integrate.call_args_list[1].kwargs["integration_feedback"] == (
+        "Improve transitions, align the document to the session adaptation contract, replace visual-only references, and revise the Summary section."
+    )
+    assert "Reintegrated content with clearer flow" in result["document"]
 
 
 @patch(_MOCK_DRAFT_EVAL)

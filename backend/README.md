@@ -36,10 +36,11 @@ It is designed to work with the Streamlit frontend in `../frontend`, but can als
 
 - `services/content_prefetch.py`: background prefetch of upcoming sessions while learner is in current session (single-flight coordination, configurable concurrency)
 - `base/llm_factory.py`: model client initialization for multiple providers
-- `base/search_rag.py`: retrieval and verified-content integration
-- `base/verified_content_manager.py` + `base/verified_content_loader.py`: indexes PDFs/slides from `resources/verified-course-content/`; tracks changes to avoid re-indexing
-- `utils/store.py`: JSON-backed runtime persistence
-- `utils/auth_store.py`, `utils/auth_jwt.py`: auth persistence and JWT token handling
+- `base/search_rag.py`: retrieval and verified-content integration via Azure AI Search + web search runners
+- `base/verified_content_manager.py` + `base/verified_content_loader.py`: indexes PDFs/slides from `resources/verified-course-content/` into Azure AI Search; uses blob-backed manifests to avoid unnecessary re-indexing
+- `base/blob_storage.py`: Azure Blob Storage access for manifests, generated audio, diagrams, and course-content blobs
+- `base/cosmos_client.py`, `utils/store.py`, `utils/auth_store.py`: Azure Cosmos DB-backed runtime persistence for users, goals, profiles, events, auth state, and cached learning content
+- `utils/auth_jwt.py`: JWT token handling
 - `utils/solo_evaluator.py`: SOLO Taxonomy rubric-based quiz assessment
 - `utils/quiz_scorer.py`: quiz evaluation logic
 
@@ -94,7 +95,7 @@ Staged pipeline with two embedded reflexion loops:
 
 Additional capabilities:
 - **FSLSM-aware adaptation** (`fslsm_adaptation.py`): tailors content format and style to learner's FSLSM profile
-- **Media enrichment**: `MediaResourceFinder` + `MediaRelevanceEvaluator` for external videos/diagrams/podcasts; `DiagramRenderer` for ASCII diagrams; `TTSGenerator` for audio
+- **Media enrichment**: `MediaResourceFinder` + `MediaRelevanceEvaluator` for external videos/diagrams/podcasts; `DiagramRenderer` for generated diagrams; `TTSGenerator` for audio
 - **Quiz generation**: `DocumentQuizGenerator` produces SOLO-aligned quizzes
 - **Bias auditing**: `ContentBiasAuditor` checks generated lesson material for exclusionary framing, inappropriate language, or demographic bias
 
@@ -150,7 +151,16 @@ Replace `path/to/Ami` with your local path.
 cp .env.example .env
 ```
 
-Open `.env` and fill in at least one LLM key (for example `OPENAI_API_KEY`) and a secure `JWT_SECRET`.
+Open `.env` and fill in the keys required by the current backend stack:
+
+- `OPENAI_API_KEY`
+- `AZURE_SEARCH_ENDPOINT`
+- `AZURE_SEARCH_KEY`
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_COSMOS_CONNECTION_STRING`
+- `JWT_SECRET`
+
+Also set `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` and `AZURE_DOCUMENT_INTELLIGENCE_KEY` if you plan to ingest or re-index verified course content from PDFs or slides.
 
 #### Step 4 — Build and Start Backend Container
 
@@ -231,7 +241,7 @@ pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
 ```
 
-Fill keys in `backend/.env`.
+Fill the same required backend keys listed above in `backend/.env`.
 
 #### Step 3 — Start backend
 
@@ -287,12 +297,27 @@ BING_SEARCH_URL=...
 BRAVE_API_KEY=...
 
 USER_AGENT=Ami/1.0 (educational-platform)
+
+AZURE_SEARCH_ENDPOINT=https://<your-service-name>.search.windows.net
+AZURE_SEARCH_KEY=<your-admin-key>
+
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-resource>.cognitiveservices.azure.com/
+AZURE_DOCUMENT_INTELLIGENCE_KEY=<your-key>
+
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+
+AZURE_COSMOS_CONNECTION_STRING=AccountEndpoint=https://<your-account>.documents.azure.com:443/;AccountKey=<your-key>==;
+
 JWT_SECRET=change-me-to-a-random-string-in-production
 ```
 
 Guidance:
 
 - Set at least one working LLM key.
+- `AZURE_SEARCH_ENDPOINT` and `AZURE_SEARCH_KEY` are required for the Azure AI Search-backed vector indexes used by verified-content retrieval and shared web-result caching.
+- `AZURE_STORAGE_CONNECTION_STRING` is required for blob-backed manifests and generated media assets.
+- `AZURE_COSMOS_CONNECTION_STRING` is required for persisted runtime/user data.
+- `AZURE_DOCUMENT_INTELLIGENCE_*` is required when extracting/indexing verified source documents from PDFs or slides.
 - Keep `JWT_SECRET` strong and private.
 - Search provider keys are needed only if you use those providers.
 
@@ -307,8 +332,14 @@ Current repo defaults include:
 
 - `llm.provider: openai`
 - `llm.model_name: gpt-4o`
+- `embedding.provider: openai`
+- `embedding.model_name: text-embedding-3-small`
 - `search.provider: duckduckgo`
-- `vectorstore.persist_directory: data/vectorstore`
+- `vectorstore.type: azure_ai_search`
+- `vectorstore.collection_name: ami-web-results`
+- `azure_search.verified_index_name: ami-verified-content`
+- `blob_storage.course_content_container: ami-course-content`
+- `cosmos.database_name: ami-userdata`
 - `verified_content.enabled: true`
 - `prefetch.enabled: true` (configures background session prefetch)
 
@@ -441,22 +472,24 @@ curl -X POST "http://localhost:8000/v1/schedule-learning-path-agentic" \
 
 ## Persistence and Data Paths
 
-Backend-managed runtime data:
+Backend-managed runtime persistence now uses Azure services:
 
-- `backend/data/users/*.json`
-  - users, goals, profiles, events, session activity, mastery history, cached learning content
-- `backend/data/vectorstore/`
-  - runtime vectorstore files (ChromaDB)
-- `backend/data/audio/`
-  - generated audio served via `/static/audio`
-- `backend/data/diagrams/`
-  - generated diagrams served via `/static/diagrams`
+- **Azure Cosmos DB**
+  - users, goals, profiles, events, session activity, mastery history, auth state, cached learning content
+- **Azure AI Search**
+  - `ami-web-results`: shared web-search cache / general retrieval index
+  - `ami-verified-content`: verified course-content index
+- **Azure Blob Storage**
+  - verified-content sync manifests
+  - generated audio and diagrams
+  - course-content source files when using blob-backed indexing flows
 
-Verified source corpus location:
+Local paths still used during development/testing:
 
 - `backend/resources/verified-course-content/`
-
-On startup, backend loads persisted stores and syncs verified content indexing as configured.
+  - local verified source corpus used by indexing and sync flows
+- `backend/data/`
+  - transient local artifacts used by some scripts/tests and compatibility paths
 
 ## Project Structure (Backend)
 
@@ -514,7 +547,7 @@ From `backend/`:
 python -m pytest tests
 ```
 
-Tests mock all LLM calls via `unittest.mock` — no API keys or network access are required. Tests use FastAPI's `TestClient`.
+Most tests mock LLM calls via `unittest.mock`, and many suites run without external services. Some integration-style paths depend on configured Azure/search services unless explicitly mocked. Tests use FastAPI's `TestClient`.
 
 ## Common Dev Commands
 
