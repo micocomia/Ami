@@ -2,10 +2,14 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
 
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+if load_dotenv is not None:
+    load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def _normalize_endpoint(endpoint: str, fallback: str) -> str:
