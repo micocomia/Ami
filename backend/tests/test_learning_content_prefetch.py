@@ -48,8 +48,16 @@ def _wait_until(predicate, timeout: float = 2.0) -> bool:
 def _reset_prefetch_state():
     import main
 
+    # Set start_delay_secs=0 so existing tests that trigger session-activity
+    # don't have to wait for the deferred prefetch window.
+    _saved_delay = main.APP_CONFIG.get("prefetch_start_delay_secs")
+    main.APP_CONFIG["prefetch_start_delay_secs"] = 0
     main.PREFETCH_SERVICE.reset_for_test()
     yield
+    if _saved_delay is None:
+        main.APP_CONFIG.pop("prefetch_start_delay_secs", None)
+    else:
+        main.APP_CONFIG["prefetch_start_delay_secs"] = _saved_delay
 
 
 @pytest.fixture()
@@ -511,3 +519,26 @@ def test_prefetch_service_utility_methods():
     before = [_session("Session 1", learned=True), _session("Session 2", title="A"), _session("Session 3", title="B")]
     after = [_session("Session 1", learned=True), _session("Session 2", title="A2"), _session("Session 3", title="B")]
     assert service.changed_unlearned_indices(before, after) == [1]
+
+
+@patch("main.get_llm", return_value=MagicMock())
+@patch("main.generate_learning_content_with_llm", side_effect=_fake_learning_content)
+def test_session_start_deferred_prefetch_does_not_enqueue_immediately(mock_generate, _mock_llm, client, monkeypatch):
+    """When start_delay_secs > 0, the next-session prefetch is not enqueued immediately
+    after a session-activity start event, but is triggered after the delay elapses."""
+    import main
+
+    # Override delay to a long value so the prefetch never fires during the test
+    monkeypatch.setitem(main.APP_CONFIG, "prefetch_start_delay_secs", 60)
+    goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
+
+    resp = client.post(
+        "/v1/session-activity",
+        json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
+    )
+    assert resp.status_code == 200
+
+    # Content for session 1 (index 1) must NOT be enqueued immediately
+    time.sleep(0.2)
+    assert store.get_learning_content("alice", goal_id, 1) is None
+    assert mock_generate.call_count == 0

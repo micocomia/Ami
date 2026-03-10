@@ -151,8 +151,23 @@ def main():
         if n_uploaded == 0:
             logger.warning("No files were uploaded. Check that --base-dir contains course content.")
 
+    required_di_envs = [
+        "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT",
+        "AZURE_DOCUMENT_INTELLIGENCE_KEY",
+    ]
+    missing_di_envs = [name for name in required_di_envs if not os.environ.get(name, "").strip()]
+    if missing_di_envs:
+        logger.error(
+            "Missing required Azure Document Intelligence settings: %s",
+            ", ".join(missing_di_envs),
+        )
+        sys.exit(1)
+
     logger.info("Initializing VerifiedContentManager ...")
     manager = VerifiedContentManager.from_config(config)
+    logger.info("Ensuring Azure AI Search schema exposes filterable metadata fields ...")
+    schema_result = manager.ensure_filterable_metadata_schema(recreate_on_mismatch=True)
+    logger.info("Schema check result: %s", schema_result)
 
     logger.info("Starting sync (force=True) ...")
     result = manager.sync_verified_content(force=True)
@@ -160,8 +175,9 @@ def main():
     logger.info(f"Pre-index complete: {result}")
     if result.get("reindexed"):
         logger.info(
-            f"Indexed {result.get('collection_count', '?')} documents into "
-            f"'{manager.collection_name}'. Snapshot hash: {result.get('snapshot_hash', '?')}"
+            f"Submitted {result.get('chunks_submitted', '?')} chunks to "
+            f"'{manager.collection_name}'. Snapshot hash: {result.get('snapshot_hash', '?')}. "
+            "Azure AI Search will finish indexing within a few seconds."
         )
     else:
         logger.info("No re-indexing needed (content unchanged).")

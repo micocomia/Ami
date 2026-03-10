@@ -868,13 +868,22 @@ async def _session_activity_core(request: SessionActivityRequest):
             current_session_index=request.session_index,
         )
         if next_idx is not None:
-            PREFETCH_SERVICE.enqueue_for_session(
-                user_id=request.user_id,
-                goal_id=request.goal_id,
-                session_index=next_idx,
-                trigger_source="session_start",
-                apply_cooldown=True,
-            )
+            _prefetch_delay = PREFETCH_SERVICE.prefetch_start_delay_secs()
+            _prefetch_user_id = request.user_id
+            _prefetch_goal_id = request.goal_id
+            _prefetch_next_idx = next_idx
+
+            async def _deferred_enqueue() -> None:
+                await asyncio.sleep(_prefetch_delay)
+                PREFETCH_SERVICE.enqueue_for_session(
+                    user_id=_prefetch_user_id,
+                    goal_id=_prefetch_goal_id,
+                    session_index=_prefetch_next_idx,
+                    trigger_source="session_start",
+                    apply_cooldown=True,
+                )
+
+            asyncio.create_task(_deferred_enqueue())
     return {"ok": True, "trigger": trigger}
 
 

@@ -49,11 +49,14 @@ class VerifiedContentManager:
         self.embedder = embedder
         self.text_splitter = text_splitter
         self.collection_name = collection_name
+        self.vectorstore_type = vectorstore_type
         self.azure_endpoint = azure_endpoint or os.environ.get("AZURE_SEARCH_ENDPOINT", "")
         self.azure_key = azure_key or os.environ.get("AZURE_SEARCH_KEY", "")
         self.blob_client = blob_client
         self.manifests_container = manifests_container
         self.course_content_container = course_content_container
+        self._azure_vector_dimensions = self._infer_vector_dimensions()
+        self._azure_fields = self._build_verified_index_fields(self._azure_vector_dimensions)
         self.vectorstore: VectorStore = VectorStoreFactory.create(
             vectorstore_type=vectorstore_type,
             collection_name=collection_name,
@@ -61,6 +64,8 @@ class VerifiedContentManager:
             embedder=embedder,
             azure_endpoint=self.azure_endpoint,
             azure_key=self.azure_key,
+            azure_fields=self._azure_fields,
+            azure_vector_dimensions=self._azure_vector_dimensions,
         )
 
     @staticmethod
@@ -161,6 +166,173 @@ class VerifiedContentManager:
 
     # ── Azure Search helpers ───────────────────────────────────────────────
 
+    @staticmethod
+    def _build_verified_index_fields(vector_dimensions: int):
+        from azure.search.documents.indexes.models import (
+            SearchableField,
+            SearchField,
+            SearchFieldDataType,
+            SimpleField,
+        )
+
+        return [
+            SimpleField(
+                name="id",
+                type=SearchFieldDataType.String,
+                key=True,
+                filterable=True,
+            ),
+            SearchableField(
+                name="content",
+                type=SearchFieldDataType.String,
+            ),
+            SearchField(
+                name="content_vector",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                searchable=True,
+                vector_search_dimensions=vector_dimensions,
+                vector_search_profile_name="myHnswProfile",
+            ),
+            SearchableField(
+                name="metadata",
+                type=SearchFieldDataType.String,
+            ),
+            SimpleField(name="source_type", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="course_code", type=SearchFieldDataType.String, filterable=True),
+            SearchableField(name="course_name", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="term", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="content_category", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="file_name", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="lecture_number", type=SearchFieldDataType.Int32, filterable=True, sortable=True),
+            SimpleField(name="page_number", type=SearchFieldDataType.Int32, filterable=True, sortable=True),
+            SearchableField(name="title", type=SearchFieldDataType.String, filterable=False),
+        ]
+
+    def _infer_vector_dimensions(self) -> int:
+        model_name = (
+            str(getattr(self.embedder, "model", "") or getattr(self.embedder, "model_name", ""))
+            .strip()
+            .lower()
+        )
+        known_dimensions = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+        }
+        if model_name in known_dimensions:
+            return known_dimensions[model_name]
+        try:
+            vec = self.embedder.embed_query("Text")
+            return len(vec)
+        except Exception:
+            logger.warning(
+                "Could not infer embedding dimension from model '%s'; defaulting to 1536.",
+                model_name or "unknown",
+            )
+            return 1536
+
+    def _index_field_expectations(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            "id": {"type": "Edm.String", "filterable": True},
+            "content": {"type": "Edm.String"},
+            "content_vector": {"type": "Collection(Edm.Single)"},
+            "metadata": {"type": "Edm.String"},
+            "source_type": {"type": "Edm.String", "filterable": True},
+            "course_code": {"type": "Edm.String", "filterable": True},
+            "course_name": {"type": "Edm.String", "filterable": True},
+            "term": {"type": "Edm.String", "filterable": True},
+            "content_category": {"type": "Edm.String", "filterable": True},
+            "file_name": {"type": "Edm.String", "filterable": True},
+            "lecture_number": {"type": "Edm.Int32", "filterable": True},
+            "page_number": {"type": "Edm.Int32", "filterable": True},
+            "title": {"type": "Edm.String"},
+        }
+
+    def ensure_filterable_metadata_schema(self, *, recreate_on_mismatch: bool = False) -> Dict[str, Any]:
+        """Ensure the verified-content index exposes top-level filterable metadata fields."""
+        from azure.core.credentials import AzureKeyCredential
+        from azure.core.exceptions import ResourceNotFoundError
+        from azure.search.documents.indexes import SearchIndexClient
+
+        index_client = SearchIndexClient(
+            endpoint=self.azure_endpoint,
+            credential=AzureKeyCredential(self.azure_key),
+        )
+        expected = self._index_field_expectations()
+        try:
+            index = index_client.get_index(self.collection_name)
+        except ResourceNotFoundError:
+            return {"status": "index_missing", "recreated": False}
+        except Exception as e:
+            logger.warning(f"Could not inspect Azure Search index schema: {e}")
+            return {"status": "inspect_failed", "recreated": False, "error": str(e)}
+
+        by_name = {f.name: f for f in index.fields}
+        missing = [name for name in expected if name not in by_name]
+        wrong_type = [
+            name
+            for name, rules in expected.items()
+            if name in by_name and str(by_name[name].type) != rules["type"]
+        ]
+        not_filterable = [
+            name
+            for name, rules in expected.items()
+            if name in by_name
+            and rules.get("filterable") is True
+            and not bool(getattr(by_name[name], "filterable", False))
+        ]
+
+        mismatch = bool(missing or wrong_type or not_filterable)
+        if not mismatch:
+            return {"status": "ok", "recreated": False}
+
+        logger.warning(
+            "Verified index '%s' schema mismatch. missing=%s wrong_type=%s not_filterable=%s",
+            self.collection_name,
+            missing,
+            wrong_type,
+            not_filterable,
+        )
+        if not recreate_on_mismatch:
+            return {
+                "status": "schema_mismatch",
+                "recreated": False,
+                "missing": missing,
+                "wrong_type": wrong_type,
+                "not_filterable": not_filterable,
+            }
+
+        try:
+            index_client.delete_index(self.collection_name)
+            logger.warning("Deleted index '%s' to recreate with filterable metadata schema.", self.collection_name)
+            self.vectorstore = VectorStoreFactory.create(
+                vectorstore_type=self.vectorstore_type,
+                collection_name=self.collection_name,
+                persist_directory=".",
+                embedder=self.embedder,
+                azure_endpoint=self.azure_endpoint,
+                azure_key=self.azure_key,
+                azure_fields=self._azure_fields,
+                azure_vector_dimensions=self._azure_vector_dimensions,
+            )
+            return {
+                "status": "schema_mismatch",
+                "recreated": True,
+                "missing": missing,
+                "wrong_type": wrong_type,
+                "not_filterable": not_filterable,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to recreate index '{self.collection_name}' after schema mismatch: {e}")
+            return {
+                "status": "recreate_failed",
+                "recreated": False,
+                "missing": missing,
+                "wrong_type": wrong_type,
+                "not_filterable": not_filterable,
+                "error": str(e),
+            }
+
     def _get_azure_search_client(self):
         from azure.search.documents import SearchClient
         from azure.core.credentials import AzureKeyCredential
@@ -196,6 +368,15 @@ class VerifiedContentManager:
         from their metadata, and re-indexes only when the hash has changed or
         the collection is empty.  No local files are required.
         """
+        schema_result = {"status": "skipped", "recreated": False}
+        if self.vectorstore.__class__.__name__ == "AzureSearch":
+            schema_result = self.ensure_filterable_metadata_schema(recreate_on_mismatch=True)
+            if schema_result.get("recreated"):
+                logger.info(
+                    "Recreated verified-content index '%s' with filterable metadata schema.",
+                    self.collection_name,
+                )
+
         blobs = self._list_source_blobs()
         computed_hash = self._compute_snapshot_hash(blobs)
         stored_hash = self._get_stored_hash()
@@ -231,8 +412,9 @@ class VerifiedContentManager:
             return {
                 "reindexed": False,
                 "reason": reason,
-                "collection_count": existing_count,
+                "chunks_submitted": 0,
                 "snapshot_hash": computed_hash,
+                "schema_check": schema_result,
             }
 
         if existing_count > 0:
@@ -242,13 +424,14 @@ class VerifiedContentManager:
         self._store_hash(computed_hash)
         logger.info(
             f"Verified content sync completed for '{self.collection_name}' "
-            f"(reason={reason}, indexed={indexed_count}, blobs={len(blobs)})."
+            f"(reason={reason}, chunks_submitted={indexed_count}, blobs={len(blobs)})."
         )
         return {
             "reindexed": True,
             "reason": reason,
-            "collection_count": indexed_count,
+            "chunks_submitted": indexed_count,
             "snapshot_hash": computed_hash,
+            "schema_check": schema_result,
         }
 
     def index_verified_content(self, blobs) -> int:
@@ -294,7 +477,7 @@ class VerifiedContentManager:
                     sas_url = self.blob_client.generate_sas_url(
                         self.course_content_container, blob.name
                     )
-                    docs = _load_with_azure_di(url_source=sas_url)
+                    docs = _load_with_azure_di(url_path=sas_url)
                 elif ext == ".json":
                     content_bytes = self.blob_client.download(
                         self.course_content_container, blob.name
@@ -389,12 +572,14 @@ class VerifiedContentManager:
             return 0
 
         self.vectorstore.add_documents(split_docs)
-        final_count = self._get_document_count()
+        # Report chunks submitted, not _get_document_count(), because Azure AI Search
+        # has a propagation delay and may return 0 immediately after add_documents().
+        n_chunks = len(split_docs)
         logger.info(
-            f"Indexed {len(split_docs)} verified content chunks into "
-            f"'{self.collection_name}' (total: {final_count})"
+            f"Submitted {n_chunks} verified content chunks to '{self.collection_name}'. "
+            f"(Azure Search count may lag by a few seconds.)"
         )
-        return final_count
+        return n_chunks
 
     # ── Retrieval ─────────────────────────────────────────────────────────
 
@@ -423,15 +608,65 @@ class VerifiedContentManager:
         require_lecture: bool = False,
     ) -> List[Document]:
         """Similarity search with optional metadata constraints and lightweight reranking."""
+        def escape_odata_string(value: str) -> str:
+            return value.replace("'", "''")
+
+        def canonical_category(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return None
+            v = value.strip().lower()
+            known = {
+                "lectures": "Lectures",
+                "syllabus": "Syllabus",
+                "references": "References",
+                "exercises": "Exercises",
+            }
+            return known.get(v, value.strip())
+
+        clauses: List[str] = []
+        if course_code:
+            clauses.append(f"course_code eq '{escape_odata_string(course_code.strip())}'")
+        canonical_cat = canonical_category(content_category)
+        if canonical_cat:
+            clauses.append(f"content_category eq '{escape_odata_string(canonical_cat)}'")
+        if lecture_number is not None:
+            clauses.append(f"lecture_number eq {int(lecture_number)}")
+        if page_number is not None:
+            clauses.append(f"page_number eq {int(page_number)}")
+        if require_lecture:
+            clauses.append("(lecture_number ne null or content_category eq 'Lectures')")
+        filters = " and ".join(clauses) if clauses else None
+
         try:
             count = self._get_document_count()
             if count == 0:
                 return []
             fetch_k = max(k * 8, 40)
-            candidates = self.vectorstore.similarity_search(query, k=fetch_k)
+            candidates = self.vectorstore.similarity_search(query, k=fetch_k, filters=filters)
+        except TypeError:
+            # Some non-Azure vector stores don't accept `filters`; fallback preserves behavior.
+            try:
+                fetch_k = max(k * 8, 40)
+                candidates = self.vectorstore.similarity_search(query, k=fetch_k)
+            except Exception as e:
+                logger.error(f"Error retrieving filtered verified content: {e}")
+                return []
         except Exception as e:
-            logger.error(f"Error retrieving filtered verified content: {e}")
-            return []
+            # Fallback to client-side filtering when index schema does not yet expose fields.
+            msg = str(e)
+            if "Invalid expression" in msg or "Could not find a property" in msg:
+                logger.warning(
+                    "Server-side metadata filtering unavailable for index '%s'; using client-side filtering fallback.",
+                    self.collection_name,
+                )
+                try:
+                    candidates = self.vectorstore.similarity_search(query, k=fetch_k)
+                except Exception as inner:
+                    logger.error(f"Error retrieving filtered verified content: {inner}")
+                    return []
+            else:
+                logger.error(f"Error retrieving filtered verified content: {e}")
+                return []
 
         excluded = {x.lower() for x in (exclude_file_names or [])}
 
@@ -451,7 +686,7 @@ class VerifiedContentManager:
             cat = str(meta.get("content_category", "")).strip().lower()
             fname = str(meta.get("file_name", "")).strip().lower()
 
-            if course_code and code and code != course_code.lower():
+            if course_code and code != course_code.lower():
                 continue
             if content_category and cat != content_category.lower():
                 continue

@@ -5,11 +5,75 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+_PIPELINE = "modules.content_generator.orchestrators.content_generation_pipeline"
+_MOCK_INTEGRATE = f"{_PIPELINE}.integrate_learning_document_with_llm"
+_MOCK_INTEGRATE_PARALLEL = f"{_PIPELINE}.integrate_learning_document_parallel"
+_MOCK_EXPLORE = f"{_PIPELINE}.explore_knowledge_points_with_llm"
+_MOCK_DRAFT = f"{_PIPELINE}.draft_knowledge_points_with_llm"
+_MOCK_DRAFT_ONE = f"{_PIPELINE}.draft_knowledge_point_with_llm"
+_MOCK_INTEGRATED_EVAL = f"{_PIPELINE}.evaluate_integrated_document_with_llm"
+_MOCK_DRAFT_EVAL = f"{_PIPELINE}.evaluate_knowledge_draft_batch_with_llm"
+
+_NEUTRAL_PROFILE = {
+    "learning_preferences": {
+        "fslsm_dimensions": {
+            "fslsm_input": 0.0,
+            "fslsm_processing": 0.0,
+            "fslsm_perception": 0.0,
+            "fslsm_understanding": 0.0,
+        }
+    }
+}
+
+_PASSING_EVAL = {
+    "is_acceptable": True,
+    "issues": [],
+    "improvement_directives": "",
+    "repair_scope": "integrator_only",
+    "affected_section_indices": [],
+    "severity": "low",
+}
+
+_SINGLE_KP = [{"name": "Branching", "role": "foundational", "solo_level": "beginner"}]
+_SINGLE_SECTION_CONTENT = (
+    "## Branching Basics\n\n"
+    "Branching controls program flow with conditions and decision paths.\n\n"
+    "### Example\n\n"
+    "A login system branches into success, retry, or lockout paths."
+)
+
+# Two-KP content that reliably passes the deterministic audit
+_TWO_KP_DRAFTS = [
+    {
+        "title": "Foundations",
+        "content": (
+            "## Foundations\n\n"
+            "Detailed instructional prose for the first concept with concrete examples and clear rationale."
+        ),
+    },
+    {
+        "title": "Applications",
+        "content": (
+            "## Applications\n\n"
+            "Detailed instructional prose for the second concept with applied steps and practical outcomes."
+        ),
+    },
+]
+_TWO_KPS = [
+    {"name": "Foundations", "role": "foundational", "solo_level": "beginner"},
+    {"name": "Applications", "role": "practical", "solo_level": "intermediate"},
+]
+
+
+# ─── Tests ────────────────────────────────────────────────────────────────────
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
 def test_orchestrator_retries_integrator_with_feedback(
     mock_explore,
     mock_draft,
@@ -21,18 +85,8 @@ def test_orchestrator_retries_integrator_with_feedback(
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = [{"name": "Branching", "role": "foundational", "solo_level": "beginner"}]
-    mock_draft.return_value = [
-        {
-            "title": "Branching Basics",
-            "content": (
-                "## Branching Basics\n\n"
-                "Branching controls program flow with conditions and decision paths.\n\n"
-                "### Example\n\n"
-                "A login system branches into success, retry, or lockout paths."
-            ),
-        }
-    ]
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
     mock_draft_eval.return_value = {
         "evaluations": [
             {
@@ -56,30 +110,12 @@ def test_orchestrator_retries_integrator_with_feedback(
             "affected_section_indices": [],
             "severity": "medium",
         },
-        {
-            "is_acceptable": True,
-            "issues": [],
-            "improvement_directives": "",
-            "repair_scope": "integrator_only",
-            "affected_section_indices": [],
-            "severity": "low",
-        },
+        _PASSING_EVAL,
     ]
-
-    profile = {
-        "learning_preferences": {
-            "fslsm_dimensions": {
-                "fslsm_input": 0.0,
-                "fslsm_processing": 0.0,
-                "fslsm_perception": 0.0,
-                "fslsm_understanding": 0.0,
-            }
-        }
-    }
 
     result = generate_learning_content_with_llm(
         MagicMock(name="primary"),
-        profile,
+        _NEUTRAL_PROFILE,
         {},
         {"title": "Session A"},
         with_quiz=False,
@@ -152,6 +188,169 @@ def test_media_fallback_adds_display_title_and_short_description(_mock_create):
     assert out[0]["short_description"]
 
 
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+@patch(_MOCK_DRAFT_ONE)
+def test_no_progress_quality_loop_exits_early(
+    mock_repair,
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = [{"name": "Topic A", "role": "foundational", "solo_level": "beginner"}]
+    mock_draft.return_value = [
+        {
+            "title": "Topic A",
+            "content": "## Topic A\n\nDetailed explanation of topic A with enough prose to pass deterministic checks.\n",
+        }
+    ]
+    mock_draft_eval.return_value = {
+        "evaluations": [{"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}]
+    }
+    document_body = "## Topic A\n\nEnough prose here to satisfy deterministic checks for this section.\n"
+    mock_integrate.return_value = document_body
+
+    # Same failing eval returned every round — identical fingerprint, should exit after round 2
+    identical_eval = {
+        "is_acceptable": False,
+        "issues": ["Section lacks depth."],
+        "improvement_directives": "Add more detail.",
+        "repair_scope": "integrator_only",
+        "affected_section_indices": [],
+        "severity": "medium",
+    }
+    mock_integrated_eval.return_value = identical_eval
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session B"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    # Integration evaluator called twice (rounds 1 and 2), then no-progress exit
+    assert mock_integrated_eval.call_count == 2
+    # integrate called: initial + 1 integrator_only retry (before no-progress detected on round 2)
+    assert mock_integrate.call_count == 2
+    assert result["document"] == document_body
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+@patch(_MOCK_DRAFT_ONE)
+def test_parallel_draft_repair_runs_all_failed_drafts(
+    mock_repair_fn,
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    """Parallel draft repair should call draft_knowledge_point_with_llm for every failed draft."""
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    kps = [
+        {"name": "Topic A", "role": "foundational", "solo_level": "beginner"},
+        {"name": "Topic B", "role": "supporting", "solo_level": "beginner"},
+        {"name": "Topic C", "role": "supporting", "solo_level": "beginner"},
+    ]
+    mock_explore.return_value = kps
+
+    section_template = "## {title}\n\nEnough prose for deterministic check — detailed explanation here.\n"
+    mock_draft.return_value = [{"title": kp["name"], "content": section_template.format(title=kp["name"])} for kp in kps]
+
+    # All drafts fail eval → triggers targeted repair for all 3
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": f"draft-{i}", "is_acceptable": False, "issues": ["Weak"], "improvement_directives": "Expand."}
+            for i in range(3)
+        ]
+    }
+
+    # Repair returns a better draft
+    def _repair(*_args, **_kwargs):
+        kp = _kwargs.get("knowledge_point", {})
+        return {"title": kp.get("name", "Fixed"), "content": section_template.format(title=kp.get("name", "Fixed"))}
+
+    mock_repair_fn.side_effect = _repair
+
+    integrated_doc = "\n".join(section_template.format(title=kp["name"]) for kp in kps)
+    mock_integrate.return_value = integrated_doc
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session C"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    # All 3 failed drafts must have been repaired
+    assert mock_repair_fn.call_count == 3
+    assert "document" in result
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_orchestrator_uses_shell_when_no_acceptable_drafts(
+    mock_explore,
+    mock_draft,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching", "content": "## Branching"}]
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": False, "issues": ["Too skeletal"], "improvement_directives": "Expand section."}
+        ]
+    }
+    mock_integrate.return_value = "## Branching\n\nThis section is generated in best-effort mode."
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    profile = {
+        "learning_preferences": {
+            "fslsm_dimensions": {"fslsm_input": 0.0, "fslsm_processing": 0.0, "fslsm_perception": 0.0}
+        }
+    }
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        profile,
+        {},
+        {"title": "Session A"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    assert "best-effort mode" in result["document"].lower()
+
+
 def test_content_view_parser_ignores_h2_inside_code_fences():
     from utils.content_view import build_learning_content_view_model
 
@@ -222,54 +421,164 @@ def test_deterministic_audit_rejects_narrative_only_section():
     assert any("instructional explanation" in issue.lower() for issue in result["issues"])
 
 
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
-def test_orchestrator_uses_shell_when_no_acceptable_drafts(
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT_ONE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_quality_loop_normalizes_section_redraft_to_integration_retry(
+    mock_explore,
+    mock_draft,
+    mock_redraft_one,
+    mock_integrate,
+    mock_integrated_eval,
+    mock_draft_eval,
+):
+    """Fix 5: when evaluator returns section_redraft, pipeline normalizes to integrator_only.
+    Section drafts must NOT be re-called; the integrator must be retried with feedback."""
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _TWO_KPS
+    mock_draft.return_value = _TWO_KP_DRAFTS
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+            {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
+        ]
+    }
+
+    prose = "Detailed instructional prose for concept with concrete examples and clear rationale."
+    initial_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\n{prose}"
+    improved_doc = f"## Foundations\n\n{prose}\n\n## Applications\n\nImproved second section with stronger depth."
+    mock_integrate.side_effect = [initial_doc, improved_doc]
+    mock_integrated_eval.side_effect = [
+        {
+            "is_acceptable": False,
+            "issues": ["Section 1 needs clearer instructional depth."],
+            "improvement_directives": "Improve depth of section 1.",
+            "repair_scope": "section_redraft",   # Fix 5: normalized to integrator_only
+            "affected_section_indices": [1],
+            "severity": "medium",
+        },
+        _PASSING_EVAL,
+    ]
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Fix5"},
+        with_quiz=False,
+        use_search=False,
+    )
+
+    # Fix 5: section redraft must NOT be called — scope normalized to integrator_only
+    assert mock_redraft_one.call_count == 0
+    # Integrator called twice: initial + 1 retry
+    assert mock_integrate.call_count == 2
+    # Improved document returned
+    assert "Improved second section" in result["document"]
+
+
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_INTEGRATE)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_knowledge_points_capped_at_four(
     mock_explore,
     mock_draft,
     mock_integrate,
     mock_integrated_eval,
     mock_draft_eval,
 ):
+    """Fix 4: pipeline must cap knowledge points to _MAX_KNOWLEDGE_POINTS (4) after explorer returns."""
     from modules.content_generator.orchestrators.content_generation_pipeline import (
         generate_learning_content_with_llm,
     )
 
-    mock_explore.return_value = [{"name": "Branching", "role": "foundational", "solo_level": "beginner"}]
-    mock_draft.return_value = [{"title": "Branching", "content": "## Branching"}]
+    # Explorer returns 6 KPs — pipeline should cap to 4
+    kps_6 = [
+        {"name": f"Topic {i}", "role": "foundational", "solo_level": "beginner"}
+        for i in range(6)
+    ]
+    mock_explore.return_value = kps_6
+
+    prose = "Enough instructional prose for deterministic check — detailed explanation here.\n"
+    # Return only 4 drafts (matching the capped list)
+    mock_draft.return_value = [
+        {"title": f"Topic {i}", "content": f"## Topic {i}\n\n{prose}"}
+        for i in range(4)
+    ]
     mock_draft_eval.return_value = {
         "evaluations": [
-            {"draft_id": "draft-0", "is_acceptable": False, "issues": ["Too skeletal"], "improvement_directives": "Expand section."}
+            {"draft_id": f"draft-{i}", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+            for i in range(4)
         ]
     }
-    mock_integrate.return_value = "## Branching\n\nThis section is generated in best-effort mode."
-    mock_integrated_eval.return_value = {
-        "is_acceptable": True,
-        "issues": [],
-        "improvement_directives": "",
-        "repair_scope": "integrator_only",
-        "affected_section_indices": [],
-        "severity": "low",
-    }
+    doc = "\n\n".join(f"## Topic {i}\n\n{prose}" for i in range(4))
+    mock_integrate.return_value = doc
+    mock_integrated_eval.return_value = _PASSING_EVAL
 
-    profile = {
-        "learning_preferences": {
-            "fslsm_dimensions": {"fslsm_input": 0.0, "fslsm_processing": 0.0, "fslsm_perception": 0.0}
-        }
-    }
-    result = generate_learning_content_with_llm(
+    generate_learning_content_with_llm(
         MagicMock(name="primary"),
-        profile,
+        _NEUTRAL_PROFILE,
         {},
-        {"title": "Session A"},
+        {"title": "Session Cap"},
         with_quiz=False,
         use_search=False,
     )
 
-    assert "best-effort mode" in result["document"].lower()
+    # Verify draft_knowledge_points_with_llm was called with at most 4 KPs
+    assert mock_draft.called
+    drafted_kps = mock_draft.call_args.kwargs.get("knowledge_points", [])
+    assert len(drafted_kps) <= 4, f"Expected at most 4 KPs drafted, got {len(drafted_kps)}"
+
+
+@patch(_MOCK_INTEGRATE_PARALLEL)
+@patch(_MOCK_DRAFT_EVAL)
+@patch(_MOCK_INTEGRATED_EVAL)
+@patch(_MOCK_DRAFT)
+@patch(_MOCK_EXPLORE)
+def test_pipeline_routes_to_parallel_when_fast_llm_is_distinct(
+    mock_explore,
+    mock_draft,
+    mock_integrated_eval,
+    mock_draft_eval,
+    mock_integrate_parallel,
+):
+    """Fix 3: when a distinct fast_llm is passed, pipeline routes to integrate_learning_document_parallel."""
+    from modules.content_generator.orchestrators.content_generation_pipeline import (
+        generate_learning_content_with_llm,
+    )
+
+    mock_explore.return_value = _SINGLE_KP
+    mock_draft.return_value = [{"title": "Branching Basics", "content": _SINGLE_SECTION_CONTENT}]
+    mock_draft_eval.return_value = {
+        "evaluations": [
+            {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""}
+        ]
+    }
+    parallel_doc = "## Branching Basics\n\nParallel integration output."
+    mock_integrate_parallel.return_value = parallel_doc
+    mock_integrated_eval.return_value = _PASSING_EVAL
+
+    result = generate_learning_content_with_llm(
+        MagicMock(name="primary"),
+        _NEUTRAL_PROFILE,
+        {},
+        {"title": "Session Parallel"},
+        with_quiz=False,
+        use_search=False,
+        fast_llm=MagicMock(name="fast"),  # distinct fast_llm → parallel path
+    )
+
+    # Parallel path should be taken
+    assert mock_integrate_parallel.call_count >= 1
+    assert "Parallel integration" in result["document"]
 
 
 def test_deterministic_integrated_audit_rejects_excess_h2_sections():
@@ -292,104 +601,3 @@ This should not be an extra core section.
     assert result["is_acceptable"] is False
     assert result["repair_scope"] == "integrator_only"
     assert any("Core section count mismatch" in issue for issue in result["issues"])
-
-
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_knowledge_draft_batch_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.evaluate_integrated_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.integrate_learning_document_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_point_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.draft_knowledge_points_with_llm")
-@patch("modules.content_generator.orchestrators.content_generation_pipeline.explore_knowledge_points_with_llm")
-def test_orchestrator_section_redraft_targets_affected_indices(
-    mock_explore,
-    mock_draft,
-    mock_redraft_one,
-    mock_integrate,
-    mock_integrated_eval,
-    mock_draft_eval,
-):
-    from modules.content_generator.orchestrators.content_generation_pipeline import (
-        generate_learning_content_with_llm,
-    )
-
-    mock_explore.return_value = [
-        {"name": "Foundations", "role": "foundational", "solo_level": "beginner"},
-        {"name": "Applications", "role": "practical", "solo_level": "intermediate"},
-    ]
-    mock_draft.return_value = [
-        {
-            "title": "Foundations",
-            "content": (
-                "## Foundations\n\n"
-                "Detailed instructional prose for the first concept with concrete examples and clear rationale."
-            ),
-        },
-        {
-            "title": "Applications",
-            "content": (
-                "## Applications\n\n"
-                "Detailed instructional prose for the second concept with applied steps and practical outcomes."
-            ),
-        },
-    ]
-    mock_draft_eval.side_effect = [
-        {
-            "evaluations": [
-                {"draft_id": "draft-0", "is_acceptable": True, "issues": [], "improvement_directives": ""},
-                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
-            ]
-        },
-        {
-            "evaluations": [
-                {"draft_id": "draft-1", "is_acceptable": True, "issues": [], "improvement_directives": ""},
-            ]
-        },
-    ]
-    mock_integrate.side_effect = [
-        "## Foundations\n\nIntegrated first section.\n\n## Applications\n\nIntegrated second section needing rewrite.",
-        "## Foundations\n\nIntegrated first section.\n\n## Applications\n\nRewritten and improved second section.",
-    ]
-    mock_integrated_eval.side_effect = [
-        {
-            "is_acceptable": False,
-            "issues": ["Section 1 needs clearer instructional depth."],
-            "improvement_directives": "Redraft section 1 with stronger examples.",
-            "repair_scope": "section_redraft",
-            "affected_section_indices": [1],
-            "severity": "medium",
-        },
-        {
-            "is_acceptable": True,
-            "issues": [],
-            "improvement_directives": "",
-            "repair_scope": "integrator_only",
-            "affected_section_indices": [],
-            "severity": "low",
-        },
-    ]
-    mock_redraft_one.return_value = {
-        "title": "Applications",
-        "content": "## Applications\n\nRewritten targeted section with clear instructional explanation.",
-    }
-
-    profile = {
-        "learning_preferences": {
-            "fslsm_dimensions": {
-                "fslsm_input": 0.0,
-                "fslsm_processing": 0.0,
-                "fslsm_perception": 0.0,
-                "fslsm_understanding": 0.0,
-            }
-        }
-    }
-    _ = generate_learning_content_with_llm(
-        MagicMock(name="primary"),
-        profile,
-        {},
-        {"title": "Session A"},
-        with_quiz=False,
-        use_search=False,
-    )
-
-    assert mock_redraft_one.call_count == 1
-    assert mock_redraft_one.call_args.kwargs["knowledge_point"]["name"] == "Applications"

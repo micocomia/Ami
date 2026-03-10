@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
@@ -52,6 +52,8 @@ class VectorStoreFactory:
         embedder: Optional[Embeddings] = None,
         azure_endpoint: Optional[str] = None,
         azure_key: Optional[str] = None,
+        azure_fields: Optional[List[Any]] = None,
+        azure_vector_dimensions: Optional[int] = None,
     ) -> VectorStore:
         vectorstore_type = vectorstore_type.lower()
         if vectorstore_type in ["chroma"]:
@@ -76,9 +78,10 @@ class VectorStoreFactory:
                 azure_search_key=key,
                 index_name=collection_name,
                 embedding_function=embedder.embed_query,
+                fields=azure_fields,
+                vector_search_dimensions=azure_vector_dimensions,
             )
             logger.info(f"Azure AI Search vectorstore connected to index '{collection_name}'")
         else:
             raise ValueError(f"Unsupported vectorstore type: {vectorstore_type}")
         return vectorstore
-

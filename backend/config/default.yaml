@@ -58,4 +58,5 @@ prefetch:
   wait_short_secs: 8
   wait_long_secs: 130
   cooldown_secs: 20
-  max_workers: 2
+  max_workers: 3
+  start_delay_secs: 30

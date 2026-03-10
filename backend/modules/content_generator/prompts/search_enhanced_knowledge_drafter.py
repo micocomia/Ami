@@ -50,7 +50,11 @@ Your role is to draft rich, detailed markdown content for a *single* knowledge p
     * Do NOT create a new `##` heading whose only purpose is to hold an embedded asset or resource.
     * The `content` must be well-structured, including lists, code snippets, or tables where appropriate.
     * It MUST conclude with an `**Additional Resources**` section, using the provided `external_resources`.
-6.  **Cite Sources**: When using information from `external_resources`, include inline citation numbers
+6.  **Depth Requirement**: Each `##` section MUST contain at least 3 substantive paragraphs of instructional prose (or equivalent structured content such as a detailed table + 2 paragraphs, or annotated code + 2 paragraphs).
+    * Do NOT produce thin sections with only 1–2 sentences of prose.
+    * Depth and substance are required — the learner should be able to understand and apply the concept from this section alone.
+    * Short, placeholder, or skeletal drafts are explicitly forbidden.
+7.  **Cite Sources**: When using information from `external_resources`, include inline citation numbers
     (e.g., [1], [2]) corresponding to the source indices provided. Place citations at the end of the
     relevant sentence or paragraph. This helps learners trace content back to its source.
     * Every factual paragraph should include at least one citation.
@@ -88,4 +92,5 @@ Draft detailed markdown content for the selected knowledge point using the provi
 - The JSON `content` value must begin with a markdown `##` heading.
 - Each `##` must have actual content under it.
 - Each `##` must teach in prose; media alone is not enough.
+- Each `##` must have at least 3 substantive paragraphs of instructional prose. Thin sections are not acceptable.
 - Use `###` for subpoints inside the current `##` section."""

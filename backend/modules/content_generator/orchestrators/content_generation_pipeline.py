@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import concurrent.futures
 import json
 import logging
 import re
@@ -19,8 +20,8 @@ from modules.content_generator.agents.knowledge_draft_evaluator import (
 )
 from modules.content_generator.agents.learning_document_integrator import (
     build_inline_assets_plan,
+    integrate_learning_document_parallel,
     integrate_learning_document_with_llm,
-    map_integrated_sections_to_draft_ids,
 )
 from modules.content_generator.agents.media_relevance_evaluator import filter_media_resources_with_llm
 from modules.content_generator.agents.narrative_resource_generator import generate_narrative_resources_with_llm
@@ -69,9 +70,9 @@ _MAX_BATCH_DRAFTS = 6
 _MAX_BATCH_CHARS = 18_000
 _MAX_SINGLE_DRAFT_CHARS = 6_000
 _MAX_DRAFT_RETRIES = 1
-_MAX_INTEGRATOR_RETRIES = 1
-_MAX_SECTION_REDRAFT_ROUNDS = 1
+_MAX_KNOWLEDGE_POINTS = 4  # cap explorer output; prefer 3–4 deep points over 5+ shallow ones
 _MAX_QUALITY_ROUNDS = 3
+_MAX_INTEGRATOR_RETRIES = _MAX_QUALITY_ROUNDS - 1  # all rounds used for integration retries
 _MIN_ACCEPTABLE_DRAFT_RATIO = 0.7
 
 
@@ -385,20 +386,6 @@ def _deterministic_integrated_section_audit(
     }
 
 
-def _resolve_draft_ids_from_sections(
-    section_to_draft_ids: dict[int, list[str]],
-    affected_section_indices: list[int],
-) -> list[str]:
-    resolved: list[str] = []
-    for section_index in affected_section_indices:
-        if not isinstance(section_index, int):
-            continue
-        for draft_id in section_to_draft_ids.get(section_index, []):
-            if draft_id and draft_id not in resolved:
-                resolved.append(draft_id)
-    return resolved
-
-
 def _integrated_eval_fallback() -> dict[str, Any]:
     return {
         "is_acceptable": False,
@@ -563,6 +550,7 @@ def generate_learning_content_with_llm(
     integration_records: list[dict[str, Any]] = []
     draft_records: list[dict[str, Any]] = []
 
+    _explicit_fast_llm = fast_llm is not None
     _fast_llm = get_fast_llm(llm, fast_llm)
     session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
 
@@ -584,6 +572,8 @@ def generate_learning_content_with_llm(
             trace["final_failure_reason"] = f"Explorer terminal failure: {exc}"
             raw_knowledge_points = {"knowledge_points": _fallback_knowledge_points(learning_session)}
     knowledge_points = _extract_knowledge_points(raw_knowledge_points)
+    if len(knowledge_points) > _MAX_KNOWLEDGE_POINTS:
+        knowledge_points = knowledge_points[:_MAX_KNOWLEDGE_POINTS]
     if not knowledge_points:
         trace["explorer_terminal_failure"] = True
         trace["fallback_mode"] = "best_effort"
@@ -659,15 +649,14 @@ def generate_learning_content_with_llm(
 
     failed_drafts = [r for r in draft_records if not _draft_is_acceptable(r)]
     if failed_drafts and _MAX_DRAFT_RETRIES > 0:
-        # If there are failed drafts, retry creation
+        # If there are failed drafts, retry creation in parallel
         with _time_stage(trace, "draft_targeted_repair"):
-            for record in failed_drafts:
+            def _repair_one_draft(record: dict) -> dict:
                 feedback_lines = list(record.get("issues", []))
                 directives = str(record.get("directives", "") or "").strip()
                 if directives:
                     feedback_lines.append(directives)
                 evaluator_feedback = "\n".join(line for line in feedback_lines if line).strip()
-
                 try:
                     revised = draft_knowledge_point_with_llm(
                         llm,
@@ -693,6 +682,17 @@ def generate_learning_content_with_llm(
                     existing_issues.append(f"Draft repair failed: {exc}")
                     record["issues"] = existing_issues
                     record["status"] = "failed_repair"
+                return record
+
+            _repair_workers = min(4, len(failed_drafts))
+            if _repair_workers <= 1:
+                for record in failed_drafts:
+                    _repair_one_draft(record)
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=_repair_workers) as _repair_pool:
+                    _repair_futures = {_repair_pool.submit(_repair_one_draft, r): i for i, r in enumerate(failed_drafts)}
+                    for fut in concurrent.futures.as_completed(_repair_futures):
+                        fut.result()  # propagate exceptions; record is mutated in-place
 
         repaired_subset = failed_drafts
         with _time_stage(trace, "draft_repair_audit"):
@@ -765,21 +765,26 @@ def generate_learning_content_with_llm(
     elif fslsm_input >= _FSLSM_MODERATE:
         max_audio = 2 if fslsm_input >= _FSLSM_STRONG else 1
 
-    if max_videos or max_images or max_audio:
-        with _time_stage(trace, "media_retrieval"):
-            _search_runner = getattr(search_rag_manager, "search_runner", None) if search_rag_manager else None
-            if _search_runner is None:
-                try:
-                    from config.loader import default_config
-                    from base.searcher_factory import SearchRunner
+    _needs_media = bool(max_videos or max_images or max_audio)
+    verbal_narrative_allowance = narrative_allowance(fslsm_input)
+    _needs_narrative = verbal_narrative_allowance > 0
 
-                    _search_runner = SearchRunner.from_config(default_config)
-                except Exception:
-                    _search_runner = None
+    def _run_media_branch() -> list:
+        _search_runner = getattr(search_rag_manager, "search_runner", None) if search_rag_manager else None
+        if _search_runner is None:
+            try:
+                from config.loader import default_config
+                from base.searcher_factory import SearchRunner
 
-            if _search_runner is not None:
+                _search_runner = SearchRunner.from_config(default_config)
+            except Exception:
+                _search_runner = None
+
+        result: list = []
+        if _search_runner is not None:
+            with _time_stage(trace, "media_retrieval"):
                 try:
-                    media_resources = find_media_resources(
+                    result = find_media_resources(
                         _search_runner,
                         selected_knowledge_points,
                         max_videos=max_videos,
@@ -789,27 +794,27 @@ def generate_learning_content_with_llm(
                         video_focus="audio" if fslsm_input >= _FSLSM_MODERATE else "visual",
                     )
                 except Exception:
-                    media_resources = []
+                    result = []
 
-        if media_resources:
+        if result:
             with _time_stage(trace, "media_relevance_checkpoint"):
                 kp_names = [
                     kp.get("name", "") if isinstance(kp, dict) else str(kp)
                     for kp in selected_knowledge_points
                 ]
-                media_resources = filter_media_resources_with_llm(
+                result = filter_media_resources_with_llm(
                     llm,
-                    media_resources,
+                    result,
                     session_title=session_title,
                     knowledge_point_names=kp_names,
                     fast_llm=_fast_llm,
                 )
+        return result
 
-    verbal_narrative_allowance = narrative_allowance(fslsm_input)
-    if verbal_narrative_allowance > 0:
+    def _run_narrative_branch() -> list:
         with _time_stage(trace, "narrative_generation"):
             try:
-                narrative_resources = generate_narrative_resources_with_llm(
+                return generate_narrative_resources_with_llm(
                     llm,
                     selected_knowledge_points,
                     selected_knowledge_drafts,
@@ -819,7 +824,19 @@ def generate_learning_content_with_llm(
                     fast_llm=_fast_llm,
                 )
             except Exception:
-                narrative_resources = []
+                return []
+
+    if _needs_media and _needs_narrative:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _asset_pool:
+            _media_fut = _asset_pool.submit(_run_media_branch)
+            _narr_fut = _asset_pool.submit(_run_narrative_branch)
+            concurrent.futures.wait([_media_fut, _narr_fut])
+            media_resources = _media_fut.result()
+            narrative_resources = _narr_fut.result()
+    elif _needs_media:
+        media_resources = _run_media_branch()
+    elif _needs_narrative:
+        narrative_resources = _run_narrative_branch()
 
     if media_resources or narrative_resources:
         with _time_stage(trace, "inline_asset_planning"):
@@ -836,13 +853,12 @@ def generate_learning_content_with_llm(
     _check_cancel(cancel_event)
 
     def _integrate_document(integration_feedback: str = "") -> str:
-        return integrate_learning_document_with_llm(
-            llm,
-            learner_profile,
-            learning_path,
-            learning_session,
-            selected_knowledge_points,
-            selected_knowledge_drafts,
+        _common_kwargs = dict(
+            learner_profile=learner_profile,
+            learning_path=learning_path,
+            learning_session=learning_session,
+            knowledge_points=selected_knowledge_points,
+            knowledge_drafts=selected_knowledge_drafts,
             output_markdown=output_markdown,
             media_resources=media_resources if media_resources else None,
             narrative_resources=narrative_resources if narrative_resources else None,
@@ -850,17 +866,23 @@ def generate_learning_content_with_llm(
             session_adaptation_contract=session_adaptation_contract,
             integration_feedback=integration_feedback,
         )
+        # Use the parallel integrator only when callers explicitly provide
+        # a distinct fast model. Auto-created support models should not change
+        # the default integration path.
+        if _explicit_fast_llm and _fast_llm is not None and _fast_llm is not llm:
+            return integrate_learning_document_parallel(fast_llm=_fast_llm, **_common_kwargs)
+        return integrate_learning_document_with_llm(llm, **_common_kwargs)
 
     with _time_stage(trace, "integration"):
         learning_document = _integrate_document("")
 
-    section_to_draft_ids = map_integrated_sections_to_draft_ids(learning_document, selected_draft_records)
     quality_rounds = 0
     integrator_retries = 0
-    section_redraft_rounds = 0
     final_integration_eval: dict[str, Any] = _integrated_eval_fallback()
 
     with _time_stage(trace, "final_quality_checkpoint"):
+        _prev_quality_fingerprint: Optional[tuple] = None
+        _prev_issue_count: int = 0
         while quality_rounds < _MAX_QUALITY_ROUNDS:
             quality_rounds += 1
             _check_cancel(cancel_event)
@@ -911,78 +933,32 @@ def generate_learning_content_with_llm(
                 break
 
             repair_scope = str(final_integration_eval.get("repair_scope", "integrator_only"))
+            # Fix 5: section_redraft and full_restart are not permitted in the quality loop.
+            # Drafts are already approved; the integrator re-flows them with feedback instead.
+            if repair_scope in ("section_redraft", "full_restart_required"):
+                repair_scope = "integrator_only"
             directives = str(final_integration_eval.get("improvement_directives", "") or "").strip()
-            affected_section_indices = [
-                int(x) for x in final_integration_eval.get("affected_section_indices", []) if isinstance(x, int)
-            ]
+            _current_issue_count = len(final_integration_eval.get("issues", []))
+            _current_fingerprint = (repair_scope, directives)
+            if (
+                _prev_quality_fingerprint is not None
+                and _current_fingerprint == _prev_quality_fingerprint
+                and _current_issue_count >= _prev_issue_count
+            ):
+                trace["fallback_mode"] = "best_effort"
+                trace["final_failure_reason"] = "Quality loop no-progress: identical repair scope and directives across consecutive rounds."
+                trace["severity"] = str(final_integration_eval.get("severity", "high") or "high")
+                break
+            _prev_quality_fingerprint = _current_fingerprint
+            _prev_issue_count = _current_issue_count
 
             if repair_scope == "integrator_only" and integrator_retries < _MAX_INTEGRATOR_RETRIES:
                 integrator_retries += 1
                 learning_document = _integrate_document(directives)
-                section_to_draft_ids = map_integrated_sections_to_draft_ids(learning_document, selected_draft_records)
-                continue
-
-            if repair_scope == "section_redraft" and section_redraft_rounds < _MAX_SECTION_REDRAFT_ROUNDS:
-                section_redraft_rounds += 1
-                target_draft_ids = _resolve_draft_ids_from_sections(section_to_draft_ids, affected_section_indices)
-                if not target_draft_ids:
-                    trace["fallback_mode"] = "best_effort"
-                    trace["final_failure_reason"] = "Section redraft requested but no matching draft ids were resolved."
-                    trace["severity"] = "high"
-                    break
-
-                for record in selected_draft_records:
-                    if str(record.get("draft_id")) not in target_draft_ids:
-                        continue
-                    repair_feedback = directives or "\n".join(final_integration_eval.get("issues", []))
-                    try:
-                        revised = draft_knowledge_point_with_llm(
-                            llm,
-                            learner_profile=learner_profile,
-                            learning_path=learning_path,
-                            learning_session=learning_session,
-                            knowledge_points=selected_knowledge_points,
-                            knowledge_point=record.get("knowledge_point", {}),
-                            use_search=use_search,
-                            session_adaptation_contract=session_adaptation_contract,
-                            fast_llm=_fast_llm,
-                            max_revision_passes=0,
-                            run_quality_gate=False,
-                            evaluator_feedback=repair_feedback,
-                            search_rag_manager=search_rag_manager,
-                            goal_context=goal_context,
-                        )
-                        record["draft"] = revised if isinstance(revised, dict) else {"title": "", "content": str(revised)}
-                        record["attempt_count"] = int(record.get("attempt_count", 1)) + 1
-                    except Exception as exc:
-                        logger.warning("Section redraft failed for %s: %s", record.get("draft_id"), exc)
-                        existing_issues = list(record.get("issues", []))
-                        existing_issues.append(f"Section redraft failed: {exc}")
-                        record["issues"] = existing_issues
-                        record["status"] = "failed_section_redraft"
-
-                repaired_subset = [
-                    record for record in selected_draft_records if str(record.get("draft_id")) in target_draft_ids
-                ]
-                _apply_deterministic_draft_audit(repaired_subset)
-                _apply_batched_draft_eval(
-                    _fast_llm,
-                    learner_profile=learner_profile if isinstance(learner_profile, Mapping) else {},
-                    learning_session=learning_session if isinstance(learning_session, Mapping) else {},
-                    session_adaptation_contract=session_adaptation_contract,
-                    records=repaired_subset,
-                    trace=trace,
-                )
-
-                selected_knowledge_drafts[:] = [r.get("draft", {}) for r in selected_draft_records]
-                learning_document = _integrate_document(directives)
-                section_to_draft_ids = map_integrated_sections_to_draft_ids(learning_document, selected_draft_records)
                 continue
 
             trace["fallback_mode"] = "best_effort"
-            if repair_scope == "full_restart_required":
-                trace["final_failure_reason"] = "Final evaluator requested full restart; auto-restart is disabled."
-            elif not trace.get("final_failure_reason"):
+            if not trace.get("final_failure_reason"):
                 trace["final_failure_reason"] = "Quality round budget exhausted."
             trace["severity"] = str(final_integration_eval.get("severity", "high") or "high")
             break
@@ -999,9 +975,6 @@ def generate_learning_content_with_llm(
         trace["final_failure_reason"] = ""
         trace["severity"] = "low"
 
-    # Selective redraft may have updated draft contents; refresh source references.
-    sources_used = collect_sources_used(selected_knowledge_drafts)
-
     _check_cancel(cancel_event)
 
     content_format = "standard"
@@ -1012,41 +985,8 @@ def generate_learning_content_with_llm(
 
     audio_url = None
     audio_mode = None
-    if fslsm_input >= _FSLSM_MODERATE:
-        with _time_stage(trace, "audio_generation"):
-            try:
-                tts_source_document = learning_document
-                if fslsm_input >= _FSLSM_STRONG:
-                    audio_mode = "host_expert_optional"
-                    tts_source_document = convert_to_podcast_with_llm(
-                        llm,
-                        learning_document,
-                        learner_profile,
-                        mode="full",
-                    )
-                else:
-                    audio_mode = "narration_optional"
 
-                audio_url = generate_tts_audio(tts_source_document)
-            except Exception:
-                audio_url = None
-
-    learning_content: JSONDict = {
-        "document": learning_document,
-        "quizzes": {},
-        "sources_used": sources_used,
-        "content_format": content_format,
-        "inline_assets_count": int((inline_stats or {}).get("placed_assets", 0)),
-        "inline_assets_placement_stats": inline_stats or {},
-    }
-    if audio_mode is not None:
-        learning_content["audio_mode"] = audio_mode
-    if audio_url is not None:
-        learning_content["audio_url"] = audio_url
-
-    _check_cancel(cancel_event)
-
-    if with_quiz:
+    def _build_quiz() -> dict:
         with _time_stage(trace, "quiz_generation"):
             if quiz_mix_config:
                 from utils.quiz_scorer import get_quiz_mix_for_session as _get_quiz_mix
@@ -1065,8 +1005,7 @@ def generate_learning_content_with_llm(
                     "short_answer_count": 0,
                     "open_ended_count": 0,
                 }
-
-            learning_content["quizzes"] = generate_document_quizzes_with_llm(
+            return generate_document_quizzes_with_llm(
                 llm,
                 learner_profile,
                 learning_document,
@@ -1076,6 +1015,54 @@ def generate_learning_content_with_llm(
                 short_answer_count=mix.get("short_answer_count", 0),
                 open_ended_count=mix.get("open_ended_count", 0),
             )
+
+    if fslsm_input >= _FSLSM_MODERATE:
+        with _time_stage(trace, "audio_generation"):
+            tts_source_document = learning_document
+            if fslsm_input >= _FSLSM_STRONG:
+                audio_mode = "host_expert_optional"
+                try:
+                    tts_source_document = convert_to_podcast_with_llm(
+                        llm,
+                        learning_document,
+                        learner_profile,
+                        mode="full",
+                    )
+                except Exception:
+                    tts_source_document = learning_document
+            else:
+                audio_mode = "narration_optional"
+
+            # Run TTS and quiz in parallel: quiz uses learning_document, TTS uses tts_source_document
+            def _gen_tts() -> Optional[str]:
+                try:
+                    return generate_tts_audio(tts_source_document)
+                except Exception:
+                    return None
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _av_pool:
+                _tts_fut = _av_pool.submit(_gen_tts)
+                _quiz_fut = _av_pool.submit(_build_quiz) if with_quiz else None
+                concurrent.futures.wait([f for f in [_tts_fut, _quiz_fut] if f is not None])
+                audio_url = _tts_fut.result()
+                _quiz_result = _quiz_fut.result() if _quiz_fut is not None else {}
+    else:
+        _quiz_result = _build_quiz() if with_quiz else {}
+
+    learning_content: JSONDict = {
+        "document": learning_document,
+        "quizzes": _quiz_result if with_quiz else {},
+        "sources_used": sources_used,
+        "content_format": content_format,
+        "inline_assets_count": int((inline_stats or {}).get("placed_assets", 0)),
+        "inline_assets_placement_stats": inline_stats or {},
+    }
+    if audio_mode is not None:
+        learning_content["audio_mode"] = audio_mode
+    if audio_url is not None:
+        learning_content["audio_url"] = audio_url
+
+    _check_cancel(cancel_event)
 
     _sync_quality_trace_records(trace, draft_records, integration_records)
     trace_model = OrchestrationQualityTrace.model_validate(trace)

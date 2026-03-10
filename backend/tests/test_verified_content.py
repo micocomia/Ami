@@ -210,6 +210,41 @@ class TestVerifiedContentLoader:
 
         assert docs[0].metadata["page_number"] is None
 
+    def test_load_with_azure_di_uses_page_fallback(self, tmp_path):
+        """_load_with_azure_di falls back to `page` when `page_number` is missing."""
+        from base.verified_content_loader import _load_with_azure_di
+
+        fake_doc = Document(
+            page_content="Some content",
+            metadata={"page": 6, "source": "test.pdf"},
+        )
+        with patch(
+            "langchain_community.document_loaders.AzureAIDocumentIntelligenceLoader"
+        ) as MockLoader:
+            MockLoader.return_value.load.return_value = [fake_doc]
+            docs = _load_with_azure_di("/fake/path/test.pdf")
+
+        assert docs[0].metadata["page_number"] == 6
+
+    def test_load_with_azure_di_uses_url_path(self, tmp_path):
+        """_load_with_azure_di passes blob SAS URLs via url_path."""
+        from base.verified_content_loader import _load_with_azure_di
+
+        fake_doc = Document(
+            page_content="PDF page content",
+            metadata={"page_number": 1, "source": "https://example/blob.pdf"},
+        )
+        with patch(
+            "langchain_community.document_loaders.AzureAIDocumentIntelligenceLoader"
+        ) as MockLoader:
+            MockLoader.return_value.load.return_value = [fake_doc]
+            docs = _load_with_azure_di(url_path="https://example/blob.pdf?sas-token")
+
+        assert len(docs) == 1
+        kwargs = MockLoader.call_args.kwargs
+        assert kwargs["url_path"] == "https://example/blob.pdf?sas-token"
+        assert "url_source" not in kwargs
+
     def test_load_with_azure_di_strips_non_primitive_metadata(self, tmp_path):
         """_load_with_azure_di removes complex metadata values before returning."""
         from base.verified_content_loader import _load_with_azure_di
@@ -366,6 +401,30 @@ class TestVerifiedContentManager:
         assert manager.vectorstore.add_documents.called
         assert count >= 0
 
+    def test_index_verified_content_pdf_uses_url_path(self, manager):
+        """PDF/PPTX path should pass SAS URL via url_path to Azure DI loader."""
+        pdf_blob = _make_blob("TEST_course_2024/Lectures/Lec_1.pdf")
+        sas_url = "https://test.blob.core.windows.net/ami-course-content/Lec_1.pdf?sas"
+        manager.blob_client.generate_sas_url.return_value = sas_url
+        fake_docs = [
+            Document(
+                page_content=(
+                    "This lecture page has enough content to pass low signal filtering and get indexed."
+                ),
+                metadata={"page_number": 1, "source": "Lec_1.pdf"},
+            )
+        ]
+
+        with patch("base.verified_content_manager._load_with_azure_di", return_value=fake_docs) as mock_loader:
+            count = manager.index_verified_content([pdf_blob])
+
+        manager.blob_client.generate_sas_url.assert_called_once_with(
+            manager.course_content_container, pdf_blob.name
+        )
+        mock_loader.assert_called_once_with(url_path=sas_url)
+        assert manager.vectorstore.add_documents.called
+        assert count >= 1
+
     def test_index_verified_content_skips_short_path_blobs(self, manager):
         """Blobs without at least 3 path segments are skipped."""
         bad_blob = _make_blob("orphan_file.pdf")  # Only 1 segment — no course/category
@@ -389,6 +448,68 @@ class TestVerifiedContentManager:
         with patch.object(manager, "_get_document_count", return_value=0):
             results = manager.retrieve("anything")
         assert results == []
+
+    def test_retrieve_filtered_passes_server_side_filters(self, manager):
+        manager.vectorstore.similarity_search.return_value = [
+            Document(
+                page_content="Lecture page content with relevant details.",
+                metadata={
+                    "course_code": "6.0001",
+                    "content_category": "Lectures",
+                    "lecture_number": 1,
+                    "page_number": 2,
+                    "file_name": "Lec_1.pdf",
+                },
+            )
+        ]
+        with patch.object(manager, "_get_document_count", return_value=10):
+            results = manager.retrieve_filtered(
+                query="lecture content",
+                k=1,
+                course_code="6.0001",
+                content_category="lectures",
+                lecture_number=1,
+                page_number=2,
+                require_lecture=True,
+            )
+
+        assert len(results) == 1
+        kwargs = manager.vectorstore.similarity_search.call_args.kwargs
+        filters = kwargs["filters"]
+        assert "course_code eq '6.0001'" in filters
+        assert "content_category eq 'Lectures'" in filters
+        assert "lecture_number eq 1" in filters
+        assert "page_number eq 2" in filters
+        assert "(lecture_number ne null or content_category eq 'Lectures')" in filters
+
+    def test_retrieve_filtered_falls_back_when_server_filter_fields_missing(self, manager):
+        doc = Document(
+            page_content="Syllabus section with enough matching text.",
+            metadata={
+                "course_code": "6.0001",
+                "content_category": "Syllabus",
+                "file_name": "syllabus.json",
+            },
+        )
+        manager.vectorstore.similarity_search.side_effect = [
+            Exception("Invalid expression: Could not find a property named 'course_code'"),
+            [doc],
+        ]
+
+        with patch.object(manager, "_get_document_count", return_value=20):
+            results = manager.retrieve_filtered(
+                query="syllabus",
+                k=1,
+                course_code="6.0001",
+                content_category="Syllabus",
+            )
+
+        assert len(results) == 1
+        assert manager.vectorstore.similarity_search.call_count == 2
+        first_call = manager.vectorstore.similarity_search.call_args_list[0]
+        second_call = manager.vectorstore.similarity_search.call_args_list[1]
+        assert "filters" in first_call.kwargs
+        assert "filters" not in second_call.kwargs
 
     def test_list_courses(self, manager, tmp_path):
         content_dir = tmp_path / "courses"

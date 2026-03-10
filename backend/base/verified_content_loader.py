@@ -116,11 +116,11 @@ def _load_json(file_path: str) -> List[Document]:
     return [doc]
 
 
-def _load_with_azure_di(file_path: str = None, url_source: str = None) -> List[Document]:
+def _load_with_azure_di(file_path: str = None, url_path: str = None) -> List[Document]:
     """Use Azure AI Document Intelligence to parse PDF and PPTX files, one Document per page.
 
     Pass either ``file_path`` (local path, used by the preindex script) or
-    ``url_source`` (SAS URL, used when the source lives in Blob Storage).
+    ``url_path`` (SAS URL, used when the source lives in Blob Storage).
     """
     from langchain_community.document_loaders import AzureAIDocumentIntelligenceLoader
 
@@ -131,15 +131,17 @@ def _load_with_azure_di(file_path: str = None, url_source: str = None) -> List[D
         api_endpoint=endpoint,
         api_key=key,
         file_path=file_path,
-        url_source=url_source,
+        url_path=url_path,
         api_model="prebuilt-layout",
         mode="page",
     )
     docs = loader.load()
 
     for doc in docs:
-        # Normalize page_number — Azure DI sets it directly; fall back to None
+        # Normalize page_number from either `page_number` or legacy `page`.
         page_number = doc.metadata.get("page_number")
+        if page_number is None:
+            page_number = doc.metadata.get("page")
         if page_number is not None:
             try:
                 page_number = int(page_number)
