@@ -58,3 +58,4 @@ export function useAuthContext(): AuthContextValue {
   if (!ctx) throw new Error('useAuthContext must be used within AuthProvider');
   return ctx;
 }
+

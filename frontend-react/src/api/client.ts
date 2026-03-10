@@ -1,10 +1,17 @@
 import axios, { type AxiosInstance } from 'axios';
 import { setupResponseErrorHandling } from './errors';
 
-const baseURL =
+const rawBase =
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL != null
-    ? (import.meta.env.VITE_API_BASE_URL as string).replace(/\/?$/, '') + '/'
-    : 'http://localhost:8000/';
+    ? (import.meta.env.VITE_API_BASE_URL as string)
+    : 'http://localhost:8001/';
+
+const normalized = rawBase.replace(/\s+/g, '').replace(/\/+$/, '');
+
+// VITE_API_BASE_URL should be the backend origin (e.g. http://127.0.0.1:8001)
+// API routes are served under /v1
+export const apiOrigin = normalized.replace(/\/v1$/, '');
+export const baseURL = (normalized.endsWith('/v1') ? normalized : `${normalized}/v1`) + '/';
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL,
@@ -26,5 +33,4 @@ apiClient.interceptors.request.use((config) => {
 });
 
 setupResponseErrorHandling(apiClient);
-
-export { baseURL };
+// baseURL already exported above

@@ -9,7 +9,7 @@ export function LearningSessionLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100">
       <SideNav />
-      <div className="flex flex-1 ml-sidebar overflow-hidden">
+      <div className="flex flex-1 ml-sidebar overflow-y-auto min-h-0">
         <Outlet />
       </div>
     </div>

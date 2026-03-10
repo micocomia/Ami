@@ -46,21 +46,24 @@ export const contentKeys = {
 export async function getLearningContentApi(
   userId: string,
   goalId: number,
-  sessionIndex: number
+  sessionIndex: number,
 ): Promise<{ status: number; data: LearningContentResponse | null }> {
   const response = await apiClient.get<LearningContentResponse>(
     `learning-content/${userId}/${goalId}/${sessionIndex}`,
-    { validateStatus: (s) => s < 500 }
+    { validateStatus: (s) => s < 500 },
   );
   return { status: response.status, data: response.status === 200 ? response.data : null };
 }
 
-export async function generateLearningContentApi(body: GenerateLearningContentRequest): Promise<LearningContentResponse> {
+export async function generateLearningContentApi(
+  body: GenerateLearningContentRequest,
+): Promise<LearningContentResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300_000);
   try {
     const { data } = await apiClient.post<LearningContentResponse>('generate-learning-content', body, {
       signal: controller.signal,
+      timeout: 300_000,
     });
     return data;
   } finally {
@@ -68,7 +71,11 @@ export async function generateLearningContentApi(body: GenerateLearningContentRe
   }
 }
 
-export async function deleteLearningContentApi(userId: string, goalId: number, sessionIndex: number): Promise<void> {
+export async function deleteLearningContentApi(
+  userId: string,
+  goalId: number,
+  sessionIndex: number,
+): Promise<void> {
   await apiClient.delete(`learning-content/${userId}/${goalId}/${sessionIndex}`);
 }
 
@@ -82,24 +89,63 @@ export async function completeSessionApi(body: CompleteSessionRequest): Promise<
   return data;
 }
 
-export async function submitContentFeedbackApi(body: SubmitContentFeedbackRequest): Promise<SubmitContentFeedbackResponse> {
+export async function submitContentFeedbackApi(
+  body: SubmitContentFeedbackRequest,
+): Promise<SubmitContentFeedbackResponse> {
   const { data } = await apiClient.post<SubmitContentFeedbackResponse>('submit-content-feedback', body);
   return data;
 }
 
-export async function getDashboardMetricsApi(userId: string, goalId?: number): Promise<DashboardMetricsResponse> {
-  const { data } = await apiClient.get<DashboardMetricsResponse>(`dashboard-metrics/${userId}`, {
+export async function getDashboardMetricsApi(
+  userId: string,
+  goalId?: number,
+): Promise<DashboardMetricsResponse> {
+  const { data } = await apiClient.get(`dashboard-metrics/${userId}`, {
     params: goalId != null ? { goal_id: goalId } : {},
   });
-  return data;
+
+  const raw = data as Record<string, unknown>;
+
+  const rawSessionSeries = (raw.session_time_series ?? []) as Array<Record<string, unknown>>;
+  const sessionTimeSeries = rawSessionSeries.map((s, idx) => ({
+    session_index: (s.session_index as number) ?? idx,
+    duration_sec: s.duration_sec != null
+      ? (s.duration_sec as number)
+      : (s.time_spent_min as number ?? 0) * 60,
+  }));
+
+  const rawMasterySeries = (raw.mastery_time_series ?? []) as Array<Record<string, unknown>>;
+  const masteryTimeSeries = rawMasterySeries.map((m, idx) => ({
+    session_index: (m.session_index as number) ?? (m.sample_index as number) ?? idx,
+    mastery_pct: m.mastery_pct != null
+      ? (m.mastery_pct as number)
+      : (m.mastery_rate as number ?? 0) * 100,
+  }));
+
+  return {
+    user_id: raw.user_id as string ?? userId,
+    goal_id: (raw.goal_id as number) ?? null,
+    overall_progress: (raw.overall_progress as number) ?? 0,
+    skill_radar: (raw.skill_radar as DashboardMetricsResponse['skill_radar']) ?? {
+      labels: [],
+      current_levels: [],
+      required_levels: [],
+    },
+    session_time_series: sessionTimeSeries,
+    mastery_time_series: masteryTimeSeries,
+  };
 }
 
-export async function updateLearningPreferencesApi(body: LearningPreferencesUpdateRequest): Promise<LearnerProfileResponse> {
+export async function updateLearningPreferencesApi(
+  body: LearningPreferencesUpdateRequest,
+): Promise<LearnerProfileResponse> {
   const { data } = await apiClient.post<LearnerProfileResponse>('update-learning-preferences', body);
   return data;
 }
 
-export async function updateLearnerInformationApi(body: LearnerInformationUpdateRequest): Promise<LearnerProfileResponse> {
+export async function updateLearnerInformationApi(
+  body: LearnerInformationUpdateRequest,
+): Promise<LearnerProfileResponse> {
   const { data } = await apiClient.post<LearnerProfileResponse>('update-learner-information', body);
   return data;
 }
@@ -114,7 +160,7 @@ export async function deleteUserDataApi(userId: string): Promise<{ ok: boolean }
 export function useGetLearningContent(
   userId: string | undefined,
   goalId: number | undefined,
-  sessionIndex: number | undefined
+  sessionIndex: number | undefined,
 ) {
   const enabled = Boolean(userId) && goalId != null && sessionIndex != null;
   return useQuery({
@@ -174,3 +220,4 @@ export function useUpdateLearnerInformation() {
 export function useDeleteUserData() {
   return useMutation({ mutationFn: (userId: string) => deleteUserDataApi(userId) });
 }
+

@@ -1,5 +1,5 @@
 /**
- * API request/response TypeScript types (aligned with API_CONTRACT.md and backend/api_schemas.py)
+ * API request/response TypeScript types (aligned with API_CONTRACT.md)
  */
 
 export interface BaseRequest {
@@ -11,8 +11,6 @@ export interface BaseRequest {
 export interface ApiErrorBody {
   detail: string;
 }
-
-// ─── Auth ────────────────────────────────────────────────────────────────────
 
 export interface AuthRegisterRequest {
   username: string;
@@ -32,8 +30,6 @@ export interface AuthTokenResponse {
 export interface AuthMeResponse {
   username: string;
 }
-
-// ─── Config / Static ─────────────────────────────────────────────────────────
 
 export interface QuizMix {
   single_choice_count: number;
@@ -75,121 +71,32 @@ export interface PersonasResponse {
   personas: Record<string, PersonaInfo>;
 }
 
-// ─── Core Domain ─────────────────────────────────────────────────────────────
-
-export interface LearnerProfile {
-  learning_goal?: string;
-  goal_display_name?: string;
-  cognitive_status?: Record<string, unknown>;
-  learning_preferences?: { fslsm_dimensions?: Record<string, number>; [key: string]: unknown };
-  behavioral_patterns?: Record<string, unknown>;
-  learner_information?: string;
-  [key: string]: unknown;
+export interface LlmModelItem {
+  model_name: string;
+  model_provider: string;
 }
 
-export interface LearningPathSession {
-  id: string;
-  title?: string;
-  abstract?: string;
-  associated_skills?: string[];
-  navigation_mode?: string;
-  if_learned?: boolean;
-  mastery_score?: number;
-  is_mastered?: boolean;
-  mastery_threshold?: number;
-  thinking_time_buffer_minutes?: number;
-  [key: string]: unknown;
+export interface ListLlmModelsResponse {
+  models: LlmModelItem[];
 }
-
-export interface AgentMetadata {
-  decision?: Record<string, unknown>;
-  fslsm_deltas?: Record<string, unknown>;
-  mastery_results?: unknown[];
-  evaluation_feedback?: unknown;
-  evaluation?: {
-    pass?: boolean;
-    issues?: string[];
-    feedback_summary?: string;
-  };
-  refinement_iterations?: number;
-  [key: string]: unknown;
-}
-
-// ─── Goals ───────────────────────────────────────────────────────────────────
-
-export interface GoalAggregate {
-  id: number;
-  learning_goal: string;
-  skill_gaps?: Record<string, unknown>;
-  goal_assessment?: unknown;
-  goal_context?: unknown;
-  retrieved_sources?: unknown[];
-  bias_audit?: unknown;
-  profile_fairness?: unknown;
-  learning_path?: LearningPathSession[];
-  plan_agent_metadata?: AgentMetadata;
-  learner_profile?: LearnerProfile;
-  is_completed?: boolean;
-  is_deleted?: boolean;
-  [key: string]: unknown;
-}
-
-export interface GoalsListResponse {
-  goals: GoalAggregate[];
-}
-
-export interface GoalCreateRequest {
-  learning_goal: string;
-  skill_gaps?: unknown;
-  goal_assessment?: unknown;
-  goal_context?: unknown;
-  retrieved_sources?: unknown[];
-  bias_audit?: unknown;
-  profile_fairness?: unknown;
-  learner_profile?: LearnerProfile;
-  learning_path?: LearningPathSession[];
-  plan_agent_metadata?: AgentMetadata;
-}
-
-export interface GoalUpdateRequest {
-  learning_goal?: string;
-  learning_path?: LearningPathSession[];
-  plan_agent_metadata?: AgentMetadata;
-  [key: string]: unknown;
-}
-
-// ─── Goal Runtime State ───────────────────────────────────────────────────────
-
-export interface GoalRuntimeStateSession {
-  session_index: number;
-  session_id: string;
-  is_locked: boolean;
-  can_open: boolean;
-  can_complete: boolean;
-  completion_block_reason: string | null;
-  if_learned: boolean;
-  is_mastered: boolean;
-  mastery_score: number | null;
-  mastery_threshold: number;
-  navigation_mode: string;
-}
-
-export interface GoalRuntimeState {
-  goal_id: number;
-  adaptation: {
-    suggested: boolean;
-    message: string;
-    sources: unknown[];
-  };
-  sessions: GoalRuntimeStateSession[];
-}
-
-// ─── User State (legacy, kept for UserState type) ────────────────────────────
 
 export interface SessionLearningTime {
   start_time?: number;
   end_time?: number;
   trigger_time_list?: number[];
+}
+
+export interface QuizQuestionBase {
+  question: string;
+  [key: string]: unknown;
+}
+
+export interface DocumentQuiz {
+  single_choice_questions?: Array<QuizQuestionBase & { options: string[]; correct_answer: string | number }>;
+  multiple_choice_questions?: Array<QuizQuestionBase & { options: string[]; correct_answers: (string | number)[] }>;
+  true_false_questions?: Array<QuizQuestionBase & { correct_answer: boolean }>;
+  short_answer_questions?: Array<QuizQuestionBase & { expected_answer: string }>;
+  open_ended_questions?: Array<QuizQuestionBase & { rubric: string; example_answer: string }>;
 }
 
 export interface DocumentCache {
@@ -198,8 +105,32 @@ export interface DocumentCache {
   [key: string]: unknown;
 }
 
+export interface LearnerProfile {
+  learning_goal?: string;
+  cognitive_status?: Record<string, unknown>;
+  learning_preferences?: { fslsm_dimensions?: Record<string, number>; [key: string]: unknown };
+  behavioral_patterns?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface LearningPathSession {
+  id: string;
+  if_learned?: boolean;
+  mastery_score?: number;
+  is_mastered?: boolean;
+  mastery_threshold?: number;
+  [key: string]: unknown;
+}
+
+export interface GoalInState {
+  id: number;
+  learning_path?: LearningPathSession[];
+  learner_profile?: LearnerProfile;
+  [key: string]: unknown;
+}
+
 export interface UserState {
-  goals?: GoalAggregate[];
+  goals?: GoalInState[];
   session_learning_times?: Record<string, SessionLearningTime>;
   learned_skills_history?: Record<string, number[]>;
   document_caches?: Record<string, DocumentCache>;
@@ -214,8 +145,6 @@ export interface UserStatePutRequest {
   state: UserState;
 }
 
-// ─── Events ──────────────────────────────────────────────────────────────────
-
 export interface BehaviorEventRequest {
   user_id: string;
   event_type: string;
@@ -227,13 +156,6 @@ export interface LogEventResponse {
   ok: boolean;
   event_count: number;
 }
-
-export interface GetEventsResponse {
-  user_id: string;
-  events: unknown[];
-}
-
-// ─── Profile ─────────────────────────────────────────────────────────────────
 
 export interface ProfileGetResponse {
   user_id: string;
@@ -270,12 +192,6 @@ export interface AutoProfileUpdateResponse {
   learner_profile: LearnerProfile;
 }
 
-export interface LearnerProfileResponse {
-  learner_profile: LearnerProfile;
-}
-
-// ─── Behavioral Metrics ───────────────────────────────────────────────────────
-
 export interface BehavioralMetricsResponse {
   user_id: string;
   goal_id: number | null;
@@ -300,23 +216,6 @@ export interface SessionMasteryItem {
 }
 
 export type SessionMasteryStatusResponse = SessionMasteryItem[];
-
-// ─── Dashboard Metrics ────────────────────────────────────────────────────────
-
-export interface DashboardMetricsResponse {
-  user_id: string;
-  goal_id: number | null;
-  overall_progress: number;
-  skill_radar: {
-    labels: string[];
-    current_levels: number[];
-    required_levels: number[];
-  };
-  session_time_series: Array<{ session_index: number; duration_sec: number }>;
-  mastery_time_series: Array<{ session_index: number; mastery_pct: number }>;
-}
-
-// ─── Mastery Evaluation ───────────────────────────────────────────────────────
 
 export interface QuizAnswersPayload {
   single_choice_questions?: (string | number)[];
@@ -356,89 +255,6 @@ export interface MasteryEvaluationResponse {
   open_ended_feedback?: OpenEndedFeedbackItem[];
 }
 
-// ─── Quiz Types ───────────────────────────────────────────────────────────────
-
-export interface QuizQuestionBase {
-  question: string;
-  explanation?: string;
-  [key: string]: unknown;
-}
-
-export interface DocumentQuiz {
-  single_choice_questions?: Array<QuizQuestionBase & {
-    options: string[];
-    correct_answer?: string | number;
-    correct_option?: number;
-  }>;
-  multiple_choice_questions?: Array<QuizQuestionBase & {
-    options: string[];
-    correct_answers?: (string | number)[];
-    correct_options?: number[];
-  }>;
-  true_false_questions?: Array<QuizQuestionBase & { correct_answer: boolean }>;
-  short_answer_questions?: Array<QuizQuestionBase & { expected_answer: string }>;
-  open_ended_questions?: Array<QuizQuestionBase & { rubric: string; example_answer: string }>;
-}
-
-// ─── Learning Content ─────────────────────────────────────────────────────────
-
-export interface ContentSection {
-  title: string;
-  anchor?: string;
-  level?: number;
-  markdown: string;
-}
-
-export interface ContentViewModel {
-  sections?: ContentSection[];
-  references?: Array<{ index: number; label: string }>;
-}
-
-export interface LearningContentResponse {
-  document?: string | Record<string, unknown>;
-  quizzes?: DocumentQuiz;
-  content_format: 'standard' | 'audio_enhanced' | 'visual_enhanced';
-  audio_url?: string | null;
-  audio_mode?: string;
-  view_model?: ContentViewModel;
-  sources_used?: unknown[];
-}
-
-// ─── Session Activity ─────────────────────────────────────────────────────────
-
-export interface SessionActivityRequest {
-  user_id: string;
-  goal_id: number;
-  session_index: number;
-  event_type: 'start' | 'heartbeat' | 'end';
-}
-
-export interface SessionActivityResponse {
-  trigger?: { show: boolean; message: string };
-}
-
-export interface CompleteSessionRequest {
-  user_id: string;
-  goal_id: number;
-  session_index: number;
-}
-
-export interface CompleteSessionResponse {
-  goal?: GoalAggregate;
-}
-
-export interface SubmitContentFeedbackRequest {
-  user_id: string;
-  goal_id: number;
-  feedback: Record<string, unknown>;
-}
-
-export interface SubmitContentFeedbackResponse {
-  goal?: GoalAggregate;
-}
-
-// ─── Goal & Skill Gap ─────────────────────────────────────────────────────────
-
 export interface RefineLearningGoalRequest extends BaseRequest {
   learning_goal: string;
   learner_information?: string;
@@ -457,14 +273,7 @@ export interface SkillGapIdentificationRequest extends BaseRequest {
 
 export interface IdentifySkillGapResponse {
   skill_gaps?: Record<string, unknown>;
-  goal_assessment?: {
-    auto_refined?: boolean;
-    refined_goal?: string;
-    vague?: boolean;
-    all_mastered?: boolean;
-    [key: string]: unknown;
-  };
-  goal_context?: unknown;
+  goal_assessment?: unknown;
   retrieved_sources?: unknown[];
   [key: string]: unknown;
 }
@@ -492,7 +301,14 @@ export interface ValidateProfileFairnessRequest extends BaseRequest {
   persona_name?: string;
 }
 
-// ─── Profile Updates ──────────────────────────────────────────────────────────
+export interface UpdateLearnerProfileRequest extends BaseRequest {
+  learner_profile: string;
+  learner_interactions: string;
+  learner_information?: string;
+  session_information?: string;
+  user_id?: string;
+  goal_id?: number;
+}
 
 export interface CognitiveStatusUpdateRequest extends BaseRequest {
   learner_profile: string;
@@ -509,15 +325,9 @@ export interface LearningPreferencesUpdateRequest extends BaseRequest {
   goal_id?: number;
 }
 
-export interface LearnerInformationUpdateRequest extends BaseRequest {
-  learner_profile: string;
-  updated_learner_information: string;
-  resume_text?: string;
-  user_id?: string;
-  goal_id?: number;
+export interface LearnerProfileResponse {
+  learner_profile: LearnerProfile;
 }
-
-// ─── Learning Path ────────────────────────────────────────────────────────────
 
 export interface ScheduleLearningPathRequest extends BaseRequest {
   learner_profile: string;
@@ -529,9 +339,31 @@ export interface ScheduleLearningPathResponse {
   retrieved_sources?: unknown[];
 }
 
+export interface RescheduleLearningPathRequest extends BaseRequest {
+  learner_profile: string;
+  learning_path: string;
+  session_count?: number;
+  other_feedback?: string;
+}
+
+export interface RescheduleLearningPathResponse {
+  rescheduled_learning_path?: LearningPathSession[];
+  learning_path?: LearningPathSession[];
+  [key: string]: unknown;
+}
+
 export interface AgenticLearningPathRequest extends BaseRequest {
   learner_profile: string;
   session_count?: number;
+}
+
+export interface AgentMetadata {
+  decision?: Record<string, unknown>;
+  fslsm_deltas?: Record<string, unknown>;
+  mastery_results?: unknown[];
+  evaluation_feedback?: unknown;
+  evaluation?: unknown;
+  [key: string]: unknown;
 }
 
 export interface ScheduleLearningPathAgenticResponse {
@@ -548,28 +380,25 @@ export interface AdaptLearningPathRequest extends BaseRequest {
 export interface AdaptLearningPathResponse {
   learning_path: LearningPathSession[];
   agent_metadata?: AgentMetadata;
-  adaptation?: { status: string; [key: string]: unknown };
-}
-
-// ─── Content Generation ───────────────────────────────────────────────────────
-
-export interface GenerateLearningContentRequest extends BaseRequest {
-  learner_profile: string;    // JSON-stringified LearnerProfile
-  learning_path: string;      // JSON-stringified LearningPathSession[]
-  learning_session: string;   // JSON-stringified specific LearningPathSession
-  use_search?: boolean;
-  allow_parallel?: boolean;
-  with_quiz?: boolean;
-  goal_context?: string;      // JSON-stringified goal_context from GoalAggregate
-  user_id?: string;
-  goal_id?: number;
-  session_index?: number;
 }
 
 export interface ExploreKnowledgePointsRequest {
   learner_profile: string;
   learning_path: string;
   learning_session: string;
+}
+
+export interface DraftKnowledgePointRequest extends BaseRequest {
+  learner_profile: string;
+  learning_path: string;
+  learning_session: string;
+  knowledge_points: string;
+  knowledge_point: string;
+  use_search: boolean;
+}
+
+export interface DraftKnowledgePointResponse {
+  knowledge_draft: string;
 }
 
 export interface DraftKnowledgePointsRequest extends BaseRequest {
@@ -628,29 +457,195 @@ export interface TailorKnowledgeContentResponse {
   tailored_content: Record<string, unknown>;
 }
 
-// ─── Chat with Tutor ─────────────────────────────────────────────────────────
+export interface SimulateContentFeedbackRequest extends BaseRequest {
+  learner_profile: string;
+  learning_content: string;
+}
+
+export interface SimulateContentFeedbackResponse {
+  feedback: Record<string, unknown>;
+}
 
 export interface ChatWithTutorRequest extends BaseRequest {
-  messages: string;                    // JSON.stringify(messages array)
-  learner_profile: string;             // JSON.stringify(LearnerProfile)
-  user_id?: string;
-  goal_id?: number;
-  session_index?: number;
-  use_web_search?: boolean;
-  use_vector_retrieval?: boolean;
-  use_media_search?: boolean;
-  allow_preference_updates?: boolean;
-  return_metadata?: boolean;
-  learner_information?: string;
+  messages: string;
+  learner_profile: string;
 }
 
 export interface ChatWithTutorResponse {
   response: string;
-  updated_learner_profile?: LearnerProfile;
 }
-
-// ─── PDF Extraction ───────────────────────────────────────────────────────────
 
 export interface ExtractPdfTextResponse {
   text: string;
+}
+
+export interface GetEventsResponse {
+  user_id: string;
+  events: unknown[];
+}
+
+// ─── Goals ───────────────────────────────────────────────────────────────────
+
+export interface GoalAggregate {
+  id: number;
+  learning_goal: string;
+  skill_gaps?: Record<string, unknown>;
+  goal_assessment?: unknown;
+  goal_context?: unknown;
+  retrieved_sources?: unknown[];
+  bias_audit?: unknown;
+  profile_fairness?: unknown;
+  learning_path?: LearningPathSession[];
+  plan_agent_metadata?: AgentMetadata;
+  learner_profile?: LearnerProfile;
+  is_completed?: boolean;
+  is_deleted?: boolean;
+  [key: string]: unknown;
+}
+
+export interface GoalsListResponse {
+  goals: GoalAggregate[];
+}
+
+export interface GoalCreateRequest {
+  learning_goal: string;
+  skill_gaps?: unknown;
+  goal_assessment?: unknown;
+  goal_context?: unknown;
+  retrieved_sources?: unknown[];
+  bias_audit?: unknown;
+  profile_fairness?: unknown;
+  learner_profile?: LearnerProfile;
+  learning_path?: LearningPathSession[];
+  plan_agent_metadata?: AgentMetadata;
+}
+
+export interface GoalUpdateRequest {
+  learning_goal?: string;
+  learning_path?: LearningPathSession[];
+  plan_agent_metadata?: AgentMetadata;
+  [key: string]: unknown;
+}
+
+// ─── Goal Runtime State ──────────────────────────────────────────────────────
+
+export interface GoalRuntimeStateSession {
+  session_index: number;
+  session_id: string;
+  is_locked: boolean;
+  can_open: boolean;
+  can_complete: boolean;
+  completion_block_reason: string | null;
+  if_learned: boolean;
+  is_mastered: boolean;
+  mastery_score: number | null;
+  mastery_threshold: number;
+  navigation_mode: string;
+}
+
+export interface GoalRuntimeState {
+  goal_id: number;
+  adaptation: {
+    suggested: boolean;
+    message: string;
+    sources: unknown[];
+  };
+  sessions: GoalRuntimeStateSession[];
+}
+
+// ─── Learning Content ────────────────────────────────────────────────────────
+
+export interface ContentSection {
+  title: string;
+  anchor?: string;
+  level?: number;
+  markdown: string;
+}
+
+export interface ContentViewModel {
+  sections?: ContentSection[];
+  references?: Array<{ index: number; label: string }>;
+}
+
+export interface LearningContentResponse {
+  document?: string | Record<string, unknown>;
+  quizzes?: DocumentQuiz;
+  content_format: 'standard' | 'audio_enhanced' | 'visual_enhanced';
+  audio_url?: string | null;
+  audio_mode?: string;
+  view_model?: ContentViewModel;
+  sources_used?: unknown[];
+}
+
+// ─── Content Generation ──────────────────────────────────────────────────────
+
+export interface GenerateLearningContentRequest extends BaseRequest {
+  learner_profile: string;
+  learning_path: string;
+  learning_session: string;
+  use_search?: boolean;
+  allow_parallel?: boolean;
+  with_quiz?: boolean;
+  goal_context?: Record<string, unknown>;
+  user_id?: string;
+  goal_id?: number;
+  session_index?: number;
+}
+
+// ─── Session Activity ────────────────────────────────────────────────────────
+
+export interface SessionActivityRequest {
+  user_id: string;
+  goal_id: number;
+  session_index: number;
+  event_type: 'start' | 'heartbeat' | 'end';
+}
+
+export interface SessionActivityResponse {
+  trigger?: { show: boolean; message: string };
+}
+
+export interface CompleteSessionRequest {
+  user_id: string;
+  goal_id: number;
+  session_index: number;
+}
+
+export interface CompleteSessionResponse {
+  goal?: GoalAggregate;
+}
+
+export interface SubmitContentFeedbackRequest {
+  user_id: string;
+  goal_id: number;
+  feedback: Record<string, unknown>;
+}
+
+export interface SubmitContentFeedbackResponse {
+  goal?: GoalAggregate;
+}
+
+// ─── Dashboard Metrics ───────────────────────────────────────────────────────
+
+export interface DashboardMetricsResponse {
+  user_id: string;
+  goal_id: number | null;
+  overall_progress: number;
+  skill_radar: {
+    labels: string[];
+    current_levels: number[];
+    required_levels: number[];
+  };
+  session_time_series: Array<{ session_index: number; duration_sec: number }>;
+  mastery_time_series: Array<{ session_index: number; mastery_pct: number }>;
+}
+
+// ─── Profile Updates ─────────────────────────────────────────────────────────
+
+export interface LearnerInformationUpdateRequest extends BaseRequest {
+  learner_profile: string;
+  updated_learner_information: string;
+  resume_text?: string;
+  user_id?: string;
+  goal_id?: number;
 }

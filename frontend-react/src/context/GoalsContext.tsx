@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAuthContext } from './AuthContext';
+import { useAuthContext } from '@/context/AuthContext';
 import { listGoalsApi, goalsKeys } from '@/api/endpoints/goals';
 import { syncProfileApi } from '@/api/endpoints/profile';
 import type { GoalAggregate } from '@/types';
@@ -34,7 +34,7 @@ export function GoalsProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedGoalId, setSelectedGoalIdState] = useState<number | null>(readStoredGoalId);
 
-  // Fetch goals whenever userId changes
+  // Fetch goals whenever userId/auth changes
   useEffect(() => {
     if (!userId || !isAuthenticated) {
       setGoals([]);
@@ -51,12 +51,18 @@ export function GoalsProvider({ children }: { children: React.ReactNode }) {
           if (prev != null && active.some((g) => g.id === prev)) return prev;
           const first = active[0]?.id ?? null;
           if (first != null) {
-            try { sessionStorage.setItem(SELECTED_GOAL_KEY, String(first)); } catch { /* ignore */ }
+            try {
+              sessionStorage.setItem(SELECTED_GOAL_KEY, String(first));
+            } catch {
+              // ignore
+            }
           }
           return first;
         });
       })
-      .catch(() => {})
+      .catch(() => {
+        // errors already surfaced by axios interceptor/toast
+      })
       .finally(() => setIsLoading(false));
   }, [userId, isAuthenticated]);
 
@@ -73,25 +79,38 @@ export function GoalsProvider({ children }: { children: React.ReactNode }) {
           return active[0]?.id ?? null;
         });
       })
-      .catch(() => {})
+      .catch(() => {
+        // ignore, handled globally
+      })
       .finally(() => setIsLoading(false));
   }, [userId, queryClient]);
 
-  const setSelectedGoalId = useCallback((id: number) => {
-    try { sessionStorage.setItem(SELECTED_GOAL_KEY, String(id)); } catch { /* ignore */ }
-    setSelectedGoalIdState(id);
-    // Sync profile on goal switch (fire-and-forget)
-    if (userId) {
-      syncProfileApi(userId, id).catch(() => {});
-    }
-  }, [userId]);
+  const setSelectedGoalId = useCallback(
+    (id: number) => {
+      try {
+        sessionStorage.setItem(SELECTED_GOAL_KEY, String(id));
+      } catch {
+        // ignore
+      }
+      setSelectedGoalIdState(id);
+      // Sync profile on goal switch (fire-and-forget)
+      if (userId) {
+        syncProfileApi(userId, id).catch(() => {
+          // ignore errors here; detailed handling happens where profile is consumed
+        });
+      }
+    },
+    [userId],
+  );
 
   const updateGoal = useCallback((goalId: number, updatedGoal: GoalAggregate) => {
     setGoals((prev) => prev.map((g) => (g.id === goalId ? updatedGoal : g)));
   }, []);
 
   return (
-    <GoalsContext.Provider value={{ goals, selectedGoalId, setSelectedGoalId, refreshGoals, updateGoal, isLoading }}>
+    <GoalsContext.Provider
+      value={{ goals, selectedGoalId, setSelectedGoalId, refreshGoals, updateGoal, isLoading }}
+    >
       {children}
     </GoalsContext.Provider>
   );
@@ -102,3 +121,15 @@ export function useGoalsContext(): GoalsContextValue {
   if (!ctx) throw new Error('useGoalsContext must be used within GoalsProvider');
   return ctx;
 }
+
+export function useActiveGoal() {
+  const { goals, selectedGoalId } = useGoalsContext();
+  const activeGoal = goals.find((g) => g.id === selectedGoalId) ?? null;
+  return {
+    activeGoal,
+    hasActiveGoal: activeGoal != null,
+    goals,
+    selectedGoalId,
+  };
+}
+

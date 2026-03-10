@@ -6,7 +6,7 @@ import { QuizPanel } from '@/components/learning/QuizPanel';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
 import { useGoalsContext } from '@/context/GoalsContext';
-import { useActiveGoal } from '@/hooks/useActiveGoal';
+import { useActiveGoal } from '@/context/GoalsContext';
 import { useAppConfig } from '@/api/endpoints/config';
 import { useGoalRuntimeState } from '@/api/endpoints/goals';
 import {
@@ -16,8 +16,10 @@ import {
   useSessionActivity,
   useCompleteSession,
   useSubmitContentFeedback,
+  generateLearningContentApi,
 } from '@/api/endpoints/content';
 import { useChatWithTutor } from '@/api/endpoints/chat';
+import { SessionLoadingPanel } from '@/components/learning/SessionLoadingPanel';
 import type { MasteryEvaluationResponse, ContentSection } from '@/types';
 
 interface LocationState {
@@ -25,10 +27,35 @@ interface LocationState {
   sessionIndex: number;
 }
 
+function transformSectionMarkdown(markdown: string): string {
+  if (!markdown) return markdown;
+  // Mirror Streamlit behavior: make backend /static assets absolute so media (video/image) loads correctly
+  const staticBase = absolutizeUrl('/static/');
+  if (!staticBase) return markdown;
+  return markdown.replace(/\/static\//g, staticBase);
+}
+
+function normalizeGoalContext(value: unknown): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  return undefined;
+}
+
 function absolutizeUrl(url: string | null | undefined): string {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  const base = ((import.meta.env as Record<string, string>).VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+  const base = (((import.meta.env as Record<string, string>).VITE_API_BASE_URL ?? '') as string)
+    .replace(/\/$/, '')
+    .replace(/\/v1$/, '');
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
@@ -55,19 +82,34 @@ export function LearningSessionPage() {
   const { userId } = useAuthContext();
   const { updateGoal } = useGoalsContext();
   const { data: config } = useAppConfig();
-  const activeGoal = useActiveGoal();
+  const { activeGoal } = useActiveGoal();
 
   const state = location.state as LocationState | null;
-  const goalId = state?.goalId;
-  const sessionIndex = state?.sessionIndex;
+
+  const resolvedGoalId = (() => {
+    if (state?.goalId != null) return state.goalId;
+    return activeGoal?.id ?? null;
+  })();
+
+  const resolvedSessionIndex = (() => {
+    if (state?.sessionIndex != null) return state.sessionIndex;
+    if (!activeGoal?.learning_path) return null;
+    const idx = activeGoal.learning_path.findIndex(
+      (s) => !s.if_learned,
+    );
+    return idx >= 0 ? idx : null;
+  })();
+
+  const goalId = resolvedGoalId as number;
+  const sessionIndex = resolvedSessionIndex as number;
 
   useEffect(() => {
-    if (goalId == null || sessionIndex == null) navigate('/learning-path', { replace: true });
-  }, [goalId, sessionIndex, navigate]);
+    if (resolvedGoalId == null || resolvedSessionIndex == null) {
+      navigate('/learning-path', { replace: true });
+    }
+  }, [resolvedGoalId, resolvedSessionIndex, navigate]);
 
-  const { data: runtimeStateData } = useGoalRuntimeState(userId ?? undefined, goalId ?? undefined);
-  const runtimeSession = runtimeStateData?.sessions.find((s) => s.session_index === sessionIndex);
-  const navigationMode = runtimeSession?.navigation_mode ?? 'free';
+  const { data: runtimeStateData, refetch: refetchRuntime } = useGoalRuntimeState(userId ?? undefined, goalId ?? undefined);
 
   const { data: contentCacheResult, isLoading: isCheckingCache } = useGetLearningContent(
     userId ?? undefined,
@@ -110,14 +152,20 @@ export function LearningSessionPage() {
         use_search: true,
         allow_parallel: true,
         with_quiz: true,
-        goal_context: activeGoal.goal_context ? JSON.stringify(activeGoal.goal_context) : undefined,
+        goal_context: normalizeGoalContext(activeGoal.goal_context),
         user_id: userId,
         goal_id: goalId,
         session_index: sessionIndex,
       },
       {
-        onSuccess: (data) => { setContent(data); setIsGenerating(false); },
-        onError: () => { setGenerateError('Failed to generate content. Please try again.'); setIsGenerating(false); },
+        onSuccess: (data) => {
+          setContent(data);
+          setIsGenerating(false);
+        },
+        onError: () => {
+          setGenerateError('Failed to generate content. Please try again.');
+          setIsGenerating(false);
+        },
       },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,7 +182,10 @@ export function LearningSessionPage() {
     if (sections.length > 0 && currentSectionIdx >= sections.length - 1) setQuizUnlocked(true);
   }, [currentSectionIdx, sections.length]);
 
-  useEffect(() => { setCurrentSectionIdx(0); setQuizUnlocked(false); }, [content]);
+  useEffect(() => {
+    setCurrentSectionIdx(0);
+    setQuizUnlocked(false);
+  }, [content]);
 
   // Heartbeat
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -143,17 +194,22 @@ export function LearningSessionPage() {
     const interval = (config?.motivational_trigger_interval_secs ?? 30) * 1000;
     heartbeatRef.current = setInterval(() => {
       sessionActivityMutation.mutate({
-        user_id: userId, goal_id: goalId, session_index: sessionIndex, event_type: 'heartbeat',
+        user_id: userId,
+        goal_id: goalId,
+        session_index: sessionIndex,
+        event_type: 'heartbeat',
       });
     }, interval);
-    return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, goalId, sessionIndex, config?.motivational_trigger_interval_secs]);
 
   const [masteryResult, setMasteryResult] = useState<MasteryEvaluationResponse | null>(null);
-  const canComplete = runtimeSession?.can_complete ?? true;
-  const linearMasteryGate = navigationMode === 'linear' && masteryResult != null && !masteryResult.is_mastered;
-  const isCompleteEnabled = canComplete && !linearMasteryGate;
+  const [sessionCompleted, setSessionCompleted] = useState(false);
+  const hasMastered = masteryResult?.is_mastered === true;
+  const isCompleteEnabled = hasMastered;
 
   // Chat
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
@@ -161,7 +217,9 @@ export function LearningSessionPage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const handleSendChat = useCallback(async () => {
     if (!chatInput.trim() || !userId || goalId == null) return;
@@ -201,27 +259,73 @@ export function LearningSessionPage() {
       const res = await submitFeedbackMutation.mutateAsync({
         user_id: userId,
         goal_id: goalId,
-        feedback: { clarity: clarityRating, relevance: relevanceRating, depth: depthRating, comments: feedbackComments, session_index: sessionIndex },
+        feedback: {
+          clarity: clarityRating,
+          relevance: relevanceRating,
+          depth: depthRating,
+          comments: feedbackComments,
+          session_index: sessionIndex,
+        },
       });
       setFeedbackSubmitted(true);
       if (res.goal) updateGoal(goalId, res.goal);
-    } catch { /* ignore */ }
-  }, [userId, goalId, clarityRating, relevanceRating, depthRating, feedbackComments, sessionIndex, submitFeedbackMutation, updateGoal]);
+    } catch {
+      /* ignore */
+    }
+  }, [
+    userId,
+    goalId,
+    clarityRating,
+    relevanceRating,
+    depthRating,
+    feedbackComments,
+    sessionIndex,
+    submitFeedbackMutation,
+    updateGoal,
+  ]);
 
   const handleBack = useCallback(async () => {
     if (userId && goalId != null && sessionIndex != null) {
-      await sessionActivityMutation.mutateAsync({
-        user_id: userId, goal_id: goalId, session_index: sessionIndex, event_type: 'end',
-      }).catch(() => {});
+      await sessionActivityMutation
+        .mutateAsync({
+          user_id: userId,
+          goal_id: goalId,
+          session_index: sessionIndex,
+          event_type: 'end',
+        })
+        .catch(() => {});
     }
     navigate('/learning-path');
   }, [userId, goalId, sessionIndex, sessionActivityMutation, navigate]);
 
+  const ensureCached = useCallback(async () => {
+    if (!userId || goalId == null || sessionIndex == null || !activeGoal) return;
+    const pathSession = activeGoal.learning_path?.[sessionIndex];
+    if (!pathSession) return;
+    await generateLearningContentApi({
+      learner_profile: JSON.stringify(activeGoal.learner_profile ?? {}),
+      learning_path: JSON.stringify(activeGoal.learning_path ?? []),
+      learning_session: JSON.stringify(pathSession),
+      use_search: true,
+      allow_parallel: true,
+      with_quiz: true,
+      goal_context: normalizeGoalContext(activeGoal.goal_context),
+      user_id: userId,
+      goal_id: goalId,
+      session_index: sessionIndex,
+    });
+  }, [userId, goalId, sessionIndex, activeGoal]);
+
   const handleRegenerate = useCallback(async () => {
     if (!userId || goalId == null || sessionIndex == null) return;
-    await sessionActivityMutation.mutateAsync({
-      user_id: userId, goal_id: goalId, session_index: sessionIndex, event_type: 'end',
-    }).catch(() => {});
+    await sessionActivityMutation
+      .mutateAsync({
+        user_id: userId,
+        goal_id: goalId,
+        session_index: sessionIndex,
+        event_type: 'end',
+      })
+      .catch(() => {});
     setContent(null);
     setGenerateError(null);
     setMasteryResult(null);
@@ -232,11 +336,32 @@ export function LearningSessionPage() {
   const handleComplete = useCallback(async () => {
     if (!userId || goalId == null || sessionIndex == null) return;
     try {
-      const res = await completeSessionMutation.mutateAsync({ user_id: userId, goal_id: goalId, session_index: sessionIndex });
+      const res = await completeSessionMutation.mutateAsync({
+        user_id: userId,
+        goal_id: goalId,
+        session_index: sessionIndex,
+      });
       if (res.goal) updateGoal(goalId, res.goal);
-      navigate('/learning-path');
-    } catch { /* ignore */ }
-  }, [userId, goalId, sessionIndex, completeSessionMutation, updateGoal, navigate]);
+      setSessionCompleted(true);
+      void refetchRuntime();
+    } catch {
+      /* ignore */
+    }
+  }, [userId, goalId, sessionIndex, completeSessionMutation, updateGoal, refetchRuntime]);
+
+  const totalSessions = activeGoal?.learning_path?.length ?? 0;
+  const hasNextSession = sessionIndex != null && sessionIndex + 1 < totalSessions;
+
+  const handleNextSession = useCallback(() => {
+    if (goalId == null || sessionIndex == null || !hasNextSession) return;
+    const nextIdx = sessionIndex + 1;
+    if (userId) {
+      sessionActivityMutation
+        .mutateAsync({ user_id: userId, goal_id: goalId, session_index: nextIdx, event_type: 'start' })
+        .catch(() => {});
+    }
+    navigate('/learning-session', { state: { goalId, sessionIndex: nextIdx } });
+  }, [goalId, sessionIndex, hasNextSession, userId, sessionActivityMutation, navigate]);
 
   if (goalId == null || sessionIndex == null) return null;
 
@@ -244,33 +369,38 @@ export function LearningSessionPage() {
   const sessionTitle = (pathSession?.title as string | undefined) ?? `Session ${sessionIndex + 1}`;
 
   if (isCheckingCache || isGenerating) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-96 space-y-4 text-slate-500">
-        <div className="w-8 h-8 border-4 border-primary-400 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm">
-          {isGenerating ? 'Generating personalised content… this may take a minute.' : 'Loading content…'}
-        </p>
-      </div>
-    );
+    return <SessionLoadingPanel sessionTitle={sessionTitle} />;
   }
 
   if (generateError) {
     return (
       <div className="max-w-3xl space-y-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{generateError}</div>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          {generateError}
+        </div>
         <div className="flex gap-3">
-          <Button variant="secondary" onClick={handleBack}>Back</Button>
-          <Button onClick={() => { setGenerateError(null); handleRegenerate(); }}>Retry</Button>
+          <Button variant="secondary" onClick={handleBack}>
+            Back
+          </Button>
+          <Button
+            onClick={() => {
+              setGenerateError(null);
+              handleRegenerate();
+            }}
+          >
+            Retry
+          </Button>
         </div>
       </div>
     );
   }
 
-  if (!content) return (
-    <div className="flex flex-col items-center justify-center min-h-96 text-slate-400 text-sm">
-      No content available.
-    </div>
-  );
+  if (!content)
+    return (
+      <div className="flex flex-col items-center justify-center min-h-96 text-slate-400 text-sm">
+        No content available.
+      </div>
+    );
 
   const currentSection = sections[currentSectionIdx];
   const references = content.view_model?.references ?? [];
@@ -306,20 +436,30 @@ export function LearningSessionPage() {
       <div className="flex-1 min-w-0 space-y-6">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <button type="button" onClick={handleBack} className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mb-2">
+            <button
+              type="button"
+              onClick={handleBack}
+              className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mb-2"
+            >
               ← Back to Learning Path
             </button>
             <h2 className="text-xl font-semibold text-slate-800">{sessionTitle}</h2>
           </div>
           <div className="flex gap-2 shrink-0 flex-wrap">
-            <Button size="sm" variant="secondary" onClick={handleRegenerate}>Regenerate</Button>
+            <Button size="sm" variant="secondary" onClick={handleRegenerate}>
+              Regenerate
+            </Button>
             <button
               type="button"
               onClick={() => setIsChatOpen((v) => !v)}
               className="px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm flex items-center gap-1.5"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                />
               </svg>
               Ask Ami
             </button>
@@ -342,19 +482,31 @@ export function LearningSessionPage() {
           <div className="bg-white border border-slate-200 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-slate-800">{currentSection.title}</h3>
-              <span className="text-xs text-slate-400">{currentSectionIdx + 1} / {sections.length}</span>
+              <span className="text-xs text-slate-400">
+                {currentSectionIdx + 1} / {sections.length}
+              </span>
             </div>
             <div className="prose prose-sm prose-slate max-w-none">
-              <ReactMarkdown>{currentSection.markdown}</ReactMarkdown>
+              <ReactMarkdown>{transformSectionMarkdown(currentSection.markdown)}</ReactMarkdown>
             </div>
           </div>
         )}
 
         <div className="flex items-center justify-between">
-          <Button variant="secondary" size="sm" disabled={currentSectionIdx === 0} onClick={() => setCurrentSectionIdx((i) => Math.max(0, i - 1))}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={currentSectionIdx === 0}
+            onClick={() => setCurrentSectionIdx((i) => Math.max(0, i - 1))}
+          >
             ← Previous
           </Button>
-          <Button variant="secondary" size="sm" disabled={currentSectionIdx >= sections.length - 1} onClick={() => setCurrentSectionIdx((i) => Math.min(sections.length - 1, i + 1))}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={currentSectionIdx >= sections.length - 1}
+            onClick={() => setCurrentSectionIdx((i) => Math.min(sections.length - 1, i + 1))}
+          >
             Next →
           </Button>
         </div>
@@ -365,7 +517,9 @@ export function LearningSessionPage() {
               References ({references.length})
             </summary>
             <ol className="px-6 pb-4 pt-1 space-y-1 text-xs text-slate-500 list-decimal">
-              {references.map((ref) => <li key={ref.index}>{ref.label}</li>)}
+              {references.map((ref) => (
+                <li key={ref.index}>{ref.label}</li>
+              ))}
             </ol>
           </details>
         )}
@@ -377,7 +531,8 @@ export function LearningSessionPage() {
               userId={userId!}
               goalId={goalId}
               sessionIndex={sessionIndex}
-              onMasteryResult={(r) => setMasteryResult(r)}
+              onMasteryResult={(r) => { setMasteryResult(r); void refetchRuntime(); }}
+              ensureCached={ensureCached}
             />
           </div>
         )}
@@ -394,8 +549,15 @@ export function LearningSessionPage() {
                 <span className="text-sm text-slate-600 w-20">{label}</span>
                 <div className="flex gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
-                    <button key={star} type="button" onClick={() => set(star)}
-                      className={cn('text-xl', star <= value ? 'text-amber-400' : 'text-slate-300 hover:text-amber-300')}>
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => set(star)}
+                      className={cn(
+                        'text-xl',
+                        star <= value ? 'text-amber-400' : 'text-slate-300 hover:text-amber-300',
+                      )}
+                    >
                       ★
                     </button>
                   ))}
@@ -409,8 +571,17 @@ export function LearningSessionPage() {
               placeholder="Any other comments? (optional)"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-400 resize-none"
             />
-            <Button size="sm" onClick={handleSubmitFeedback} loading={submitFeedbackMutation.isPending}
-              disabled={clarityRating === 0 || relevanceRating === 0 || depthRating === 0 || submitFeedbackMutation.isPending}>
+            <Button
+              size="sm"
+              onClick={handleSubmitFeedback}
+              loading={submitFeedbackMutation.isPending}
+              disabled={
+                clarityRating === 0 ||
+                relevanceRating === 0 ||
+                depthRating === 0 ||
+                submitFeedbackMutation.isPending
+              }
+            >
               Submit Feedback
             </Button>
           </div>
@@ -421,12 +592,51 @@ export function LearningSessionPage() {
           </div>
         )}
 
-        <div className="flex justify-end pt-2 pb-8">
-          <Button size="lg" onClick={handleComplete} loading={completeSessionMutation.isPending}
-            disabled={!isCompleteEnabled || completeSessionMutation.isPending}>
-            {completeSessionMutation.isPending ? 'Completing…' : 'Complete Session'}
-          </Button>
-        </div>
+        {sessionCompleted ? (
+          <div className="rounded-xl border border-green-300 bg-green-50 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <svg className="w-8 h-8 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="font-semibold text-green-800">Session completed!</p>
+                <p className="text-sm text-green-600">
+                  {hasNextSession
+                    ? 'Great job! Ready for the next session?'
+                    : 'Congratulations! You have completed all sessions in this learning path.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              {hasNextSession && (
+                <Button size="lg" onClick={handleNextSession}>
+                  Next Session →
+                </Button>
+              )}
+              <Button size="lg" variant="secondary" onClick={() => navigate('/learning-path')}>
+                Back to Learning Path
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-end gap-2 pt-2 pb-8">
+            <Button
+              size="lg"
+              onClick={handleComplete}
+              loading={completeSessionMutation.isPending}
+              disabled={!isCompleteEnabled || completeSessionMutation.isPending}
+            >
+              {completeSessionMutation.isPending ? 'Completing…' : 'Complete Session'}
+            </Button>
+            {!hasMastered && (
+              <p className="text-xs text-slate-400">
+                {masteryResult
+                  ? `Score ${Math.round(masteryResult.score_percentage)}% — need ${Math.round(masteryResult.threshold)}% to unlock`
+                  : 'Complete the quiz to unlock'}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Inline chatbot */}
@@ -435,7 +645,11 @@ export function LearningSessionPage() {
           <div className="sticky top-4 flex flex-col h-[calc(100vh-8rem)] border border-slate-200 rounded-xl bg-white overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <p className="font-semibold text-slate-800 text-sm">Ask Ami</p>
-              <button type="button" onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button
+                type="button"
+                onClick={() => setIsChatOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -446,11 +660,16 @@ export function LearningSessionPage() {
                 <p className="text-xs text-slate-400 text-center">Ask me anything about this session!</p>
               )}
               {chatMessages.map((msg, i) => (
-                <div key={i} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  <div className={cn(
-                    'max-w-[85%] rounded-xl px-3 py-2 text-sm',
-                    msg.role === 'user' ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-800',
-                  )}>
+                <div
+                  key={i}
+                  className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}
+                >
+                  <div
+                    className={cn(
+                      'max-w-[85%] rounded-xl px-3 py-2 text-sm',
+                      msg.role === 'user' ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-800',
+                    )}
+                  >
                     {msg.content}
                   </div>
                 </div>
@@ -467,11 +686,20 @@ export function LearningSessionPage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendChat();
+                  }
+                }}
                 placeholder="Ask a question…"
                 className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-400"
               />
-              <Button size="sm" onClick={handleSendChat} disabled={!chatInput.trim() || chatMutation.isPending}>
+              <Button
+                size="sm"
+                onClick={handleSendChat}
+                disabled={!chatInput.trim() || chatMutation.isPending}
+              >
                 Send
               </Button>
             </div>

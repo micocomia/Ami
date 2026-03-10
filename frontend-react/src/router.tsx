@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 import { AppShell, AuthLayout, LearningSessionLayout, OnboardingLayout } from '@/components/shell';
+import { HomePage } from '@/pages/HomePage';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { OnboardingPage } from '@/pages/OnboardingPage';
@@ -10,11 +11,9 @@ import { LearningSessionPage } from '@/pages/LearningSessionPage';
 import { SkillGapPage } from '@/pages/SkillGapPage';
 import { RefineGoalExamplePage } from '@/pages/RefineGoalExamplePage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
-import { HomePage } from '@/pages/HomePage';
 import { useAuthContext } from '@/context/AuthContext';
-import { useGoalsContext } from '@/context/GoalsContext';
 
-// Vite base path (handles GitHub Pages deployment)
+// Vite 的 base（如 /Ami-React/）去掉末尾斜杠作为 React Router basename，适配 GitHub Pages
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
 
 /** Redirects unauthenticated users to /login */
@@ -24,14 +23,10 @@ function AuthGuard() {
   return <Outlet />;
 }
 
-/** Root redirect: routes users to the right starting page */
+/** Root redirect: routes users to onboarding (goals routing comes later) */
 function RootRedirect() {
   const { isAuthenticated } = useAuthContext();
-  const { goals, isLoading } = useGoalsContext();
-
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (isLoading) return null; // brief wait while goals load
-  if (goals.length > 0) return <Navigate to="/learning-path" replace />;
   return <Navigate to="/onboarding" replace />;
 }
 
@@ -49,37 +44,25 @@ export const router = createBrowserRouter(
       ],
     },
 
-    /* Onboarding — full-page, no sidebar (auth-gated) */
+    /* Protected routes */
     {
       element: <AuthGuard />,
       children: [
+        /* Landing / Onboarding — full-page, no sidebar */
         {
           element: <OnboardingLayout />,
           children: [
             { path: '/onboarding', element: <OnboardingPage /> },
-            { path: '/skill-gap', element: <SkillGapPage /> },
           ],
         },
-      ],
-    },
-
-    /* Learning Session — sidebar only, no TopBar (auth-gated) */
-    {
-      element: <AuthGuard />,
-      children: [
+        /* Learning Session — sidebar only, no TopBar, center + right panel */
         {
           element: <LearningSessionLayout />,
           children: [
             { path: '/learning-session', element: <LearningSessionPage /> },
           ],
         },
-      ],
-    },
-
-    /* Main app — sidebar + top bar (auth-gated) */
-    {
-      element: <AuthGuard />,
-      children: [
+        /* Main app — sidebar + top bar */
         {
           element: <AppShell />,
           children: [
@@ -87,15 +70,14 @@ export const router = createBrowserRouter(
             { path: '/goals', element: <GoalsPage /> },
             { path: '/profile', element: <ProfilePage /> },
             { path: '/learning-path', element: <LearningPathPage /> },
+            { path: '/skill-gap', element: <SkillGapPage /> },
             { path: '/analytics', element: <AnalyticsPage /> },
-            { path: '/analytics/active-goal', element: <AnalyticsPage /> },
             { path: '/example/refine-goal', element: <RefineGoalExamplePage /> },
           ],
         },
       ],
     },
 
-    /* Catch-all */
     { path: '*', element: <Navigate to="/" replace /> },
   ],
   { basename }

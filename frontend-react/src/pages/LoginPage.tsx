@@ -5,12 +5,13 @@ import { useLogin } from '@/api/endpoints/auth';
 import { useAuthContext } from '@/context/AuthContext';
 
 export function LoginPage() {
+  const navigate = useNavigate();
+  const { login } = useAuthContext();
+  const loginMutation = useLogin();
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAuthContext();
-  const navigate = useNavigate();
-  const loginMutation = useLogin();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,7 +20,7 @@ export function LoginPage() {
     try {
       const data = await loginMutation.mutateAsync({ username: username.trim(), password });
       login(data);
-      navigate('/', { replace: true }); // RootRedirect at '/' routes to onboarding or learning-path
+      navigate('/', { replace: true });
     } catch {
       setError('Invalid username or password. Please try again.');
     }

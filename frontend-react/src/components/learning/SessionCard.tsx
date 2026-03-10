@@ -87,3 +87,4 @@ export function SessionCard({ index, pathSession, runtimeSession, onLaunch, disa
     </div>
   );
 }
+
