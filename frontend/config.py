@@ -1,5 +1,11 @@
 import os
+from pathlib import Path
 from urllib.parse import urlparse, urlunparse
+
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def _normalize_endpoint(endpoint: str, fallback: str) -> str:
