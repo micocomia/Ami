@@ -23,7 +23,39 @@ This repo contains:
 - `backend/`: FastAPI backend (auth, goals/profiles, reflexion pipelines, content generation with quality gates, session runtime, analytics, session prefetch)
 - `frontend/`: Streamlit frontend (auth-gated onboarding, skill-gap and plan flows, learning content sessioning, profile, dashboard) — a React SPA is under active development for the Beta release
 
-## Ami Enhancements
+## Differences vs. GenMentor
+
+Compared with the original [GenMentor](https://github.com/GeminiLight/gen-mentor) backend, Ami's `backend/` is not just a rename or UI fork. The published GenMentor backend is primarily a stateless research-style FastAPI surface for core LLM workflows (chat, skill-gap identification, learner-profile generation, learning-path scheduling, content generation, quiz generation) backed by web search and a local vector store. Ami has evolved into a substantially different system: a multi-user tutoring platform backend with persistent goal/session state, verified-content retrieval, quality gates, auditing, analytics, background runtime services, and continuous adaptation of the learner model over time.
+
+| Area | GenMentor backend | Ami backend |
+|---|---|---|
+| Core module layout | `skill_gap_identification`, `adaptive_learner_modeling`, `personalized_resource_delivery`, `learner_simulation`, `ai_chatbot_tutor` | `skill_gap`, `learner_profiler`, `learning_plan_generator`, `content_generator`, `ai_chatbot_tutor` |
+| Planning/content architecture | Learning-path scheduling, content generation, and learner simulation are grouped around `personalized_resource_delivery` + `learner_simulation` | Planning and content are split into separate modules with dedicated orchestrators, evaluators, repair steps, and utilities |
+| Runtime application surface | The published backend exposes a smaller set of public generation endpoints for tutoring, skill-gap identification, profile creation, scheduling, document drafting/integration, and quiz generation | `backend/main.py` also exposes auth, goal lifecycle, profile sync/editing, session activity, mastery evaluation, cached session views, and analytics endpoints |
+| Retrieval + persistence stack | Default config uses DuckDuckGo search, Hugging Face embeddings, and local Chroma persistence | `base/search_rag.py` is Azure-oriented, with Azure AI Search, verified-content indexing, Azure Blob Storage, and Azure Cosmos DB-backed runtime persistence |
+| Product/runtime state | No user-account, JWT, goal-management, or long-lived session-state layer is surfaced in the published backend | Ami persists users, auth state, goals, profiles, events, mastery attempts, cached content, and session runtime data |
+| Quality/safety controls | Core multi-agent tutoring pipeline | Explicit evaluator/auditor agents and bounded reflexion loops across skill gaps, learning plans, content generation, learner profiling, and chatbot responses |
+| Background/runtime services | No comparable runtime service layer is surfaced in the repo backend layout | Adds content prefetch, session caching, mastery/session tracking, behavioral analytics, and verified-content sync services |
+| Verification surface | The backend repo layout is relatively compact | Ami includes dedicated `backend/tests/` and `backend/evals/` suites alongside implementation plans and migration notes |
+
+At the feature level, Ami also adds several capabilities that are not present as first-class subsystems in the published GenMentor backend:
+
+| Feature | GenMentor backend | Ami backend |
+|---|---|---|
+| Verified-content retrieval | Uses web search + local vectorstore flow; no separate verified-course-content indexing subsystem is exposed | `VerifiedContentManager` indexes curated course PDFs/slides and supports verified-first hybrid retrieval |
+| Persistent user accounts and goals | No auth/account or multi-goal runtime surface is exposed in the published backend | JWT auth, user registration/login, per-user goal creation, goal updates/deletion, and goal runtime-state endpoints are built into the backend |
+| Session runtime and caching | Content is generated through stateless request/response endpoints | Session content can be cached, invalidated, prefetched, and retrieved by `user_id`/`goal_id`/`session_index` |
+| Adaptive learner model over time | Learner modeling is generated for the current request flow, but not surfaced as Ami's persistent cross-session adaptation loop | Ami continuously updates cognitive status and FSLSM learning preferences over time, then uses those updated signals to adapt plans, content, quizzes, and tutoring behavior |
+| Tool-using chatbot | Chatbot module exists, but no request-time tool registry is exposed for retrieval/media/profile-update actions | The tutor assembles runtime tools such as `retrieve_vector_context`, `retrieve_session_learning_content`, `search_web_context_ephemeral`, `search_media_resources`, and `update_learning_preferences_from_signal` |
+| Audio generation | No dedicated TTS/audio generation pipeline is surfaced in the backend modules | `TTSGenerator` produces audio renditions of generated learning content |
+| Media enrichment | No dedicated media search and relevance-filtering subsystem is surfaced | Content and tutoring flows can attach videos, diagrams, and podcasts through `MediaResourceFinder`, `MediaRelevanceEvaluator`, and diagram rendering |
+| Bias/fairness checks | No dedicated bias-auditor/fairness-validator module family is exposed in the backend layout | Ami adds `BiasAuditor`, `FairnessValidator`, `ContentBiasAuditor`, and `ChatbotBiasAuditor`, plus audit endpoints for each surface |
+| Mastery evaluation and analytics | Quiz generation is exposed, but not a comparable mastery-tracking and dashboard-analytics layer | Ami scores quiz submissions, tracks session mastery status, computes behavioral metrics, and serves dashboard metrics |
+| Profile evolution after onboarding | Learner modeling endpoints exist, but not Ami's scoped ongoing update surface | Ami supports profile sync across goals, FSLSM-only edits, learner-information-only edits, quiz-driven SOLO progression, repeated-interaction and mistake-driven adaptation, and chatbot signal-gated preference updates |
+| Content quality gates | Multi-agent content generation is present, but not with Ami's explicit staged evaluator/repair pipeline | Draft-level and document-level evaluators gate generation, trigger targeted repair, and enforce bounded fallback behavior |
+| Session prefetch | No background prefetch service is exposed | `ContentPrefetchService` preloads upcoming sessions while the learner is still in the current one |
+
+The sections below summarize the main backend-level deltas in Ami.
 
 ### 1. Skill Gap Reflexion + Bias Auditing
 
@@ -79,11 +111,20 @@ Implemented through `AITutorChatbot._build_runtime_tools` and `create_ai_tutor_t
 
 ### 5. Adaptive Learner Profile Updates
 
-The learner profile is not static after onboarding — it evolves throughout the learning lifecycle through three update channels:
+One of Ami's largest departures from GenMentor is that the learner model is not static after onboarding. Cognitive status and FSLSM learning preferences evolve throughout the learning lifecycle, and the rest of the system adapts to those changes.
+
+The learner profile evolves through three update channels:
 
 - **Manual edit**: The learner explicitly adjusts FSLSM dimensions via sliders (`update_learning_preferences_with_llm` → `/update-learning-preferences`) or updates background/bio via text and optional resume re-upload (`update_learner_information_with_llm` → `/update-learner-information`). These two paths are scoped separately to prevent unintended cross-field changes.
-- **Quiz-driven cognitive progression**: Mastery evaluation outcomes drive `update_cognitive_status_with_llm`, tracking SOLO level advancement session-over-session.
+- **Quiz-driven cognitive progression**: Mastery evaluation outcomes drive `update_cognitive_status_with_llm`, tracking SOLO level advancement session-over-session. Repeated mistakes and mastery outcomes feed forward into later adaptation decisions.
 - **Chatbot signal-gated updates**: When Ami detects a strong learning preference signal during tutoring (e.g., "I prefer visual explanations"), the `update_learning_preferences_from_signal` tool applies a preference update — but only when signal confidence and user/goal context are both present.
+
+Those updates are then consumed by downstream modules:
+
+- learning-path generation can reschedule or reshape later sessions
+- content generation can shift format and presentation through FSLSM-aware adaptation
+- quizzes and mastery checks can stay aligned to the learner's current cognitive status
+- the tutor can adjust explanations and tool use based on current preferences and session context
 
 Implemented in `AdaptiveLearningProfiler` (`modules/learner_profiler/`) and the chatbot tool `update_learning_preferences_from_signal`.
 
