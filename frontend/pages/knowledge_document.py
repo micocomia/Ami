@@ -339,7 +339,11 @@ def render_content_preparation(goal):
     try:
         learner_information = st.session_state.get("learner_information", "")
         learning_document = learning_content.get("content", "")
-        content_bias_result = audit_content_bias(learning_document, learner_information)
+        content_bias_result = audit_content_bias(
+            learning_document, learner_information,
+            user_id=st.session_state.get("userId"),
+            goal_id=goal.get("id") if isinstance(goal, dict) else None,
+        )
         goal["content_bias_audit"] = content_bias_result
     except Exception:
         goal["content_bias_audit"] = None

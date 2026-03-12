@@ -17,6 +17,7 @@ _GOALS_PATH = _DATA_DIR / "goals.json"
 _LEARNING_CONTENT_PATH = _DATA_DIR / "learning_content.json"
 _SESSION_ACTIVITY_PATH = _DATA_DIR / "session_activity.json"
 _MASTERY_HISTORY_PATH = _DATA_DIR / "mastery_history.json"
+_BIAS_AUDIT_LOG_PATH = _DATA_DIR / "bias_audit_log.json"
 
 _lock = threading.Lock()
 
@@ -34,6 +35,8 @@ _learning_content_cache: Dict[str, Dict[str, Any]] = {}
 _session_activity: Dict[str, Dict[str, Any]] = {}
 # keyed by "{user_id}:{goal_id}"
 _mastery_history: Dict[str, List[Dict[str, Any]]] = {}
+# keyed by user_id
+_bias_audit_log: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def _now_iso() -> str:
@@ -42,7 +45,7 @@ def _now_iso() -> str:
 
 def load():
     """Read persisted data from disk into memory. Call once at startup."""
-    global _profiles, _events, _profile_snapshots, _goals, _learning_content_cache, _session_activity, _mastery_history
+    global _profiles, _events, _profile_snapshots, _goals, _learning_content_cache, _session_activity, _mastery_history, _bias_audit_log
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     for path, target_name in (
         (_PROFILES_PATH, "_profiles"),
@@ -52,6 +55,7 @@ def load():
         (_LEARNING_CONTENT_PATH, "_learning_content_cache"),
         (_SESSION_ACTIVITY_PATH, "_session_activity"),
         (_MASTERY_HISTORY_PATH, "_mastery_history"),
+        (_BIAS_AUDIT_LOG_PATH, "_bias_audit_log"),
     ):
         target = {}
         if path.exists():
@@ -292,6 +296,47 @@ def append_mastery_history(user_id: str, goal_id: int, mastery_rate: float, samp
         return copy.deepcopy(_mastery_history[key])
 
 
+# ---------------- bias audit log ----------------
+
+def append_bias_audit_log(
+    user_id: str,
+    goal_id: Optional[int],
+    audit_type: str,
+    audit_result: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Append a compact bias audit entry. Retains last 200 per user."""
+    flags = audit_result.get("flags") or audit_result.get("flagged_items") or []
+    flagged = [f for f in flags if isinstance(f, dict)]
+    audited_items = audit_result.get("audited_items") or audit_result.get("items_audited")
+    audited_count = int(audited_items) if audited_items is not None else len(flagged)
+
+    entry: Dict[str, Any] = {
+        "timestamp": _now_iso(),
+        "goal_id": goal_id,
+        "audit_type": audit_type,
+        "overall_risk": str(audit_result.get("overall_risk", "low")).lower(),
+        "flagged_count": len(flagged),
+        "audited_count": audited_count,
+        "flags_summary": [
+            {"category": f.get("category", "unknown"), "severity": f.get("severity", "low")}
+            for f in flagged[:20]
+        ],
+    }
+    with _lock:
+        _bias_audit_log.setdefault(user_id, []).append(entry)
+        _bias_audit_log[user_id] = _bias_audit_log[user_id][-200:]
+        _flush_json(_BIAS_AUDIT_LOG_PATH, _bias_audit_log)
+        return copy.deepcopy(_bias_audit_log[user_id])
+
+
+def get_bias_audit_log(user_id: str, goal_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return all bias audit entries for a user, optionally filtered by goal_id."""
+    entries = _bias_audit_log.get(user_id, [])
+    if goal_id is not None:
+        entries = [e for e in entries if e.get("goal_id") == goal_id]
+    return copy.deepcopy(entries) if isinstance(entries, list) else []
+
+
 _PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
 
 
@@ -447,3 +492,6 @@ def delete_all_user_data(user_id: str):
 
         _events.pop(user_id, None)
         _flush_json(_EVENTS_PATH, _events)
+
+        _bias_audit_log.pop(user_id, None)
+        _flush_json(_BIAS_AUDIT_LOG_PATH, _bias_audit_log)

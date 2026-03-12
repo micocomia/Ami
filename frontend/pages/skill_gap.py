@@ -95,6 +95,8 @@ def render_skill_gap():
                                     learner_profile,
                                     st.session_state["learner_information"],
                                     persona_name=st.session_state.get("learner_persona", ""),
+                                    user_id=st.session_state.get("userId"),
+                                    goal_id=goal.get("id"),
                                 )
                                 goal["profile_fairness"] = fairness_result
                             except Exception:
