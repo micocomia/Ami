@@ -24,6 +24,9 @@ This repo contains:
 - `frontend/`: Streamlit frontend for onboarding, skill-gap analysis, learning paths, learning sessions, profiles, goals, and dashboard flows
 - `frontend-react/`: React SPA for the Beta release, currently in active development
 
+Live Streamlit demo:
+- [ami-dti5902-group5.streamlit.app](https://ami-dti5902-group5.streamlit.app)
+
 ## Key Capabilities
 
 - **Goal clarification and skill-gap analysis**: Ami can refine a vague goal into a clearer target, identify missing skills, and ground the analysis in verified course materials when available.
