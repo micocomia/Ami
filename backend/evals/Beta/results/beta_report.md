@@ -1,5 +1,5 @@
 # Beta Evaluation Report
-*Generated: 2026-03-13 11:03:51*
+*Generated: 2026-03-13 13:46:49*
 
 Ami Backend (Current)
 
@@ -11,37 +11,26 @@ Interpretation guide: `/Users/micocomia/Documents/3 - School/Winter 2026/DTI 590
 
 ## 1. RAG Quality (RAGAS, 0-1 scale)
 
-Evaluates the tutor short-answer retrieval flow, emphasizing grounded concise answers and verified course-context retrieval.
 
-Assessment changed vs MVP: The metric names are the same RAGAS metrics, but the evaluated product path changed from MVP’s drafting/product-mode RAG to the tutor short-answer flow, so direct score comparison is not valid.
+
+Assessment changed vs MVP: 
 
 | Metric | Score |
 |---|---|
-| context_precision | 0.78 |
-| context_recall | 0.52 |
-| faithfulness | 0.70 |
-| answer_relevancy | 0.86 |
-| answer_correctness | 0.65 |
+| context_precision | 0.97 |
+| context_recall | 0.40 |
+| faithfulness | 0.71 |
+| answer_relevancy | 0.89 |
+| answer_correctness | 0.73 |
 | metadata_course_hit_rate | 1.00 |
 | metadata_verified_source_rate | 1.00 |
-| metadata_keyword_coverage | 0.55 |
-| metadata_fact_coverage_answer | 0.22 |
-| metadata_fact_coverage_context | 0.28 |
+| metadata_keyword_coverage | 0.39 |
+| metadata_fact_coverage_answer | 0.20 |
+| metadata_fact_coverage_context | 0.20 |
 | metadata_expected_lecture_hit_rate | 1.00 |
 
 | Metric | Comparable to MVP? | Assessment Change in Beta | Why |
 |---|---|---|---|
-| context_precision | no | Same RAGAS metric, different product path. | Beta evaluates tutor short-answer grounding rather than MVP’s product-mode drafting flow. |
-| context_recall | no | Same RAGAS metric, different answer style and retrieval objective. | The tutor is optimized for concise grounded help, not exhaustive draft-style retrieval coverage. |
-| faithfulness | no | Same metric name, tutor answers are shorter and grounded differently. | Beta answers are evaluated against tutor constraints and retrieved session/course context. |
-| answer_relevancy | no | Same metric name, but measured on tutor-style short answers. | The current tutor prompt prioritizes concise, learner-centered responses over draft-style completeness. |
-| answer_correctness | no | Same metric name, but grounded in the tutor path. | Current correctness depends on the tutor retrieval flow and short-answer synthesis behavior. |
-| metadata_course_hit_rate | no | Now reflects tutor retrieval metadata rather than old drafting metadata. | The metadata trace now comes from the tutor retrieval path. |
-| metadata_verified_source_rate | no | Now reflects tutor retrieval metadata rather than old drafting metadata. | Verified-source reporting is tied to tutor retrieval traces in Beta. |
-| metadata_keyword_coverage | no | Now interpreted in concise-answer mode. | Beta answers are intentionally shorter, so keyword coverage reflects a different product tradeoff. |
-| metadata_fact_coverage_answer | no | Now reflects concise tutor answers rather than knowledge drafts. | The answer style changed materially between MVP and Beta. |
-| metadata_fact_coverage_context | no | Now reflects tutor retrieval traces. | Context evidence comes from tutor retrieval_trace rather than draft-stage retrieval. |
-| metadata_expected_lecture_hit_rate | no | Now reflects tutor goal-context retrieval instead of draft retrieval. | Lecture-hit reporting is tied to tutor metadata in Beta. |
 
 ## 2. Skill Gap Quality (LLM-Judge, 1-5 scale)
 
@@ -51,11 +40,11 @@ Assessment changed vs MVP: Metric names are mostly unchanged, but Beta now inter
 
 | Dimension | Score |
 |---|---|
-| completeness | 4.00 |
-| gap_calibration | 4.38 |
-| confidence_validity | 4.12 |
-| expert_calibration | 4.25 |
-| solo_level_accuracy | 4.38 |
+| completeness | 4.12 |
+| gap_calibration | 4.75 |
+| confidence_validity | 4.75 |
+| expert_calibration | 4.50 |
+| solo_level_accuracy | 4.75 |
 | scenario_count | 8 |
 | scored_scenario_count | 8 |
 | error_count | 0 |
@@ -76,12 +65,12 @@ Assessment changed vs MVP: Beta keeps the MVP metric names, but planning metrics
 
 | Dimension | Score |
 |---|---|
-| pedagogical_sequencing | 3.75 |
-| skill_coverage | 3.38 |
-| scope_appropriateness | 4.25 |
-| session_abstraction_quality | 3.50 |
-| fslsm_structural_alignment | 3.50 |
-| solo_outcome_progression | 3.75 |
+| pedagogical_sequencing | 4.50 |
+| skill_coverage | 4.25 |
+| scope_appropriateness | 4.50 |
+| session_abstraction_quality | 4.25 |
+| fslsm_structural_alignment | 4.50 |
+| solo_outcome_progression | 4.25 |
 | scenario_count | 8 |
 | scored_scenario_count | 8 |
 | not_applicable_zero_gap_count | 0 |
@@ -89,19 +78,19 @@ Assessment changed vs MVP: Beta keeps the MVP metric names, but planning metrics
 
 | Deterministic Plan Audit | Count |
 |---|---|
-| total_violation_count | 8 |
-| total_coverage_gap_count | 12 |
-| scenarios_with_violations | 3 |
-| scenarios_with_coverage_gaps | 4 |
-| scenarios_with_flag_inconsistencies | 6 |
+| total_violation_count | 9 |
+| total_coverage_gap_count | 9 |
+| scenarios_with_violations | 1 |
+| scenarios_with_coverage_gaps | 1 |
+| scenarios_with_flag_inconsistencies | 0 |
 
 | Metric | Comparable to MVP? | Assessment Change in Beta | Why |
 |---|---|---|---|
 | pedagogical_sequencing | partial | Now bounded by deterministic no-skip SOLO progression checks. | The current scheduler prompt makes one-step SOLO progression a hard requirement, and the planner already has a deterministic auditor for violations. |
 | skill_coverage | partial | Now requires full stepwise coverage and exact outcome-name coverage. | The current scheduler requires every in-progress skill to appear verbatim in desired outcomes and to progress one level at a time until the required level is reached. |
 | scope_appropriateness | yes | Core meaning unchanged. | This still measures whether the path matches the learner’s goal and background, though it is now read alongside the stricter sequencing and coverage rules. |
-| session_abstraction_quality | partial | Now includes abstract-to-flag consistency, not just abstract polish. | The current scheduler prompt makes checkpoint, reflection, sequence-hint, and input-mode wording in the abstract a hard consistency requirement. |
-| fslsm_structural_alignment | partial | Now checks explicit structural FSLSM fields and their abstract realization. | The current planner prompt maps numeric FSLSM dimensions to concrete session flags, order hints, navigation mode, and input-mode hints. |
+| session_abstraction_quality | partial | Now includes abstract-to-flag consistency and whether the abstract makes the intended SOLO depth legible. | The current scheduler prompt makes checkpoint, reflection, sequence-hint, and input-mode wording in the abstract a hard consistency requirement, and also expects the abstract to sound like the target beginner/intermediate/advanced/expert session depth. |
+| fslsm_structural_alignment | partial | Now checks explicit structural FSLSM fields directly rather than judging abstract realization. | The current planner prompt maps numeric FSLSM dimensions to concrete session flags, order hints, navigation mode, and input-mode hints. |
 | solo_outcome_progression | partial | Now judged with deterministic legality evidence instead of free-form interpretation. | The current planner defines exact legal transitions and forbids same-level repeats except remediation. |
 
 ## 4. Content Quality (LLM-Judge, 1-5 scale)
@@ -112,12 +101,12 @@ Assessment changed vs MVP: Metric names remain stable, but Beta judges content a
 
 | Dimension | Score |
 |---|---|
-| cognitive_level_match | 4.50 |
+| cognitive_level_match | 4.75 |
 | factual_accuracy | 5.00 |
-| quiz_alignment | 4.62 |
+| quiz_alignment | 4.75 |
 | engagement_quality | 4.00 |
-| fslsm_content_adaptation | 4.38 |
-| solo_cognitive_alignment | 4.50 |
+| fslsm_content_adaptation | 4.12 |
+| solo_cognitive_alignment | 4.75 |
 | scenario_count | 8 |
 | scored_scenario_count | 8 |
 | not_applicable_zero_gap_count | 0 |
@@ -140,12 +129,12 @@ Assessment changed vs MVP: Perf remains the most comparable category, but endpoi
 
 | Endpoint | p50 | p95 | error% | applicable_count | skipped_count |
 |---|---|---|---|---|---|
-| chat_with_tutor | 3145.70 | 4086.30 | 0.00 | 8 | 0 |
-| create_learner_profile | 7890.80 | 13516.80 | 0.00 | 8 | 0 |
-| generate_learning_content | 83637.30 | 186797.90 | 0.00 | 8 | 0 |
-| identify_skill_gap | 17369.20 | 27899.40 | 0.00 | 8 | 0 |
-| refine_learning_goal | 1354.40 | 1574.90 | 0.00 | 8 | 0 |
-| schedule_learning_path | 14951.30 | 25137.80 | 0.00 | 8 | 0 |
+| chat_with_tutor | 2496.60 | 2779.90 | 0.00 | 5 | 3 |
+| create_learner_profile | 6445.30 | 11472.70 | 12.50 | 8 | 0 |
+| generate_learning_content | 133670.20 | 201533.40 | 28.60 | 7 | 1 |
+| identify_skill_gap | 20296.20 | 31002.00 | 0.00 | 8 | 0 |
+| refine_learning_goal | 1184.40 | 2348.80 | 0.00 | 8 | 0 |
+| schedule_learning_path | 17612.70 | 26517.20 | 0.00 | 7 | 1 |
 
 ## Bridge Comparison to MVP
 
@@ -163,5 +152,5 @@ Only metrics marked `yes` or `partial` are included here. This is a continuity v
 
 | Metric | Score |
 |---|---|
-| current_product_average | 4.14 |
-| bridge_subset_average | 4.13 |
+| current_product_average | 4.51 |
+| bridge_subset_average | 4.50 |

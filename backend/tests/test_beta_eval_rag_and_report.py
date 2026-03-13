@@ -240,6 +240,7 @@ def test_plan_eval_caps_scores_when_deterministic_audit_finds_skip(monkeypatch):
     assert result["scores"]["pedagogical_sequencing"]["score"] == 2
     assert result["scores"]["solo_outcome_progression"]["score"] == 2
     assert result["scores"]["fslsm_structural_alignment"]["score"] == 3
+    assert "FSLSM structural flag audit" in result["scores"]["fslsm_structural_alignment"]["reason"]
     assert result["pipeline_outputs"]["plan_audit"]["violation_count"] == 1
 
 
@@ -300,6 +301,10 @@ def test_planner_prompt_instructs_coverage_first_abstracts():
     assert "what the session covers" in learning_path_scheduler_system_prompt.lower()
     assert "the structured fields control downstream delivery" in learning_path_scheduler_system_prompt.lower()
     assert "Bad pattern" in learning_path_scheduler_system_prompt
+    assert "beginner" in learning_path_scheduler_system_prompt.lower()
+    assert "intermediate" in learning_path_scheduler_system_prompt.lower()
+    assert "advanced" in learning_path_scheduler_system_prompt.lower()
+    assert "same skill" in learning_path_scheduler_system_prompt.lower()
 
 
 def test_session_adaptation_contract_ignores_abstract_wording():
@@ -370,6 +375,213 @@ def test_brief_visual_and_application_cues_pass_flag_consistency(monkeypatch):
     result = _evaluate_plan_outputs(scenario, sg_body, profile_body, path_body)
 
     assert result["pipeline_outputs"]["fslsm_flag_signals"]["issue_count"] == 0
+    assert result["pipeline_outputs"]["abstract_solo_signals"]["sessions"][0]["dominant_target_level"] == "beginner"
+    assert result["pipeline_outputs"]["abstract_solo_signals"]["sessions"][0]["abstract_level_alignment"] in {
+        "aligned",
+        "borderline",
+        "unknown",
+    }
+
+
+def test_plan_eval_fslsm_alignment_uses_flags_even_when_abstract_omits_visual_wording(monkeypatch):
+    scenario = {"id": "S1", "learning_goal": "Learn APIs", "learner_information": "I prefer hands-on, visual learning."}
+    sg_body = {"skill_gaps": [{"name": "REST APIs", "is_gap": True, "required_level": "beginner", "current_level": "unlearned"}]}
+    profile_body = {
+        "cognitive_status": {
+            "in_progress_skills": [
+                {"name": "REST APIs", "current_proficiency_level": "unlearned", "required_proficiency_level": "beginner"}
+            ]
+        },
+        "learning_preferences": {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": -0.8,
+                "fslsm_input": -0.8,
+                "fslsm_understanding": -0.8,
+            }
+        },
+    }
+    path_body = {
+        "learning_path": [
+            {
+                "id": "Session 1",
+                "title": "REST API Basics",
+                "abstract": "Start with a concrete API example, then learn the core REST ideas through a guided practice task and checkpoint.",
+                "desired_outcome_when_completed": [{"name": "REST APIs", "level": "beginner"}],
+                "has_checkpoint_challenges": True,
+                "thinking_time_buffer_minutes": 0,
+                "session_sequence_hint": "application-first",
+                "input_mode_hint": "visual",
+                "navigation_mode": "linear",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        "evals.Beta.eval_plan.judge",
+        lambda *args, **kwargs: {
+            "pedagogical_sequencing": {"score": 4, "reason": "good"},
+            "skill_coverage": {"score": 4, "reason": "good"},
+            "scope_appropriateness": {"score": 4, "reason": "good"},
+            "session_abstraction_quality": {"score": 4, "reason": "good"},
+            "fslsm_structural_alignment": {"score": 5, "reason": "good"},
+            "solo_outcome_progression": {"score": 4, "reason": "good"},
+        },
+    )
+
+    result = _evaluate_plan_outputs(scenario, sg_body, profile_body, path_body)
+
+    assert result["pipeline_outputs"]["fslsm_structural_signals"]["issue_count"] == 0
+    assert result["pipeline_outputs"]["fslsm_flag_signals"]["issue_count"] == 0
+    assert result["scores"]["fslsm_structural_alignment"]["score"] == 5
+
+
+def test_plan_eval_generic_challenge_wording_does_not_trigger_checkpoint_claim(monkeypatch):
+    scenario = {"id": "S1", "learning_goal": "Learn algorithms", "learner_information": "I like examples."}
+    sg_body = {"skill_gaps": [{"name": "Algorithms", "is_gap": True, "required_level": "intermediate", "current_level": "beginner"}]}
+    profile_body = {
+        "cognitive_status": {
+            "in_progress_skills": [
+                {"name": "Algorithms", "current_proficiency_level": "beginner", "required_proficiency_level": "intermediate"}
+            ]
+        },
+        "learning_preferences": {"fslsm_dimensions": {"fslsm_processing": 0.0}},
+    }
+    path_body = {
+        "learning_path": [
+            {
+                "id": "Session 1",
+                "title": "Algorithmic Thinking",
+                "abstract": "Learners will engage in activities that challenge them to compare solution patterns across related problems.",
+                "desired_outcome_when_completed": [{"name": "Algorithms", "level": "intermediate"}],
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 0,
+                "session_sequence_hint": None,
+                "input_mode_hint": "mixed",
+                "navigation_mode": "linear",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        "evals.Beta.eval_plan.judge",
+        lambda *args, **kwargs: {
+            "pedagogical_sequencing": {"score": 4, "reason": "good"},
+            "skill_coverage": {"score": 4, "reason": "good"},
+            "scope_appropriateness": {"score": 4, "reason": "good"},
+            "session_abstraction_quality": {"score": 4, "reason": "good"},
+            "fslsm_structural_alignment": {"score": 4, "reason": "good"},
+            "solo_outcome_progression": {"score": 4, "reason": "good"},
+        },
+    )
+
+    result = _evaluate_plan_outputs(scenario, sg_body, profile_body, path_body)
+
+    assert result["pipeline_outputs"]["fslsm_flag_signals"]["issue_count"] == 0
+
+
+def test_plan_eval_persists_under_leveled_abstract_signal(monkeypatch):
+    scenario = {"id": "S1", "learning_goal": "Learn APIs", "learner_information": "I know some basics already."}
+    sg_body = {
+        "skill_gaps": [
+            {"name": "RESTful API Development", "is_gap": True, "required_level": "intermediate", "current_level": "beginner"}
+        ]
+    }
+    profile_body = {
+        "cognitive_status": {
+            "in_progress_skills": [
+                {
+                    "name": "RESTful API Development",
+                    "current_proficiency_level": "beginner",
+                    "required_proficiency_level": "intermediate",
+                }
+            ]
+        },
+        "learning_preferences": {"fslsm_dimensions": {"fslsm_processing": 0.0}},
+    }
+    path_body = {
+        "learning_path": [
+            {
+                "id": "Session 1",
+                "title": "Connecting API Pieces",
+                "abstract": "Learn the basic idea of an API and recognize the core parts through a simple guided example.",
+                "desired_outcome_when_completed": [{"name": "RESTful API Development", "level": "intermediate"}],
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 0,
+                "session_sequence_hint": None,
+                "input_mode_hint": "mixed",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        "evals.Beta.eval_plan.judge",
+        lambda *args, **kwargs: {
+            "pedagogical_sequencing": {"score": 4, "reason": "good"},
+            "skill_coverage": {"score": 4, "reason": "good"},
+            "scope_appropriateness": {"score": 4, "reason": "good"},
+            "session_abstraction_quality": {"score": 3, "reason": "abstract is too introductory for the intended depth."},
+            "fslsm_structural_alignment": {"score": 4, "reason": "good"},
+            "solo_outcome_progression": {"score": 4, "reason": "good"},
+        },
+    )
+
+    result = _evaluate_plan_outputs(scenario, sg_body, profile_body, path_body)
+    signal = result["pipeline_outputs"]["abstract_solo_signals"]["sessions"][0]
+
+    assert signal["dominant_target_level"] == "intermediate"
+    assert signal["abstract_level_alignment"] == "under_leveled"
+    assert "abstract_sounds_below_target_level" in signal["issues"]
+
+
+def test_plan_eval_persists_over_leveled_abstract_signal(monkeypatch):
+    scenario = {"id": "S1", "learning_goal": "Learn APIs", "learner_information": "I am new to APIs."}
+    sg_body = {
+        "skill_gaps": [
+            {"name": "RESTful API Development", "is_gap": True, "required_level": "beginner", "current_level": "unlearned"}
+        ]
+    }
+    profile_body = {
+        "cognitive_status": {
+            "in_progress_skills": [
+                {
+                    "name": "RESTful API Development",
+                    "current_proficiency_level": "unlearned",
+                    "required_proficiency_level": "beginner",
+                }
+            ]
+        },
+        "learning_preferences": {"fslsm_dimensions": {"fslsm_processing": 0.0}},
+    }
+    path_body = {
+        "learning_path": [
+            {
+                "id": "Session 1",
+                "title": "API Foundations",
+                "abstract": "Analyze authentication tradeoffs, critique endpoint design choices, and justify a scalable API architecture.",
+                "desired_outcome_when_completed": [{"name": "RESTful API Development", "level": "beginner"}],
+                "has_checkpoint_challenges": False,
+                "thinking_time_buffer_minutes": 0,
+                "session_sequence_hint": None,
+                "input_mode_hint": "mixed",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        "evals.Beta.eval_plan.judge",
+        lambda *args, **kwargs: {
+            "pedagogical_sequencing": {"score": 4, "reason": "good"},
+            "skill_coverage": {"score": 4, "reason": "good"},
+            "scope_appropriateness": {"score": 2, "reason": "too advanced for the learner."},
+            "session_abstraction_quality": {"score": 2, "reason": "the abstract sounds too advanced for a beginner target."},
+            "fslsm_structural_alignment": {"score": 4, "reason": "good"},
+            "solo_outcome_progression": {"score": 4, "reason": "good"},
+        },
+    )
+
+    result = _evaluate_plan_outputs(scenario, sg_body, profile_body, path_body)
+    signal = result["pipeline_outputs"]["abstract_solo_signals"]["sessions"][0]
+
+    assert signal["dominant_target_level"] == "beginner"
+    assert signal["abstract_level_alignment"] == "over_leveled"
+    assert "abstract_sounds_above_target_level" in signal["issues"]
 
 
 def test_skill_gap_eval_includes_prompt_aligned_evidence(monkeypatch):

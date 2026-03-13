@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import re
 
 import httpx
 
@@ -42,8 +43,12 @@ Generated Learning Path (exact JSON):
 {learning_path}
 Deterministic SOLO Audit:
 {plan_audit}
-FSLSM Flag/Abstract Consistency Signals:
+FSLSM Structural Flag Signals:
+{fslsm_structural_signals}
+Abstract-to-Flag Consistency Signals:
 {flag_signals}
+Session Abstract SOLO Signals:
+{abstract_solo_signals}
 
 Rate 1-5 for each dimension. Respond with JSON only:
 {{
@@ -74,14 +79,14 @@ Scoring guidance:
     Score 3: scope is borderline — several sessions are somewhat overloaded or somewhat shallow, making outcomes uneven but salvageable.
     Score 2: scope is frequently unrealistic — many sessions are clearly overpacked or underdeveloped for the learner level.
     Score 1: the plan is obviously overloaded or obviously trivial for the learner and requested session count.
-- session_abstraction_quality: judge whether each abstract is specific, action-oriented, and consistent with the session flags.
-    Score 5: each abstract clearly states what the session covers and what the learner will achieve, while keeping any adaptation cues brief and consistent with the flags.
-    Score 4: abstracts are mostly coverage-first and specific, with only occasional generic phrasing or slightly overemphasized adaptation wording.
-    Score 3: mixed specificity — some abstracts describe session substance well, but others are generic, repetitive, or lean too heavily on delivery wording.
-    Score 2: many abstracts are vague, repetitive, or primarily describe delivery style rather than session substance.
-    Score 1: abstracts are nearly empty, generic, or fail to say what the learner will actually study or achieve.
-- fslsm_structural_alignment: judge the explicit structural flags and abstract wording against the learner's FSLSM dimensions, not generic personalization language.
-    Score 5: the session-level structural fields and abstract wording match the learner's FSLSM profile well, or the learner is balanced and the structure is internally coherent.
+- session_abstraction_quality: judge whether each abstract is specific, action-oriented, SOLO-appropriate for its desired outcomes, and consistent with the session flags.
+    Score 5: each abstract clearly states what the session covers, what the learner will achieve, and the intended SOLO depth, while keeping any adaptation cues brief and consistent with the flags.
+    Score 4: abstracts are mostly coverage-first and level-appropriate, with only occasional generic phrasing or slightly under/over-signaled depth.
+    Score 3: mixed quality — some abstracts describe session substance and level well, but others are generic, repetitive, or vague about the intended depth.
+    Score 2: many abstracts are vague, level-mismatched, repetitive, or primarily describe delivery style rather than session substance and learner outcome.
+    Score 1: abstracts are nearly empty, generic, or consistently misstate what the learner will study and the depth they are expected to reach.
+- fslsm_structural_alignment: judge the explicit structural flags against the learner's FSLSM dimensions, not generic personalization language or abstract phrasing.
+    Score 5: the session-level structural fields match the learner's FSLSM profile well, or the learner is balanced and the structure is internally coherent.
     Score 4: structural choices largely align with FSLSM expectations, with at most one minor mismatch.
     Score 3: partial alignment — some FSLSM-driven fields are correct, but there are multiple mismatches or weak signals.
     Score 2: weak alignment — most structural choices conflict with the learner profile, though a few may align by chance.
@@ -118,6 +123,16 @@ def _build_plan_audit(profile_body: dict, path_body: dict) -> dict:
 def _abstract_flag_consistency(path_body: dict) -> dict:
     sessions = path_body.get("learning_path", []) if isinstance(path_body, dict) else []
     issues = []
+
+    checkpoint_pattern = re.compile(r"\bcheckpoint\b|\bknowledge check\b|\bcheck-in\b")
+    application_first_tokens = ("application", "example", "hands-on", "practice", "task", "build", "apply", "start with")
+    theory_first_tokens = ("concept", "theory", "principle", "fundamentals", "model", "start with")
+    visual_tokens = ("diagram", "chart", "visual", "module map", "walkthrough", "map")
+    verbal_tokens = ("narrative", "written", "story", "analogy", "podcast", "audio", "discussion", "explanation")
+
+    def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+        return any(token in text for token in tokens)
+
     for index, session in enumerate(sessions, start=1):
         if not isinstance(session, dict):
             continue
@@ -125,9 +140,10 @@ def _abstract_flag_consistency(path_body: dict) -> dict:
         if not abstract:
             continue
         session_id = str(session.get("id") or f"Session {index}")
-        if session.get("has_checkpoint_challenges") and "checkpoint" not in abstract and "challenge" not in abstract:
+        mentions_checkpoint = bool(checkpoint_pattern.search(abstract))
+        if session.get("has_checkpoint_challenges") and not mentions_checkpoint:
             issues.append({"session_id": session_id, "issue": "checkpoint_missing_from_abstract"})
-        if not session.get("has_checkpoint_challenges") and ("checkpoint" in abstract or "challenge" in abstract):
+        if not session.get("has_checkpoint_challenges") and mentions_checkpoint:
             issues.append({"session_id": session_id, "issue": "checkpoint_claim_without_flag"})
         thinking_minutes = int(session.get("thinking_time_buffer_minutes", 0) or 0)
         mentions_reflection = "reflection pause" in abstract or "reflection period" in abstract
@@ -136,24 +152,242 @@ def _abstract_flag_consistency(path_body: dict) -> dict:
         if thinking_minutes == 0 and mentions_reflection:
             issues.append({"session_id": session_id, "issue": "reflection_claim_without_buffer"})
         sequence_hint = str(session.get("session_sequence_hint") or "").strip().lower()
+        has_application_cue = _contains_any(abstract, application_first_tokens)
+        has_theory_cue = _contains_any(abstract, theory_first_tokens)
         if sequence_hint == "application-first":
-            if not any(token in abstract for token in ("application", "example", "hands-on", "practice", "task", "build", "apply", "start with")):
-                issues.append({"session_id": session_id, "issue": "application_first_not_signaled"})
+            if has_theory_cue and not has_application_cue:
+                issues.append({"session_id": session_id, "issue": "application_first_contradicted"})
         if sequence_hint == "theory-first":
-            if not any(token in abstract for token in ("concept", "theory", "principle", "fundamentals", "model", "start with")):
-                issues.append({"session_id": session_id, "issue": "theory_first_not_signaled"})
+            if has_application_cue and not has_theory_cue:
+                issues.append({"session_id": session_id, "issue": "theory_first_contradicted"})
         input_mode = str(session.get("input_mode_hint") or "").strip().lower()
-        if input_mode == "visual" and not any(token in abstract for token in ("diagram", "chart", "visual", "module map", "walkthrough", "map")):
-            issues.append({"session_id": session_id, "issue": "visual_mode_not_signaled"})
-        if input_mode == "verbal" and not any(token in abstract for token in ("narrative", "written", "story", "analogy", "podcast", "audio", "discussion", "explanation")):
-            issues.append({"session_id": session_id, "issue": "verbal_mode_not_signaled"})
+        has_visual_cue = _contains_any(abstract, visual_tokens)
+        has_verbal_cue = _contains_any(abstract, verbal_tokens)
+        if input_mode == "visual" and has_verbal_cue and not has_visual_cue:
+            issues.append({"session_id": session_id, "issue": "visual_mode_contradicted"})
+        if input_mode == "verbal" and has_visual_cue and not has_verbal_cue:
+            issues.append({"session_id": session_id, "issue": "verbal_mode_contradicted"})
     return {
         "issue_count": len(issues),
         "issues": issues,
     }
 
 
-def _apply_plan_guards(scores: dict, plan_audit: dict, flag_signals: dict) -> dict:
+def _fslsm_structural_signals(profile_body: dict, path_body: dict) -> dict:
+    sessions = path_body.get("learning_path", []) if isinstance(path_body, dict) else []
+    dims = extract_fslsm_dimensions(profile_body) or {}
+    issues = []
+
+    def _dim(name: str) -> float:
+        raw = dims.get(name, 0.0)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+
+    processing = _dim("fslsm_processing")
+    perception = _dim("fslsm_perception")
+    input_pref = _dim("fslsm_input")
+    understanding = _dim("fslsm_understanding")
+
+    for index, session in enumerate(sessions, start=1):
+        if not isinstance(session, dict):
+            continue
+        session_id = str(session.get("id") or f"Session {index}")
+        has_checkpoint = bool(session.get("has_checkpoint_challenges"))
+        thinking_minutes = int(session.get("thinking_time_buffer_minutes", 0) or 0)
+        sequence_hint = str(session.get("session_sequence_hint") or "").strip().lower()
+        input_mode = str(session.get("input_mode_hint") or "").strip().lower()
+        navigation_mode = str(session.get("navigation_mode") or "linear").strip().lower()
+
+        if processing <= -0.3 and not has_checkpoint:
+            issues.append({"session_id": session_id, "issue": "active_processing_missing_checkpoint"})
+        if processing >= 0.3 and thinking_minutes <= 0:
+            issues.append({"session_id": session_id, "issue": "reflective_processing_missing_buffer"})
+        if perception <= -0.3 and sequence_hint != "application-first":
+            issues.append({"session_id": session_id, "issue": "sensing_preference_missing_application_first"})
+        if perception >= 0.3 and sequence_hint != "theory-first":
+            issues.append({"session_id": session_id, "issue": "intuitive_preference_missing_theory_first"})
+        if input_pref <= -0.3 and input_mode != "visual":
+            issues.append({"session_id": session_id, "issue": "visual_preference_missing_visual_mode"})
+        if input_pref >= 0.3 and input_mode != "verbal":
+            issues.append({"session_id": session_id, "issue": "verbal_preference_missing_verbal_mode"})
+        if understanding <= -0.3 and navigation_mode != "linear":
+            issues.append({"session_id": session_id, "issue": "sequential_preference_missing_linear_navigation"})
+        if understanding >= 0.3 and navigation_mode != "free":
+            issues.append({"session_id": session_id, "issue": "global_preference_missing_free_navigation"})
+
+    return {
+        "issue_count": len(issues),
+        "issues": issues,
+        "dimensions": dims,
+    }
+
+
+_SOLO_LEVEL_ORDER = {"beginner": 1, "intermediate": 2, "advanced": 3, "expert": 4}
+_SOLO_LEVEL_TOKENS = {
+    "beginner": (
+        "intro",
+        "introduce",
+        "introduction",
+        "basic",
+        "basics",
+        "fundamental",
+        "fundamentals",
+        "core concept",
+        "core concepts",
+        "core idea",
+        "guided",
+        "step by step",
+        "simple",
+        "first",
+        "recognize",
+        "identify",
+    ),
+    "intermediate": (
+        "connect",
+        "connections",
+        "combine",
+        "apply",
+        "application",
+        "workflow",
+        "structured task",
+        "when to use",
+        "why to use",
+        "compare",
+    ),
+    "advanced": (
+        "tradeoff",
+        "tradeoffs",
+        "extend",
+        "optimize",
+        "optimization",
+        "architecture",
+        "architect",
+        "integrate",
+        "integration",
+        "realistic scenario",
+        "refactor",
+        "diagnose",
+    ),
+    "expert": (
+        "generalize",
+        "generalization",
+        "transfer",
+        "new context",
+        "novel context",
+        "critique",
+        "strategic",
+        "strategy",
+        "govern",
+        "justify",
+    ),
+}
+
+
+def _dominant_target_level(session: dict) -> str | None:
+    outcomes = session.get("desired_outcome_when_completed", [])
+    if not isinstance(outcomes, list):
+        return None
+    dominant = None
+    dominant_value = -1
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            continue
+        level = str(outcome.get("level", "") or "").strip().lower()
+        value = _SOLO_LEVEL_ORDER.get(level, -1)
+        if value > dominant_value:
+            dominant = level
+            dominant_value = value
+    return dominant
+
+
+def _infer_abstract_level_signal(abstract: str) -> dict:
+    lowered = abstract.lower()
+    matches = {
+        level: [token for token in tokens if token in lowered]
+        for level, tokens in _SOLO_LEVEL_TOKENS.items()
+    }
+    matched_levels = [level for level, tokens in matches.items() if tokens]
+    if not matched_levels:
+        return {"inferred_level": None, "matched_tokens": {}, "matched_levels": []}
+    inferred_level = max(matched_levels, key=lambda level: _SOLO_LEVEL_ORDER[level])
+    return {
+        "inferred_level": inferred_level,
+        "matched_tokens": {level: tokens for level, tokens in matches.items() if tokens},
+        "matched_levels": matched_levels,
+    }
+
+
+def _abstract_solo_signals(path_body: dict) -> dict:
+    sessions = path_body.get("learning_path", []) if isinstance(path_body, dict) else []
+    diagnostics = []
+    issue_count = 0
+    under_leveled = 0
+    over_leveled = 0
+
+    for index, session in enumerate(sessions, start=1):
+        if not isinstance(session, dict):
+            continue
+        abstract = str(session.get("abstract", "") or "").strip()
+        session_id = str(session.get("id") or f"Session {index}")
+        target_level = _dominant_target_level(session)
+        inferred = _infer_abstract_level_signal(abstract)
+        inferred_level = inferred["inferred_level"]
+        alignment = "unknown"
+        issues = []
+        if target_level and inferred_level:
+            target_value = _SOLO_LEVEL_ORDER[target_level]
+            inferred_value = _SOLO_LEVEL_ORDER[inferred_level]
+            target_hits = len(inferred["matched_tokens"].get(target_level, []))
+            inferred_hits = len(inferred["matched_tokens"].get(inferred_level, []))
+            if inferred_value < target_value:
+                if (target_value - inferred_value) == 1 and (target_hits > 0 or inferred_hits < 2):
+                    alignment = "borderline"
+                else:
+                    alignment = "under_leveled"
+                    issues.append("abstract_sounds_below_target_level")
+                    under_leveled += 1
+                    issue_count += 1
+            elif inferred_value > target_value:
+                if (inferred_value - target_value) == 1 and (target_hits > 0 or inferred_hits < 2):
+                    alignment = "borderline"
+                else:
+                    alignment = "over_leveled"
+                    issues.append("abstract_sounds_above_target_level")
+                    over_leveled += 1
+                    issue_count += 1
+            else:
+                alignment = "aligned"
+        elif target_level:
+            alignment = "unknown"
+
+        diagnostics.append(
+            {
+                "session_id": session_id,
+                "dominant_target_level": target_level,
+                "abstract_level_signal": inferred_level,
+                "abstract_level_alignment": alignment,
+                "matched_level_tokens": inferred["matched_tokens"],
+                "issues": issues,
+            }
+        )
+
+    return {
+        "session_count": len(diagnostics),
+        "issue_count": issue_count,
+        "under_leveled_count": under_leveled,
+        "over_leveled_count": over_leveled,
+        "sessions": diagnostics,
+    }
+
+
+def _apply_plan_guards(
+    scores: dict,
+    plan_audit: dict,
+    abstract_flag_signals: dict,
+    fslsm_structural_signals: dict,
+) -> dict:
     adjusted = json.loads(json.dumps(scores))
 
     def _cap(metric: str, cap: int, note: str) -> None:
@@ -188,9 +422,10 @@ def _apply_plan_guards(scores: dict, plan_audit: dict, flag_signals: dict) -> di
         _cap("skill_coverage", 2, "Capped by deterministic SOLO audit: multiple progression coverage gaps remain.")
     elif coverage_gap_count == 1:
         _cap("skill_coverage", 3, "Capped by deterministic SOLO audit: one progression coverage gap remains.")
-    if int(flag_signals.get("issue_count", 0) or 0) > 0:
-        _cap("fslsm_structural_alignment", 3, "Capped by flag/abstract consistency audit.")
+    if int(abstract_flag_signals.get("issue_count", 0) or 0) > 0:
         _cap("session_abstraction_quality", 3, "Capped by flag/abstract consistency audit.")
+    if int(fslsm_structural_signals.get("issue_count", 0) or 0) > 0:
+        _cap("fslsm_structural_alignment", 3, "Capped by FSLSM structural flag audit.")
     return adjusted
 
 
@@ -255,6 +490,8 @@ def _evaluate_plan_outputs(scenario: dict, sg_body: dict, profile_body: dict, pa
 
     plan_audit = _build_plan_audit(profile_body, path_body)
     flag_signals = _abstract_flag_consistency(path_body)
+    fslsm_structural_signals = _fslsm_structural_signals(profile_body, path_body)
+    abstract_solo_signals = _abstract_solo_signals(path_body)
     fslsm = extract_fslsm_dimensions(profile_body)
     user_prompt = SHARED_JUDGE_USER.format(
         learner_information=scenario["learner_information"],
@@ -264,9 +501,16 @@ def _evaluate_plan_outputs(scenario: dict, sg_body: dict, profile_body: dict, pa
         learning_path=extract_learning_path_summary(path_body),
         fslsm=json.dumps(fslsm, indent=2) if fslsm else "N/A",
         plan_audit=json.dumps(plan_audit, indent=2),
+        fslsm_structural_signals=json.dumps(fslsm_structural_signals, indent=2),
         flag_signals=json.dumps(flag_signals, indent=2),
+        abstract_solo_signals=json.dumps(abstract_solo_signals, indent=2),
     )
-    scores = _apply_plan_guards(judge(SHARED_JUDGE_SYSTEM, user_prompt), plan_audit, flag_signals)
+    scores = _apply_plan_guards(
+        judge(SHARED_JUDGE_SYSTEM, user_prompt),
+        plan_audit,
+        flag_signals,
+        fslsm_structural_signals,
+    )
     return {
         "scenario_id": scenario["id"],
         "version": VERSION_KEY,
@@ -275,7 +519,9 @@ def _evaluate_plan_outputs(scenario: dict, sg_body: dict, profile_body: dict, pa
             "skill_gap_count": skill_gap_count,
             "learning_path_session_count": len(path_body.get("learning_path", [])),
             "plan_audit": plan_audit,
+            "fslsm_structural_signals": fslsm_structural_signals,
             "fslsm_flag_signals": flag_signals,
+            "abstract_solo_signals": abstract_solo_signals,
         },
         "scores": scores,
     }
@@ -385,12 +631,18 @@ def summarise(all_results: dict) -> dict:
     version_summary["error_count"] = sum(1 for result in results if "error" in result)
     plan_audits = [result.get("pipeline_outputs", {}).get("plan_audit", {}) for result in results if "scores" in result]
     flag_signals = [result.get("pipeline_outputs", {}).get("fslsm_flag_signals", {}) for result in results if "scores" in result]
+    abstract_solo_signals = [result.get("pipeline_outputs", {}).get("abstract_solo_signals", {}) for result in results if "scores" in result]
     version_summary["deterministic_plan_audit"] = {
         "total_violation_count": sum(int(item.get("violation_count", 0) or 0) for item in plan_audits),
         "total_coverage_gap_count": sum(int(item.get("coverage_gap_count", 0) or 0) for item in plan_audits),
         "scenarios_with_violations": sum(1 for item in plan_audits if item.get("has_violations")),
         "scenarios_with_coverage_gaps": sum(1 for item in plan_audits if item.get("has_coverage_gaps")),
         "scenarios_with_flag_inconsistencies": sum(1 for item in flag_signals if int(item.get("issue_count", 0) or 0) > 0),
+    }
+    version_summary["abstract_solo_signals"] = {
+        "scenarios_with_level_signal_issues": sum(1 for item in abstract_solo_signals if int(item.get("issue_count", 0) or 0) > 0),
+        "total_under_leveled_count": sum(int(item.get("under_leveled_count", 0) or 0) for item in abstract_solo_signals),
+        "total_over_leveled_count": sum(int(item.get("over_leveled_count", 0) or 0) for item in abstract_solo_signals),
     }
     version_summary["category_metadata"] = get_category_metadata("plan")
     version_summary["metric_metadata"] = get_metric_metadata("plan", dims)

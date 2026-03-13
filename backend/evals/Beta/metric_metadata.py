@@ -156,18 +156,20 @@ METRIC_METADATA = {
         },
         "session_abstraction_quality": {
             "comparable_to_mvp": "partial",
-            "assessment_change_vs_mvp": "Now includes abstract-to-flag consistency, not just abstract polish.",
+            "assessment_change_vs_mvp": "Now includes abstract-to-flag consistency and whether the abstract makes the intended SOLO depth legible.",
             "assessment_change_reason": (
                 "The current scheduler prompt makes checkpoint, reflection, sequence-hint, and input-mode wording "
-                "in the abstract a hard consistency requirement."
+                "in the abstract a hard consistency requirement, and also expects the abstract to sound like the "
+                "target beginner/intermediate/advanced/expert session depth."
             ),
             "prompt_basis": [
                 "learning_path_scheduling: abstract-flag consistency",
+                "learning_path_scheduling: SOLO-aware abstract depth",
             ],
         },
         "fslsm_structural_alignment": {
             "comparable_to_mvp": "partial",
-            "assessment_change_vs_mvp": "Now checks explicit structural FSLSM fields and their abstract realization.",
+            "assessment_change_vs_mvp": "Now checks explicit structural FSLSM fields directly rather than judging abstract realization.",
             "assessment_change_reason": (
                 "The current planner prompt maps numeric FSLSM dimensions to concrete session flags, order hints, "
                 "navigation mode, and input-mode hints."
