@@ -259,6 +259,7 @@ def chat_with_tutor(
     chat_messages,
     learner_profile,
     *,
+    goal_context=None,
     user_id=None,
     goal_id=None,
     session_index=None,
@@ -273,6 +274,7 @@ def chat_with_tutor(
         "use_media_search": True,
         "allow_preference_updates": True,
         "return_metadata": bool(return_metadata),
+        "goal_context": _coerce_jsonable(goal_context),
     }
     if user_id is not None:
         data["user_id"] = user_id

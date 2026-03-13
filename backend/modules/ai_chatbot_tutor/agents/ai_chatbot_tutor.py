@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, field_validator
@@ -11,6 +12,11 @@ from base.search_rag import SearchRagManager, format_docs
 from modules.ai_chatbot_tutor.prompts.ai_chatbot_tutor import (
     ai_tutor_chatbot_system_prompt,
     ai_tutor_chatbot_task_prompt,
+)
+from modules.ai_chatbot_tutor.tools.common import (
+    _document_to_trace_context,
+    _record_contexts,
+    _record_tool_call,
 )
 from modules.ai_chatbot_tutor.tools import create_ai_tutor_tools
 
@@ -148,6 +154,13 @@ def _goal_scope_text(profile: Any) -> str:
     return goal
 
 
+def _goal_context_text(goal_context: Any) -> str:
+    goal_context_map = _coerce_mapping(goal_context)
+    if not goal_context_map:
+        return "No structured goal context provided."
+    return json.dumps(goal_context_map, indent=2, sort_keys=True)
+
+
 def _guardrail_policy_text() -> str:
     return (
         "- Never claim to execute filesystem or admin actions.\n"
@@ -163,6 +176,7 @@ class TutorChatPayload(BaseModel):
     use_search: bool = True
     top_k: int = 5
     external_resources: Optional[str] = None
+    goal_context: Optional[Any] = None
 
     # New additive fields
     user_id: Optional[str] = None
@@ -187,6 +201,24 @@ class TutorChatPayload(BaseModel):
 
 class AITutorChatbot(BaseAgent):
     name: str = "AITutorChatbot"
+    _NOISE_TOKENS = {
+        "lecture", "lectures", "course", "courses", "today", "welcome",
+        "download", "slides", "files", "follow", "along", "introduction",
+        "information", "terms", "use", "ocw", "mit", "python", "fall",
+    }
+    _QUERY_STOPWORDS = {
+        "using", "explain", "teach", "focus", "overview", "topic", "topics",
+        "knowledge", "point", "points", "material", "materials", "session",
+        "goal", "learn", "learning", "content", "beginner", "basics",
+        "style", "with", "from", "into", "about",
+    }
+    _GENERIC_CHUNK_MARKERS = (
+        "overview of course",
+        "what do computer scientists do",
+        "hope we have started you down the path",
+        "download slides and .py files and follow along",
+        "for information about citing these materials",
+    )
 
     def __init__(
         self,
@@ -239,6 +271,347 @@ class AITutorChatbot(BaseAgent):
             enable_preference_updates=toggles["allow_preference_updates"],
         )
 
+    @staticmethod
+    def _normalize_lecture_numbers(value: Any) -> List[int]:
+        if value is None:
+            return []
+        if isinstance(value, int):
+            nums = [value]
+        elif isinstance(value, list):
+            nums = [x for x in value if isinstance(x, int)]
+        else:
+            return []
+        return sorted({n for n in nums if n > 0})
+
+    def _goal_retrieval_filters(self, value: Any) -> Dict[str, Any]:
+        ctx = _coerce_mapping(value)
+        course_code = str(ctx.get("course_code") or "").strip() or None
+        content_category = str(ctx.get("content_category") or "").strip() or None
+        page_number = ctx.get("page_number")
+        if not isinstance(page_number, int) or page_number <= 0:
+            page_number = None
+        lecture_numbers = self._normalize_lecture_numbers(ctx.get("lecture_numbers", ctx.get("lecture_number")))
+        return {
+            "course_code": course_code,
+            "content_category": content_category,
+            "page_number": page_number,
+            "lecture_numbers": lecture_numbers,
+            "has_retrieval_fields": any([course_code, content_category, page_number, lecture_numbers]),
+        }
+
+    def _prefetch_goal_context_retrieval(
+        self,
+        *,
+        data: Dict[str, Any],
+        query: str,
+        sink: Dict[str, Any],
+        external_context: str,
+    ) -> str:
+        toggles = self._resolve_tool_toggles(data)
+        goal_filters = self._goal_retrieval_filters(data.get("goal_context"))
+        if (
+            not toggles["use_vector_retrieval"]
+            or self.search_rag_manager is None
+            or not goal_filters["has_retrieval_fields"]
+            or not query
+        ):
+            return external_context
+
+        top_k = max(1, min(int(data.get("top_k", 5) or 5), 5))
+        fetch_k = min(max(top_k + 1, 4), 6)
+        final_k = top_k
+        docs = []
+        seen = set()
+        lecture_numbers = goal_filters["lecture_numbers"]
+        context_tool_name = "prefetch_goal_context_hybrid_filtered"
+        goal_context_map = _coerce_mapping(data.get("goal_context"))
+        goal_scope = _goal_scope_text(data.get("learner_profile"))
+        lecture_intent = bool(lecture_numbers) or (goal_filters["content_category"] or "").lower() == "lectures"
+
+        def _extract_course_codes(*texts: str) -> List[str]:
+            pat = re.compile(r"\b\d+\.\d+\b|\b[A-Za-z]+\d{3,}\b|\b\d+[A-Za-z]+\d*\b")
+            out: List[str] = []
+            for text in texts:
+                if not text:
+                    continue
+                for code in pat.findall(text):
+                    if code not in out:
+                        out.append(code)
+            return out
+
+        def _tokenize(text: str) -> set[str]:
+            toks = {
+                t for t in re.findall(r"[a-z0-9][a-z0-9\.\-_]+", (text or "").lower())
+                if len(t) > 1
+            }
+            return {
+                t for t in toks
+                if t not in self._NOISE_TOKENS and t not in self._QUERY_STOPWORDS
+            }
+
+        def _doc_tokens(doc: Any) -> set[str]:
+            meta = getattr(doc, "metadata", {}) or {}
+            meta_text = " ".join([
+                str(meta.get("title", "")),
+                str(meta.get("course_code", "")),
+                str(meta.get("course_name", "")),
+                str(meta.get("file_name", "")),
+                str(meta.get("content_category", "")),
+            ])
+            return _tokenize(f"{meta_text} {getattr(doc, 'page_content', '')}")
+
+        def _is_lecture_doc(meta: Mapping[str, Any]) -> bool:
+            if meta.get("lecture_number") is not None:
+                return True
+            category = str(meta.get("content_category", "")).lower().strip()
+            if category == "lectures":
+                return True
+            file_name = str(meta.get("file_name", "")).lower().strip()
+            return file_name.startswith("lec_") and file_name.endswith(".pdf")
+
+        def _is_low_signal_text(text: str) -> bool:
+            lowered = (text or "").strip().lower()
+            if not lowered:
+                return True
+            if any(marker in lowered for marker in self._GENERIC_CHUNK_MARKERS):
+                return True
+            if any(marker in lowered for marker in [
+                "for information about citing these materials",
+                "terms of use",
+                "ocw.mit.edu/terms",
+            ]):
+                return True
+            if "download slides and .py files and follow along" in lowered:
+                return True
+            if lowered.startswith("welcome!"):
+                return True
+            if "today" in lowered and "course info" in lowered:
+                return True
+            return sum(1 for ch in lowered if ch.isalpha()) < 40
+
+        def _match_course_code(doc: Any, course_codes: List[str]) -> bool:
+            if not course_codes:
+                return True
+            meta = getattr(doc, "metadata", {}) or {}
+            code = str(meta.get("course_code", "")).lower().strip()
+            if not code:
+                return True
+            return code in {c.lower() for c in course_codes}
+
+        def _doc_overlap(doc: Any, intent_tokens: set[str]) -> int:
+            return len(intent_tokens & _doc_tokens(doc))
+
+        def _score_doc(doc: Any, intent_tokens: set[str]) -> tuple[int, int]:
+            meta = getattr(doc, "metadata", {}) or {}
+            source_type = str(meta.get("source_type", "")).lower()
+            file_name = str(meta.get("file_name", "")).lower().strip()
+            doc_text = (
+                f"{' '.join(str(meta.get(k, '')) for k in ['title', 'course_code', 'course_name', 'file_name', 'content_category'])} "
+                f"{getattr(doc, 'page_content', '')}"
+            ).lower()
+            overlap = _doc_overlap(doc, intent_tokens)
+            verified_boost = 3 if source_type == "verified_content" else 0
+            lecture_boost = 4 if _is_lecture_doc(meta) else 0
+            syllabus_penalty = -3 if "syllabus" in file_name else 0
+            generic_penalty = -4 if any(marker in doc_text for marker in self._GENERIC_CHUNK_MARKERS) else 0
+            low_signal_penalty = -2 if _is_low_signal_text(getattr(doc, "page_content", "")) else 0
+            score = overlap * 2 + verified_boost + lecture_boost + syllabus_penalty + generic_penalty + low_signal_penalty
+            return score, overlap
+
+        def _doc_file_bucket(doc: Any) -> str:
+            meta = getattr(doc, "metadata", {}) or {}
+            file_name = str(meta.get("file_name", "")).strip().lower()
+            if file_name:
+                return file_name
+            source = str(meta.get("source", "")).strip().lower()
+            return source or "unknown"
+
+        def _select_docs(candidates: Sequence[Any], *, intent_text: str) -> List[Any]:
+            if not candidates:
+                return []
+            course_codes = [goal_filters["course_code"]] if goal_filters["course_code"] else _extract_course_codes(
+                query,
+                goal_scope,
+                json.dumps(goal_context_map, sort_keys=True),
+            )
+            intent_tokens = _tokenize(intent_text)
+            filtered = [
+                doc for doc in candidates
+                if _match_course_code(doc, course_codes) and not _is_low_signal_text(getattr(doc, "page_content", ""))
+            ]
+            if lecture_intent:
+                lecture_filtered = [doc for doc in filtered if _is_lecture_doc(getattr(doc, "metadata", {}) or {})]
+                if lecture_filtered:
+                    filtered = lecture_filtered
+            strong = [doc for doc in filtered if _doc_overlap(doc, intent_tokens) >= 3]
+            if strong:
+                filtered = strong
+            else:
+                medium = [doc for doc in filtered if _doc_overlap(doc, intent_tokens) >= 2]
+                if medium:
+                    filtered = medium
+            if not filtered:
+                filtered = [doc for doc in candidates if _match_course_code(doc, course_codes)]
+            if not filtered:
+                filtered = list(candidates)
+
+            ranked = sorted(filtered, key=lambda doc: _score_doc(doc, intent_tokens), reverse=True)
+            picked: List[Any] = []
+            picked_idx: set[int] = set()
+            per_file_counts: Dict[str, int] = {}
+            covered_tokens: set[str] = set()
+            doc_tokens = [_doc_tokens(doc) for doc in ranked]
+            doc_scores = [_score_doc(doc, intent_tokens)[0] for doc in ranked]
+
+            while len(picked) < final_k and len(picked_idx) < len(ranked):
+                best_idx: Optional[int] = None
+                best_value: Optional[tuple[int, int, int]] = None
+                for idx, doc in enumerate(ranked):
+                    if idx in picked_idx:
+                        continue
+                    bucket = _doc_file_bucket(doc)
+                    if per_file_counts.get(bucket, 0) >= 2:
+                        continue
+                    overlap_tokens = doc_tokens[idx] & intent_tokens if intent_tokens else set()
+                    new_tokens = overlap_tokens - covered_tokens
+                    value = (len(new_tokens), len(overlap_tokens), doc_scores[idx])
+                    if best_value is None or value > best_value:
+                        best_value = value
+                        best_idx = idx
+                if best_idx is None:
+                    break
+                chosen = ranked[best_idx]
+                picked.append(chosen)
+                picked_idx.add(best_idx)
+                bucket = _doc_file_bucket(chosen)
+                per_file_counts[bucket] = per_file_counts.get(bucket, 0) + 1
+                covered_tokens |= (doc_tokens[best_idx] & intent_tokens)
+
+            if len(picked) < final_k:
+                for idx, doc in enumerate(ranked):
+                    if idx in picked_idx:
+                        continue
+                    bucket = _doc_file_bucket(doc)
+                    if per_file_counts.get(bucket, 0) >= 2:
+                        continue
+                    picked.append(doc)
+                    picked_idx.add(idx)
+                    per_file_counts[bucket] = per_file_counts.get(bucket, 0) + 1
+                    if len(picked) >= final_k:
+                        break
+
+            return picked[:final_k]
+
+        def _add_docs(candidates: Sequence[Any]) -> None:
+            for doc in candidates or []:
+                meta = getattr(doc, "metadata", {}) or {}
+                key = (
+                    str(meta.get("source_type", "")),
+                    str(meta.get("course_code", "")),
+                    str(meta.get("file_name", "")),
+                    str(meta.get("page_number", "")),
+                    str(getattr(doc, "page_content", ""))[:180],
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                docs.append(doc)
+
+        try:
+            if lecture_numbers:
+                for lecture_number in lecture_numbers:
+                    _add_docs(
+                        self.search_rag_manager.invoke_hybrid_filtered(
+                            query,
+                            k=fetch_k,
+                            course_code=goal_filters["course_code"],
+                            content_category=goal_filters["content_category"] or ("Lectures" if lecture_intent else None),
+                            lecture_number=lecture_number,
+                            page_number=goal_filters["page_number"],
+                            exclude_file_names=["syllabus.json"] if lecture_intent else None,
+                            require_lecture=lecture_intent,
+                            allow_web_fallback=False,
+                        )
+                    )
+            else:
+                _add_docs(
+                    self.search_rag_manager.invoke_hybrid_filtered(
+                        query,
+                        k=fetch_k,
+                        course_code=goal_filters["course_code"],
+                        content_category=goal_filters["content_category"] or ("Lectures" if lecture_intent else None),
+                        lecture_number=None,
+                        page_number=goal_filters["page_number"],
+                        exclude_file_names=["syllabus.json"] if lecture_intent else None,
+                        require_lecture=lecture_intent,
+                        allow_web_fallback=False,
+                    )
+                )
+            _record_tool_call(
+                sink,
+                tool_name="prefetch_goal_context_hybrid_filtered",
+                query=query,
+                status="ok" if docs else "empty",
+                result_count=len(docs),
+                extra={"goal_context": _coerce_mapping(data.get("goal_context"))},
+            )
+        except Exception as exc:
+            _record_tool_call(
+                sink,
+                tool_name="prefetch_goal_context_hybrid_filtered",
+                query=query,
+                status="error",
+                extra={"goal_context": _coerce_mapping(data.get("goal_context")), "error": str(exc)},
+            )
+            docs = []
+
+        if not docs:
+            try:
+                fallback_docs = self.search_rag_manager.invoke_hybrid(query, k=fetch_k)
+                _add_docs(fallback_docs)
+                context_tool_name = "prefetch_goal_context_hybrid"
+                _record_tool_call(
+                    sink,
+                    tool_name="prefetch_goal_context_hybrid",
+                    query=query,
+                    status="ok" if docs else "empty",
+                    result_count=len(docs),
+                    extra={"goal_context": _coerce_mapping(data.get("goal_context"))},
+                )
+            except Exception as exc:
+                _record_tool_call(
+                    sink,
+                    tool_name="prefetch_goal_context_hybrid",
+                    query=query,
+                    status="error",
+                    extra={"goal_context": _coerce_mapping(data.get("goal_context")), "error": str(exc)},
+                )
+
+        if not docs:
+            return external_context
+
+        intent_text = " ".join(
+            value for value in [
+                query,
+                goal_scope,
+                str(goal_filters["content_category"] or "").strip(),
+                " ".join(str(n) for n in lecture_numbers),
+            ]
+            if value
+        ).strip()
+        docs = _select_docs(docs, intent_text=intent_text) or docs[:final_k]
+
+        _record_contexts(
+            sink,
+            tool_name=context_tool_name,
+            query=query,
+            contexts=[_document_to_trace_context(doc) for doc in docs[:final_k]],
+        )
+        context = format_docs(docs[:final_k])
+        if not context:
+            return external_context
+        return f"{external_context}\n{context}" if external_context else context
+
     def chat(self, payload: TutorChatPayload | Mapping[str, Any] | str):
         if not isinstance(payload, TutorChatPayload):
             payload = TutorChatPayload.model_validate(payload)
@@ -255,6 +628,13 @@ class AITutorChatbot(BaseAgent):
         # Rebuild the internal agent with runtime tool availability.
         self._tools = tools
         self._agent = self._build_agent()
+
+        external_context = self._prefetch_goal_context_retrieval(
+            data=data,
+            query=query,
+            sink=metadata_sink,
+            external_context=external_context,
+        )
 
         # Backward-compatible preloaded context when tools are effectively disabled.
         if not tools and self.search_rag_manager is not None and query:
@@ -273,6 +653,7 @@ class AITutorChatbot(BaseAgent):
             "learner_profile": data.get("learner_profile", ""),
             "learner_information": data.get("learner_information", ""),
             "goal_scope": _goal_scope_text(data.get("learner_profile", "")),
+            "goal_context": _goal_context_text(data.get("goal_context")),
             "fslsm_adaptation_guidance": _fslsm_adaptation_guidance(data.get("learner_profile", "")),
             "guardrail_policy": _guardrail_policy_text(),
             "user_id": data.get("user_id"),
@@ -294,6 +675,15 @@ class AITutorChatbot(BaseAgent):
         updated_profile = metadata_sink.get("updated_learner_profile")
         if isinstance(updated_profile, Mapping):
             result["updated_learner_profile"] = dict(updated_profile)
+        retrieval_trace = metadata_sink.get("retrieval_trace")
+        if isinstance(retrieval_trace, Mapping):
+            cleaned_trace = {
+                "contexts": list(retrieval_trace.get("contexts", []) or []),
+                "tool_calls": list(retrieval_trace.get("tool_calls", []) or []),
+            }
+        else:
+            cleaned_trace = {"contexts": [], "tool_calls": []}
+        result["retrieval_trace"] = cleaned_trace
         return result
 
 
@@ -304,6 +694,7 @@ def chat_with_tutor_with_llm(
     *,
     search_rag_manager: Optional[SearchRagManager] = None,
     safe_preference_update_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+    goal_context: Optional[Any] = None,
     use_search: bool = True,
     top_k: int = 5,
     user_id: Optional[str] = None,
@@ -330,6 +721,7 @@ def chat_with_tutor_with_llm(
     payload = {
         "learner_profile": learner_profile,
         "messages": messages,
+        "goal_context": goal_context,
         "use_search": use_search,
         "top_k": top_k,
         "user_id": user_id,

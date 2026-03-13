@@ -1535,6 +1535,7 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             learner_profile,
             search_rag_manager=search_rag_manager,
             safe_preference_update_fn=_safe_tutor_preference_update,
+            goal_context=request.goal_context,
             use_search=request.use_search if request.use_search is not None else True,
             top_k=request.top_k or 5,
             user_id=request.user_id,
@@ -1559,6 +1560,9 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             updated_profile = result.get("updated_learner_profile")
             if isinstance(updated_profile, dict):
                 response_payload["updated_learner_profile"] = updated_profile
+            retrieval_trace = result.get("retrieval_trace")
+            if isinstance(retrieval_trace, dict):
+                response_payload["retrieval_trace"] = retrieval_trace
             return response_payload
         return {"response": result}
     except Exception as e:

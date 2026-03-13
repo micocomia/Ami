@@ -1,0 +1,296 @@
+{
+  "raw_rows": {
+    "current": [
+      {
+        "question": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+        "answer": "Hey there! Let's dive into the exciting world of Python programming using the MIT 6.0001 lecture material.\n\n**Control Flow:**\nIn Lecture 2, we explore control flow, which is all about directing the order in which your code executes. Two key structures here are loops and branching:\n\n- **Loops:** You can use a `while` loop to repeat actions until a condition is no longer true. For example, `while n < 5:` will keep running the block of code inside it as long as `n` is less than 5. Alternatively, a `for` loop, like `for n in range(5):`, is a more concise way to iterate over a sequence of numbers.\n\n- **Branching:** This involves using `if`, `elif`, and `else` statements to execute different blocks of code based on certain conditions. For instance, if a condition is true, the code inside the `if` block runs. If not, it checks the `elif` conditions, and finally, the `else` block if none of the conditions are met.\n\n**Decomposition with Functions:**\nIn Lecture 4, we learn about decomposition, which is breaking down your code into smaller, manageable pieces. This is achieved through functions:\n\n- **Functions:** They help organize your code by encapsulating specific tasks. Functions are self-contained and reusable, making your code more coherent and easier to manage. You can think of them as building blocks that you can use to construct more complex programs.\n\nBy understanding these concepts, you'll be well on your way to writing efficient and organized Python code. Keep up the great work, and feel free to ask if you have more questions! \ud83d\ude0a",
+        "contexts": [
+          "CONTROL FLOW: while and for LOOPS \u00b7 iterate through numbers in a sequence # more complicated with while loop n = 0 while n < 5: print (n) n = n+1 # shortcut with for loop for n in range (5) : print (n) 6.0001 LECTURE 2 18",
+          "CREATE STRUCTURE with DECOMPOSITION \u00b7 in projector example, separate devices \" in programming, divide code into modules \u00b7 are self-contained \u00b7 used to break up code \u00b7 intended to be reusable \u00b7 keep code organized \u00b7 keep code coherent \" this lecture, achieve decomposition with functions \u00b7 in a few weeks, achieve decomposition with classes 6.0001 LECTURE 4 9",
+          "CONTROL FLOW - BRANCHING if <condition>: <expression> <expression> . . . if <condition>: <expression> <expression> . . . else: <expression> <expression> . . . if <condition>: <expression> <expression> . . . elif <condition>: <expression> <expression> . . . else: <expression> <expression> . . . \" <condition> has a value True or False evaluate expressions in that block if <condition> is True 6.0001 LECTURE 2 11",
+          "DECOMPOSITION, ABSTRACTION, FUNCTIONS (download slides and .py files follow along!) 6.0001 LECTURE 4 6.0001 LECTURE 4 1"
+        ],
+        "ground_truth": "6.0001 teaches while and for as core control-flow loop constructs. Function-based decomposition and abstraction are introduced as good programming practice. Functions are described with a name, parameters, optional docstring/specification, body, and return value. The lectures distinguish return from print when writing functions. Function calls create a new scope/frame where formal parameters bind to actual arguments.",
+        "question_source": "dataset_query",
+        "dataset_query": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+        "retrieval_query_primary": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+        "retrieval_queries": [
+          "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions"
+        ],
+        "retrieval_intent_text": "",
+        "tool_calls": [
+          {
+            "tool_name": "prefetch_goal_context_hybrid_filtered",
+            "query": "Using MIT 6.0001 lecture material, explain Python control flow and decomposition with functions",
+            "status": "ok",
+            "result_count": 7,
+            "goal_context": {
+              "course_code": "6.0001",
+              "lecture_numbers": [
+                2,
+                4
+              ],
+              "content_category": "Lectures"
+            }
+          }
+        ],
+        "case_type": "metadata",
+        "case_id": "M01",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "while",
+          "for",
+          "functions",
+          "decomposition",
+          "abstraction",
+          "scope",
+          "return",
+          "docstring",
+          "specification",
+          "parameters",
+          "if",
+          "else",
+          "loops",
+          "conditionals"
+        ],
+        "expected_lecture_numbers": [
+          2,
+          4
+        ],
+        "ground_truth_facts": [
+          "6.0001 teaches while and for as core control-flow loop constructs.",
+          "Function-based decomposition and abstraction are introduced as good programming practice.",
+          "Functions are described with a name, parameters, optional docstring/specification, body, and return value.",
+          "The lectures distinguish return from print when writing functions.",
+          "Function calls create a new scope/frame where formal parameters bind to actual arguments."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_2.pdf",
+          "lec_4.pdf",
+          "lec_2.pdf",
+          "lec_4.pdf"
+        ],
+        "source_lecture_numbers": [
+          2,
+          4,
+          2,
+          4
+        ]
+      },
+      {
+        "question": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+        "answer": "Hey there! Let's dive into computational thinking and algorithmic problem-solving using insights from MIT 6.0001 lectures. \ud83d\ude0a\n\n**Lecture 3** introduces the \"guess-and-check\" method, also known as exhaustive enumeration. This approach involves guessing a solution, checking if it's correct, and repeating until you find the right answer or exhaust all possibilities. It's a practical way to tackle problems when you can systematically test potential solutions.\n\n**Lecture 6** focuses on recursion, a powerful technique in algorithm design. Recursion involves solving a problem by breaking it down into simpler versions of itself. Think of it like solving the Towers of Hanoi puzzle: you solve a smaller problem first, then use that solution to tackle the larger problem. Key to recursion is having base cases to prevent infinite loops and ensure the problem gets simpler with each step.\n\nThese concepts are foundational in computational problem-solving and can be applied to writing efficient Python programs. If you have any specific questions or need further examples, feel free to ask! Keep up the great work! \ud83c\udf1f",
+        "contexts": [
+          "GUESS-AND-CHECK \" the process below also called exhaustive enumeration \u00b7 given a problem ... \" you are able to guess a value for solution \" you are able to check if the solution is correct \u00b7 keep guessing until find solution or guessed all values 6.0001 LECTURE 3 12",
+          "TOWERS OF HANOI \" Having seen a set of examples of different sized stacks, how would you write a program to print out the right set of moves? \u00b7 Think recursively! \u00b7 Solve a smaller problem \u00b7 Solve a basic problem \u00b7 Solve a smaller problem 6.0001 LECTURE 6 19",
+          "WHAT IS RECURSION? \" Algorithmically: a way to design solutions to problems by divide-and-conquer or decrease-and-conquer \u00b7 reduce a problem to simpler versions of the same problem \" Semantically: a programming technique where a function calls itself \u00b7 in programming, goal is to NOT have infinite recursion \u00b7 must have 1 or more base cases that are easy to solve \u00b7 must solve the same problem on some other input with the goal of simplifying the larger problem input 6.0001 LECTURE 6 6",
+          "EXERCISE s1 = \"mit u rock\" s2 = \"i rule mit\" if len (s1) == len (s2) : for char1 in s1: for char2 in s2: if char1 == char2: print ( \"common letter\") break 6.0001 LECTURE 3 11"
+        ],
+        "ground_truth": "6.0001 frames computational thinking around abstraction and algorithm design. Early lectures include guess-and-check and bisection as algorithmic strategies. Lecture 6 contrasts iterative algorithms with recursion. Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style. Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion.",
+        "question_source": "dataset_query",
+        "dataset_query": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+        "retrieval_query_primary": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+        "retrieval_queries": [
+          "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python"
+        ],
+        "retrieval_intent_text": "",
+        "tool_calls": [
+          {
+            "tool_name": "prefetch_goal_context_hybrid_filtered",
+            "query": "Using MIT 6.0001 lectures, teach computational thinking and algorithmic problem solving in Python",
+            "status": "ok",
+            "result_count": 6,
+            "goal_context": {
+              "course_code": "6.0001",
+              "lecture_numbers": [
+                3,
+                6
+              ],
+              "content_category": "Lectures"
+            }
+          }
+        ],
+        "case_type": "metadata",
+        "case_id": "M02",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "algorithm",
+          "iteration",
+          "recursion",
+          "divide and conquer",
+          "guess and check",
+          "bisection",
+          "complexity",
+          "abstraction"
+        ],
+        "expected_lecture_numbers": [
+          3,
+          6
+        ],
+        "ground_truth_facts": [
+          "6.0001 frames computational thinking around abstraction and algorithm design.",
+          "Early lectures include guess-and-check and bisection as algorithmic strategies.",
+          "Lecture 6 contrasts iterative algorithms with recursion.",
+          "Recursion is explained with base and recursive steps in a divide/decrease-and-conquer style.",
+          "Efficiency is discussed using examples like expensive naive Fibonacci recursion versus memoized recursion."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_3.pdf",
+          "lec_6.pdf",
+          "lec_6.pdf",
+          "lec_3.pdf"
+        ],
+        "source_lecture_numbers": [
+          3,
+          6,
+          6,
+          3
+        ]
+      },
+      {
+        "question": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+        "answer": "Hey there! Let's dive into the basics of data structures using insights from the MIT 6.0001 lectures. \ud83d\ude0a\n\n**Strings and Lists:**\n- **Strings** can be converted to lists using `list(s)`, which breaks the string into individual characters. You can also split a string into parts using `s.split()`, which defaults to splitting by spaces unless you specify a character.\n- To convert a list back into a string, you can use `''.join(L)`, which combines list elements into a single string. You can even add a character between elements, like `'_'.join(L)`.\n\n**Lists:**\n- Lists are versatile and can be modified. You can add elements to the end of a list using `L.append(element)`, which changes the list directly.\n\n**Dictionaries:**\n- Dictionaries are a cleaner way to handle data by storing key-value pairs. This allows you to index items directly using custom labels instead of just numbers. For example, `grades = {'Ana': 'B', 'John': 'A+'}` lets you access grades by name.\n\nThese concepts form the foundation of handling data in Python, making your code more organized and efficient. Keep exploring, and you'll get the hang of it in no time! \ud83c\udf1f",
+        "contexts": [
+          "CONVERT LISTS TO STRINGS AND BACK convert string to list with list (s) , returns a list with every character from s an element in L \" can use s . split () , to split a string on a character parameter, splits on spaces if called without a parameter \" use '' . join (L) to turn a list of characters into a string, can give a character in quotes to add char between every element s. split ('<') L = ['a', 'b', 'c'] ''. join (L) '_'. join (L) > s is a string S = \"I<3 CS\" list (s) > returns [ ' I ', ' <",
+          "OPERATIONS ON LISTS - ADD \" add elements to end of list with L . append (element) \"mutates the list! L = [2,1,3] L. append (5) > L is now [2, 1, 3, 5] \" what is the dot? \u00b7 lists are Python objects, everything in Python is an object \u00b7 objects have data \u00b7 objects have methods and functions \u00b7 access this information by object_name. do_something () \u00b7 will learn more about these later 6.0001 LECTURE 5 11",
+          "A BETTER AND CLEANER WAY - A DICTIONARY \" nice to index item of interest directly (not always int) \u00b7 nice to use one data structure, no separate lists A list 0 Elem 1 1 Elem 2 2 Elem 3 3 Elem 4 ... ... index element A dictionary Key 1 Val 1 Key 2 Val 2 Key 3 Val 3 Key 4 Val 4 ... ... custom index by label element 6.0001 LECTURE 6 43",
+          "A PYTHON DICTIONARY \" store pairs of data \u00b7 key \u00b7 value 'Ana ' 'B' ' Denise' 'A' ' John ' 'A+' ' Katy' 'A' custom index by label element empty dictionary my_dict = { } grades = { 'Ana ' : 'B', ' John ' : ' A+ ', ' Denise ' : 'A' , 'Katy' : 'A' } 1 1 1 key1 val1 key2 val2 1 1 key3 1 val3 1 key4 1 val4 6.0001 LECTURE 6 44"
+        ],
+        "ground_truth": "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns. Tuples are immutable while lists are mutable. List mutation is shown via index updates and methods like append, extend, remove, pop, and del. String and list transformations are covered using list(s), split, and join. Dictionary usage is introduced as key-based mapping-style data handling.",
+        "question_source": "dataset_query",
+        "dataset_query": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+        "retrieval_query_primary": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+        "retrieval_queries": [
+          "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python"
+        ],
+        "retrieval_intent_text": "",
+        "tool_calls": [
+          {
+            "tool_name": "prefetch_goal_context_hybrid_filtered",
+            "query": "Use MIT 6.0001 lectures to explain strings, lists, and dictionary-style data handling in beginner Python",
+            "status": "ok",
+            "result_count": 7,
+            "goal_context": {
+              "course_code": "6.0001",
+              "lecture_numbers": [
+                5,
+                6
+              ],
+              "content_category": "Lectures"
+            }
+          }
+        ],
+        "case_type": "metadata",
+        "case_id": "M03",
+        "expected_course_code": "6.0001",
+        "expected_keywords": [
+          "strings",
+          "tuples",
+          "lists",
+          "indexing",
+          "slicing",
+          "mutable",
+          "immutable",
+          "append",
+          "remove",
+          "split",
+          "join",
+          "dictionary"
+        ],
+        "expected_lecture_numbers": [
+          5,
+          6
+        ],
+        "ground_truth_facts": [
+          "Lecture 5 introduces tuples and lists as ordered sequences with indexing and slicing patterns.",
+          "Tuples are immutable while lists are mutable.",
+          "List mutation is shown via index updates and methods like append, extend, remove, pop, and del.",
+          "String and list transformations are covered using list(s), split, and join.",
+          "Dictionary usage is introduced as key-based mapping-style data handling."
+        ],
+        "source_types": [
+          "verified_content",
+          "verified_content",
+          "verified_content",
+          "verified_content"
+        ],
+        "source_course_codes": [
+          "6.0001",
+          "6.0001",
+          "6.0001",
+          "6.0001"
+        ],
+        "source_file_names": [
+          "lec_5.pdf",
+          "lec_5.pdf",
+          "lec_6.pdf",
+          "lec_6.pdf"
+        ],
+        "source_lecture_numbers": [
+          5,
+          5,
+          6,
+          6
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "current": {
+      "metrics_mode": "full_ragas",
+      "evaluated_version": "current",
+      "case_scope": "metadata_only",
+      "context_precision": 0.9722222221925926,
+      "context_recall": 0.4000000000000001,
+      "faithfulness": 0.7051282051282052,
+      "answer_relevancy": 0.8867720784068863,
+      "answer_correctness": 0.7301372557278523,
+      "metadata_context_precision": 0.9722222221925926,
+      "metadata_context_recall": 0.4000000000000001,
+      "metadata_faithfulness": 0.7051282051282052,
+      "metadata_answer_relevancy": 0.8867720784068863,
+      "metadata_answer_correctness": 0.7301372557278523,
+      "metadata_case_count": 3.0,
+      "metadata_course_hit_rate": 1.0,
+      "metadata_verified_source_rate": 1.0,
+      "metadata_keyword_coverage": 0.3888888888888889,
+      "metadata_fact_coverage_answer": 0.20000000000000004,
+      "metadata_fact_coverage_context": 0.20000000000000004,
+      "metadata_expected_lecture_hit_rate": 1.0,
+      "evaluation_mode": "tutor_vector_retrieval_only",
+      "verified_preflight": {
+        "enabled": true,
+        "passed": true,
+        "reason": "ok",
+        "probe_count": 3,
+        "verified_source_hit_count": 3,
+        "course_code_hit_count": 3
+      },
+      "verified_preflight_passed": true
+    }
+  }
+}

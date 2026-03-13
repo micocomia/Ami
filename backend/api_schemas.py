@@ -11,6 +11,7 @@ class ChatWithAutorRequest(BaseRequest):
 
     messages: str
     learner_profile: str = ""
+    goal_context: Optional[Any] = None
     user_id: Optional[str] = None
     goal_id: Optional[int] = None
     session_index: Optional[int] = None

@@ -45,6 +45,10 @@ def test_chat_with_tutor_metadata_mode(mock_get_llm, mock_chat, client):
         "response": "Here is an updated response.",
         "profile_updated": True,
         "updated_learner_profile": {"learning_preferences": {"fslsm_dimensions": {"fslsm_input": -0.2}}},
+        "retrieval_trace": {
+            "contexts": [{"page_content": "Retrieved lecture content.", "source_type": "verified_content"}],
+            "tool_calls": [{"tool_name": "retrieve_vector_context", "query": "Use more visuals"}],
+        },
     }
 
     resp = client.post(
@@ -52,6 +56,7 @@ def test_chat_with_tutor_metadata_mode(mock_get_llm, mock_chat, client):
         json={
             "messages": "[{\"role\": \"user\", \"content\": \"Use more visuals\"}]",
             "learner_profile": "{}",
+            "goal_context": {"course_code": "6.0001", "lecture_numbers": [1]},
             "return_metadata": True,
             "user_id": "alice",
             "goal_id": 0,
@@ -62,6 +67,8 @@ def test_chat_with_tutor_metadata_mode(mock_get_llm, mock_chat, client):
     assert payload["response"]
     assert payload["profile_updated"] is True
     assert isinstance(payload.get("updated_learner_profile"), dict)
+    assert payload["retrieval_trace"]["contexts"][0]["source_type"] == "verified_content"
+    assert mock_chat.call_args.kwargs["goal_context"] == {"course_code": "6.0001", "lecture_numbers": [1]}
 
 
 def test_chat_with_tutor_rejects_invalid_messages_format(client):
