@@ -14,8 +14,12 @@ export function SessionCard({ index, pathSession, runtimeSession, onLaunch, disa
   const canOpen = runtimeSession?.can_open ?? true;
   const ifLearned = runtimeSession?.if_learned ?? false;
   const isMastered = runtimeSession?.is_mastered ?? false;
+  // Backend stores mastery_score as 0–100 (score_percentage). Older data may be 0–1.
   const masteryScore = runtimeSession?.mastery_score;
-  const masteryPct = masteryScore != null ? Math.round(masteryScore * 100) : null;
+  const masteryPct =
+    masteryScore != null
+      ? Math.round(masteryScore <= 1 ? masteryScore * 100 : masteryScore)
+      : null;
 
   return (
     <div

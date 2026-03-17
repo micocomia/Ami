@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Select } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
@@ -27,9 +27,10 @@ function ClockIcon() {
 
 function AnalyticsOverview() {
   const [timeRange, setTimeRange] = useState<TimeRange>('Last 30 days');
+  const navigate = useNavigate();
 
   const { userId } = useAuthContext();
-  const { goals, selectedGoalId } = useGoalsContext();
+  const { goals, selectedGoalId, setSelectedGoalId } = useGoalsContext();
 
   const { data: metrics, isLoading: metricsLoading } = useDashboardMetrics(
     userId ?? undefined,
@@ -120,9 +121,7 @@ function AnalyticsOverview() {
                 Across all active learning goals.
               </p>
             </div>
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-              <span className="text-lg text-slate-600">📊</span>
-            </div>
+            
           </div>
         </div>
 
@@ -143,10 +142,7 @@ function AnalyticsOverview() {
               <p className="mt-1 text-[11px] text-slate-400">
                 Goals that are not archived or deleted.
               </p>
-            </div>
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-              <span className="text-lg text-slate-600">🎯</span>
-            </div>
+            </div>        
           </div>
         </div>
 
@@ -174,9 +170,7 @@ function AnalyticsOverview() {
                   : 'Time spent across all sessions.'}
               </p>
             </div>
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-              <span className="text-lg text-slate-600">⏱️</span>
-            </div>
+    
           </div>
         </div>
 
@@ -204,17 +198,15 @@ function AnalyticsOverview() {
                   : 'Complete a few sessions to see this.'}
               </p>
             </div>
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-              <span className="text-lg text-slate-600">🏆</span>
-            </div>
+      
           </div>
         </div>
       </div>
 
-      {/* Goals overview + charts */}
-      <div className="mt-6 grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.5fr)] gap-6">
+      {/* Goals overview + charts — items-start so left column height fits content */}
+      <div className="mt-6 grid grid-cols-1 xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.5fr)] gap-6 items-start">
         {/* Goals overview list */}
-        <section className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <section className="bg-white rounded-2xl border border-slate-200 shadow-sm self-start w-full">
           <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-100">
             <div>
               <h3 className="text-sm font-semibold text-slate-900">Goals overview</h3>
@@ -223,7 +215,7 @@ function AnalyticsOverview() {
               </p>
             </div>
             <p className="hidden md:block text-[11px] text-slate-400">
-              Click any goal in other pages to dive deeper.
+              Use the arrow to open that goal on Learning Path.
             </p>
           </div>
           <div className="divide-y divide-slate-100">
@@ -301,10 +293,14 @@ function AnalyticsOverview() {
                       </div>
                     </div>
 
-                    <Link
-                      to="/analytics"
-                      className="shrink-0 self-start text-slate-400 hover:text-slate-700"
-                      aria-label="View goal details"
+                    <button
+                      type="button"
+                      className="shrink-0 self-start rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+                      aria-label="Open goal on Learning Path"
+                      onClick={() => {
+                        setSelectedGoalId(goal.id);
+                        navigate('/learning-path');
+                      }}
                     >
                       <svg
                         className="w-5 h-5"
@@ -319,7 +315,7 @@ function AnalyticsOverview() {
                           d="M8.25 4.5l7.5 7.5-7.5 7.5"
                         />
                       </svg>
-                    </Link>
+                    </button>
                   </div>
                 );
               })}
@@ -786,8 +782,8 @@ export function AnalyticsPage() {
   const [view, setView] = useState<'overview' | 'active-goal'>('overview');
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
-      <div className="flex justify-end">
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-4">
+      <div className="flex justify-start items-center">
         <div className="inline-flex rounded-full bg-slate-100 p-1 text-sm font-medium">
           <button
             type="button"

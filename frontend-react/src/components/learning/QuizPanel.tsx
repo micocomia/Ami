@@ -11,9 +11,24 @@ interface QuizPanelProps {
   sessionIndex: number;
   onMasteryResult: (result: MasteryEvaluationResponse) => void;
   ensureCached?: () => Promise<void>;
+  onCompleteSession?: () => void;
+  completeSessionLoading?: boolean;
+  completeSessionDisabled?: boolean;
+  completeSessionHint?: string | null;
 }
 
-export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult, ensureCached }: QuizPanelProps) {
+export function QuizPanel({
+  quiz,
+  userId,
+  goalId,
+  sessionIndex,
+  onMasteryResult,
+  ensureCached,
+  onCompleteSession,
+  completeSessionLoading = false,
+  completeSessionDisabled = true,
+  completeSessionHint = null,
+}: QuizPanelProps) {
   const scQs = quiz.single_choice_questions ?? [];
   const mcQs = quiz.multiple_choice_questions ?? [];
   const tfQs = quiz.true_false_questions ?? [];
@@ -44,10 +59,10 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
         session_index: sessionIndex,
         quiz_answers: {
           single_choice_questions: scAnswers.map((a, i) =>
-            a != null ? scQs[i].options[a] : null,
+            a != null ? quizOptions(scQs[i])[a] ?? null : null,
           ),
           multiple_choice_questions: mcAnswers.map((s, i) =>
-            Array.from(s).map((idx) => mcQs[i].options[idx]),
+            Array.from(s).map((idx) => quizOptions(mcQs[i])[idx]).filter(Boolean),
           ),
           true_false_questions: tfAnswers.map((a) =>
             a == null ? null : a ? 'True' : 'False',
@@ -82,6 +97,16 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
 
   if (totalQuestions === 0) return null;
 
+  const quizExplanationText = (q: unknown): string | null => {
+    const e = (q as { explanation?: unknown })?.explanation;
+    if (typeof e === 'string' && e.trim()) return e;
+    return null;
+  };
+  const quizOptions = (q: { options?: unknown }): string[] =>
+    Array.isArray(q.options)
+      ? (q.options as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+
   const soloColors: Record<string, string> = {
     Prestructural: 'text-red-600',
     Unistructural: 'text-orange-600',
@@ -106,11 +131,12 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
             {qi + 1}. {q.question}
           </p>
           <div className="space-y-2">
-            {q.options.map((opt, oi) => {
+            {quizOptions(q).map((opt, oi) => {
+              const opts = quizOptions(q);
               const isSelected = scAnswers[qi] === oi;
               const correctIdx = typeof q.correct_option === 'number'
                 ? q.correct_option
-                : q.options.indexOf(q.correct_option as string);
+                : opts.indexOf(q.correct_option as string);
               const isCorrect = result != null && correctIdx === oi;
               const isWrong = result != null && isSelected && correctIdx !== oi;
               return (
@@ -137,8 +163,8 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
               );
             })}
           </div>
-          {result && q.explanation && showExplanations && (
-            <p className="text-xs text-slate-500 italic">{q.explanation}</p>
+          {result && showExplanations && quizExplanationText(q) && (
+            <p className="text-xs text-slate-500 italic">{quizExplanationText(q)}</p>
           )}
         </div>
       ))}
@@ -151,13 +177,18 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
             <span className="text-xs text-slate-400 font-normal">(select all that apply)</span>
           </p>
           <div className="space-y-2">
-            {q.options.map((opt, oi) => {
+            {quizOptions(q).map((opt, oi) => {
+              const opts = quizOptions(q);
               const isSelected = mcAnswers[qi].has(oi);
-              const rawCorrect = q.correct_options ?? [];
+              const rawCorrect = (q as { correct_options?: unknown; correct_answers?: unknown })
+                .correct_options ??
+                (q as { correct_answers?: unknown }).correct_answers ??
+                [];
+              const rawList: (string | number)[] = Array.isArray(rawCorrect)
+                ? (rawCorrect as (string | number)[])
+                : [];
               const correctIndices = new Set(
-                rawCorrect.map((c: string | number) =>
-                  typeof c === 'number' ? c : q.options.indexOf(c),
-                ),
+                rawList.map((c) => (typeof c === 'number' ? c : opts.indexOf(String(c)))),
               );
               const isCorrect = result != null && correctIndices.has(oi);
               const isWrong = result != null && isSelected && !correctIndices.has(oi);
@@ -213,8 +244,8 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
               );
             })}
           </div>
-          {result && q.explanation && showExplanations && (
-            <p className="text-xs text-slate-500 italic">{q.explanation}</p>
+          {result && showExplanations && quizExplanationText(q) && (
+            <p className="text-xs text-slate-500 italic">{quizExplanationText(q)}</p>
           )}
         </div>
       ))}
@@ -254,8 +285,8 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
               );
             })}
           </div>
-          {result && q.explanation && showExplanations && (
-            <p className="text-xs text-slate-500 italic">{q.explanation}</p>
+          {result && showExplanations && quizExplanationText(q) && (
+            <p className="text-xs text-slate-500 italic">{quizExplanationText(q)}</p>
           )}
         </div>
       ))}
@@ -352,11 +383,31 @@ export function QuizPanel({ quiz, userId, goalId, sessionIndex, onMasteryResult,
         </div>
       )}
 
-      {!result && !submitError && (
-        <Button className="w-full" onClick={handleSubmit} loading={isSubmitting} disabled={isSubmitting}>
-          Submit Answers
-        </Button>
-      )}
+      <div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          {!result && !submitError && (
+            <Button className="w-full sm:flex-1" onClick={handleSubmit} loading={isSubmitting} disabled={isSubmitting}>
+              Submit Answers
+            </Button>
+          )}
+          {onCompleteSession && (
+          <div className="w-full sm:flex-1 text-center">
+              <Button
+                className="w-full"
+                variant="secondary"
+                onClick={onCompleteSession}
+                loading={completeSessionLoading}
+                disabled={completeSessionDisabled || completeSessionLoading}
+              >
+                {completeSessionLoading ? 'Completing…' : 'Complete Session'}
+              </Button>
+              {completeSessionHint && (
+                <p className="mt-1 text-xs text-slate-400">{completeSessionHint}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -56,7 +56,7 @@ function CenterSpinner() {
 /*  Step progress list                                                 */
 /* ------------------------------------------------------------------ */
 
-function StepProgress({ steps, activeIndex }: { steps: string[]; activeIndex: number }) {
+function StepProgress({ steps, activeIndex }: { steps: readonly string[]; activeIndex: number }) {
   if (!steps.length) return null;
   return (
     <ul className="space-y-2.5">
@@ -102,7 +102,7 @@ function StepProgress({ steps, activeIndex }: { steps: string[]; activeIndex: nu
 /*  Tip carousel                                                       */
 /* ------------------------------------------------------------------ */
 
-function TipCarousel({ tips }: { tips: string[] }) {
+function TipCarousel({ tips }: { tips: readonly string[] }) {
   const [idx, setIdx] = useState(0);
   const [fadeIn, setFadeIn] = useState(true);
 
@@ -146,9 +146,9 @@ export interface PathGenerationLoadingProps {
   /** Optional short description under the title */
   subtitle?: string;
   /** Step messages shown in the checklist (e.g. "Analyzing your skill gaps…") */
-  steps: string[];
+  steps: readonly string[] | string[];
   /** Rotating tips shown below (e.g. "Tip: Clear goals lead to...") */
-  tips: string[];
+  tips: readonly string[] | string[];
   /** Optional goal/skill title shown under the main title (e.g. the user's goal text) */
   goalTitle?: string;
 }

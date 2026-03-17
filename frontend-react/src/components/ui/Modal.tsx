@@ -11,12 +11,20 @@ export interface ModalProps {
   maxWidth?: string;
 }
 
-export function Modal({ open, onClose, title, children, className, maxWidth = 'max-w-lg' }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  className,
+  maxWidth = 'max-w-lg',
+}: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+
     if (open && !dialog.open) dialog.showModal();
     if (!open && dialog.open) dialog.close();
   }, [open]);
@@ -24,8 +32,10 @@ export function Modal({ open, onClose, title, children, className, maxWidth = 'm
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+
     const handler = () => onClose();
     dialog.addEventListener('close', handler);
+
     return () => dialog.removeEventListener('close', handler);
   }, [onClose]);
 
@@ -33,31 +43,54 @@ export function Modal({ open, onClose, title, children, className, maxWidth = 'm
     <dialog
       ref={dialogRef}
       className={cn(
-        'backdrop:bg-black/40 backdrop:backdrop-blur-sm',
-        'rounded-lg shadow-lg p-0 w-full border-none',
-        maxWidth,
-        'animate-in fade-in',
+        'fixed inset-0 z-[100] m-0 h-screen w-screen overflow-hidden border-none bg-transparent p-0',
+        'backdrop:bg-black/40 backdrop:backdrop-blur-sm'
       )}
       onClick={(e) => {
         if (e.target === dialogRef.current) onClose();
       }}
     >
-      <div className={cn('p-6', className)}>
-        {title && (
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 transition-colors p-1 -mr-1"
-              aria-label="Close"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+      <div className="flex h-full items-start justify-center px-4 pt-[8vh] pb-4">
+        <div
+          className={cn(
+            'w-full rounded-lg bg-white shadow-lg',
+            'max-h-[calc(100vh-2rem)] overflow-y-auto',
+            maxWidth,
+            'animate-in fade-in',
+            className
+          )}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-6">
+            {title && (
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+                <button
+                  onClick={onClose}
+                  className="p-1 -mr-1 text-slate-400 transition-colors hover:text-slate-600"
+                  aria-label="Close"
+                  type="button"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {children}
           </div>
-        )}
-        {children}
+        </div>
       </div>
     </dialog>
   );

@@ -1,7 +1,10 @@
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/cn';
+import LogoBlack from '@/assets/Logo_black.png';
+import AvatarImg from '@/assets/avatar.png';
 import { useHasEnteredGoal } from '@/context/HasEnteredGoalContext';
 import { useAuthContext } from '@/context/AuthContext';
+import { useSidebarCollapse } from '@/context/SidebarCollapseContext';
 
 interface NavSubItem {
   to: string;
@@ -55,7 +58,6 @@ const NAV_ITEMS: NavItem[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
       </svg>
     ),
-    badge: 24,
   },
   {
     to: '/profile',
@@ -78,10 +80,13 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 interface SideNavProps {
+  /** @deprecated Use SidebarCollapseContext instead */
   collapsed?: boolean;
 }
 
-export function SideNav({ collapsed = false }: SideNavProps) {
+export function SideNav({ collapsed: collapsedProp }: SideNavProps) {
+  const { collapsed: collapsedCtx, toggleCollapsed, setCollapsed } = useSidebarCollapse();
+  const collapsed = collapsedProp ?? collapsedCtx;
   const { hasEnteredGoal } = useHasEnteredGoal();
   const { userId } = useAuthContext();
   const navItems = NAV_ITEMS.filter((item) => !item.showWhenHasGoal || hasEnteredGoal);
@@ -93,12 +98,54 @@ export function SideNav({ collapsed = false }: SideNavProps) {
         collapsed ? 'w-16' : 'w-sidebar',
       )}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 h-topbar shrink-0 border-b border-slate-200">
-        <div className="w-8 h-8 rounded-lg bg-primary-500 text-white flex items-center justify-center font-bold text-sm">
-          A
-        </div>
-        {!collapsed && <span className="text-lg font-semibold tracking-tight text-slate-900">Ami</span>}
+      {/* Brand: expanded = logo link + collapse; collapsed = avatar only, click to expand */}
+      <div
+        className={cn(
+          'flex items-center h-topbar shrink-0 border-b border-slate-200',
+          collapsed ? 'justify-center px-2' : 'gap-2 px-3',
+        )}
+      >
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="flex items-center justify-center rounded-lg p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2 hover:bg-sidebar-hover transition-colors"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <img
+              src={AvatarImg}
+              alt=""
+              className="h-8 w-8 rounded-full object-cover ring-2 ring-slate-100"
+            />
+          </button>
+        ) : (
+          <>
+            <NavLink
+              to="/dashboard"
+              className="flex items-center min-w-0 rounded-lg py-1 flex-1 outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
+              title="Ami"
+            >
+              <img
+                src={LogoBlack}
+                alt="Ami"
+                className="h-8 w-auto max-h-8 max-w-[120px] object-contain object-left"
+              />
+            </NavLink>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className="rounded-lg p-2 shrink-0 text-slate-500 hover:bg-sidebar-hover hover:text-slate-800 transition-colors"
+              title="Collapse sidebar"
+              aria-expanded
+              aria-label="Collapse sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Navigation */}
