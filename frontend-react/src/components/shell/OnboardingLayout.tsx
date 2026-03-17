@@ -1,6 +1,7 @@
 import { Outlet, Link } from 'react-router-dom';
 import { Button } from '@/components/ui';
 import { useAuthContext } from '@/context/AuthContext';
+import Logo from '@/assets/Logo_black.png';
 
 export function OnboardingLayout() {
   const { isAuthenticated } = useAuthContext();
@@ -10,17 +11,14 @@ export function OnboardingLayout() {
       {/* Minimal top bar — matches Figma: LOGO left, Sign in / Register right */}
       <header className="flex items-center justify-between px-8 py-4 shrink-0">
         <Link to="/" className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-lg bg-primary-600 text-white flex items-center justify-center font-bold text-sm">
-            A
-          </div>
-          <span className="text-xl font-bold text-slate-900 tracking-tight">Ami</span>
+          <img src={Logo} alt="Ami logo" className="h-9 w-auto" />
         </Link>
 
         <div className="flex items-center gap-2">
           {isAuthenticated ? (
             <Link to="/dashboard">
               <Button variant="secondary" size="sm">
-                Dashboard
+                My Learning
               </Button>
             </Link>
           ) : (

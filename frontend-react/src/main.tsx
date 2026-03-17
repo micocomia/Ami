@@ -8,6 +8,7 @@ import { ApiToastBridge } from '@/components/ApiToastBridge';
 import { AuthProvider } from '@/context/AuthContext';
 import { HasEnteredGoalProvider } from '@/context/HasEnteredGoalContext';
 import { GoalsProvider } from '@/context/GoalsContext';
+import { DebugPanel } from '@/components/DebugPanel';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ createRoot(document.getElementById('root')!).render(
             <ToastProvider>
               <ApiToastBridge />
               <RouterProvider router={router} />
+              {import.meta.env.DEV && <DebugPanel />}
             </ToastProvider>
           </HasEnteredGoalProvider>
         </GoalsProvider>

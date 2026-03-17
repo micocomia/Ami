@@ -96,6 +96,19 @@ export async function submitContentFeedbackApi(
   return data;
 }
 
+export async function reportDiagramRenderFailureApi(body: {
+  user_id?: string;
+  goal_id?: number;
+  session_index?: number;
+  diagram_type: string;
+  snippet: string;
+  error?: string;
+  page_url?: string;
+}): Promise<{ ok: boolean; snippet_hash?: string }> {
+  const { data } = await apiClient.post<{ ok: boolean; snippet_hash?: string }>('diagram-render-failure', body);
+  return data;
+}
+
 export async function getDashboardMetricsApi(
   userId: string,
   goalId?: number,

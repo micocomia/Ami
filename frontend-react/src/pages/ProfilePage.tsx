@@ -1,14 +1,35 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Button, Toggle } from '@/components/ui';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button, Modal } from '@/components/ui';
+import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
 import { useGoalsContext } from '@/context/GoalsContext';
 import { useActiveGoal } from '@/context/GoalsContext';
-import { useDeleteUserData, useUpdateLearnerInformation } from '@/api/endpoints/content';
+import { useDeleteUserData, useUpdateLearnerInformation, useUpdateLearningPreferences } from '@/api/endpoints/content';
 import { useBehavioralMetrics } from '@/api/endpoints/metrics';
-import { useDeleteUser } from '@/api/endpoints/auth';
-import { useAppConfig } from '@/api/endpoints/config';
+import { useDeleteUser, useAuthMe } from '@/api/endpoints/auth';
+import { useAppConfig, usePersonas } from '@/api/endpoints/config';
 import { useExtractPdfText } from '@/api/endpoints/pdf';
+import {
+  getLearningStylePreference,
+  setLearningStylePreference,
+  type LearningStyleOption,
+} from '@/lib/learningStylePreference';
+import {
+  getMemberSinceIso,
+  formatMemberSinceDisplay,
+  earliestGoalTimestampIso,
+} from '@/lib/memberSince';
+import {
+  getAvatarDataUrl,
+  setAvatarFromFile,
+  clearAvatar,
+} from '@/lib/avatarStorage';
+import {
+  getStoredResumeFileName,
+  setStoredResume,
+  clearStoredResume,
+} from '@/lib/resumeStorage';
 
 function formatDuration(secs: number): string {
   if (secs <= 0 || !Number.isFinite(secs)) return '—';
@@ -19,6 +40,192 @@ function formatDuration(secs: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+/* ── Persona definitions (aligned with OnboardingPage) ────────────── */
+
+interface PersonaOption {
+  id: string;
+  personaKey: string;
+  title: string;
+  learningStyle: LearningStyleOption;
+  description: string;
+  tags: string[];
+}
+
+const PERSONA_OPTIONS: PersonaOption[] = [
+  {
+    id: 'hands-on',
+    personaKey: 'Hands-on Explorer',
+    title: 'Interactive',
+    learningStyle: 'Interactive',
+    description: 'Learns best by doing and practicing with examples.',
+    tags: ['Active', 'Visual', 'Step-by-step'],
+  },
+  {
+    id: 'reflective',
+    personaKey: 'Reflective Reader',
+    title: 'Textual',
+    learningStyle: 'Textual',
+    description: 'Learns through reading and reflection. Prefers detailed explanations.',
+    tags: ['Reading', 'Reflection'],
+  },
+  {
+    id: 'visual',
+    personaKey: 'Visual Learner',
+    title: 'Visual',
+    learningStyle: 'Visual',
+    description: 'Understands concepts best through visuals and diagrams.',
+    tags: ['Visual', 'Diagrams'],
+  },
+  {
+    id: 'conceptual',
+    personaKey: 'Conceptual Thinker',
+    title: 'Concise',
+    learningStyle: 'Concise',
+    description: 'Enjoys big-picture ideas, theory, and analysis.',
+    tags: ['Theory', 'Analysis', 'Big-picture'],
+  },
+  {
+    id: 'balanced',
+    personaKey: 'Balanced Learner',
+    title: 'Balanced',
+    learningStyle: 'Balanced',
+    description: 'Flexible across different learning formats.',
+    tags: ['Flexible', 'Neutral'],
+  },
+];
+
+/* ── FSLSM-based learning preference helpers ─────────────────────── */
+
+const FSLSM_THRESHOLD = 0.3;
+const FSLSM_STRONG = 0.7;
+
+interface PreferenceCardData {
+  type: string;
+  title: string;
+  description: string;
+}
+
+function deriveFslsmPreferenceCards(
+  dims: Record<string, number> | undefined,
+): PreferenceCardData[] {
+  if (!dims) return [];
+  const cards: PreferenceCardData[] = [];
+
+  const input = dims.fslsm_input ?? 0;
+  if (input <= -FSLSM_THRESHOLD)
+    cards.push({ type: 'visual', title: 'Visual materials', description: 'I prefer diagrams, charts, and videos over text.' });
+  else if (input >= FSLSM_THRESHOLD)
+    cards.push({ type: 'text', title: 'Text-based content', description: 'I prefer written explanations and detailed narratives.' });
+
+  const perception = dims.fslsm_perception ?? 0;
+  if (perception <= -FSLSM_THRESHOLD)
+    cards.push({ type: 'practical', title: 'Practical examples', description: 'I prefer seeing real-world uses before theory.' });
+  else if (perception >= FSLSM_THRESHOLD)
+    cards.push({ type: 'conceptual', title: 'Conceptual thinking', description: 'I prefer understanding theory and concepts first.' });
+
+  const understanding = dims.fslsm_understanding ?? 0;
+  if (understanding <= -FSLSM_THRESHOLD)
+    cards.push({ type: 'sequential', title: 'Step-by-step', description: 'I prefer clear, guided, linear progression.' });
+  else if (understanding >= FSLSM_THRESHOLD)
+    cards.push({ type: 'global', title: 'Big-picture first', description: 'I prefer seeing the overview before diving into details.' });
+
+  const processing = dims.fslsm_processing ?? 0;
+  if (processing <= -FSLSM_THRESHOLD)
+    cards.push({ type: 'interactive', title: 'Interactive exercises', description: 'I prefer quizzes, sandboxes, and hands-on tasks.' });
+  else if (processing >= FSLSM_THRESHOLD)
+    cards.push({ type: 'reflective', title: 'Reflective learning', description: 'I prefer reading, observation, and time to reflect.' });
+
+  return cards;
+}
+
+function deriveFslsmBullets(dims: Record<string, number> | undefined): string[] {
+  if (!dims) return [];
+  const bullets: string[] = [];
+
+  const input = dims.fslsm_input ?? 0;
+  if (input <= -FSLSM_STRONG) bullets.push('Prioritizes visual content and infographics.');
+  else if (input <= -FSLSM_THRESHOLD) bullets.push('Includes visual aids like diagrams and charts.');
+  else if (input >= FSLSM_STRONG) bullets.push('Focuses on detailed written and narrated explanations.');
+  else if (input >= FSLSM_THRESHOLD) bullets.push('Enriches content with written and narrative-style material.');
+
+  const perception = dims.fslsm_perception ?? 0;
+  if (perception <= -FSLSM_STRONG) bullets.push('Introduces concepts through concrete examples first.');
+  else if (perception <= -FSLSM_THRESHOLD) bullets.push('Leads with practical examples before theoretical concepts.');
+  else if (perception >= FSLSM_STRONG) bullets.push('Presents theoretical frameworks and concepts upfront.');
+  else if (perception >= FSLSM_THRESHOLD) bullets.push('Emphasizes conceptual understanding before examples.');
+
+  const understanding = dims.fslsm_understanding ?? 0;
+  if (understanding <= -FSLSM_STRONG) bullets.push('Structures lessons in strict, bite-sized sequences.');
+  else if (understanding <= -FSLSM_THRESHOLD) bullets.push('Organizes content in a structured, sequential order.');
+  else if (understanding >= FSLSM_STRONG) bullets.push('Starts with big-picture overviews before diving into details.');
+  else if (understanding >= FSLSM_THRESHOLD) bullets.push('Provides big-picture framing before sequential detail.');
+
+  const processing = dims.fslsm_processing ?? 0;
+  if (processing <= -FSLSM_STRONG) bullets.push('Integrates frequent interactive knowledge checks.');
+  else if (processing <= -FSLSM_THRESHOLD) bullets.push('Includes hands-on activities and practice opportunities.');
+  else if (processing >= FSLSM_STRONG) bullets.push('Allows ample time for reflection and deep thinking.');
+  else if (processing >= FSLSM_THRESHOLD) bullets.push('Provides reflection time before moving to new topics.');
+
+  if (bullets.length === 0) bullets.push('Delivers a balanced mix of content styles and activities.');
+  return bullets;
+}
+
+function PreferenceIcon({ type }: { type: string }) {
+  const cls = 'w-5 h-5';
+  switch (type) {
+    case 'visual':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+        </svg>
+      );
+    case 'text':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+        </svg>
+      );
+    case 'practical':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75a4.5 4.5 0 0 1-4.884 4.484c-1.076-.091-2.264.071-2.95.904l-7.152 8.684a2.548 2.548 0 1 1-3.586-3.586l8.684-7.152c.833-.686.995-1.874.904-2.95a4.5 4.5 0 0 1 6.336-4.486l-3.276 3.276a3.004 3.004 0 0 0 2.25 2.25l3.276-3.276c.256.565.398 1.192.398 1.852Z" />
+        </svg>
+      );
+    case 'conceptual':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+        </svg>
+      );
+    case 'sequential':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+        </svg>
+      );
+    case 'global':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" />
+        </svg>
+      );
+    case 'interactive':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+        </svg>
+      );
+    case 'reflective':
+      return (
+        <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 export function ProfilePage() {
   const navigate = useNavigate();
   const { userId, logout } = useAuthContext();
@@ -26,22 +233,37 @@ export function ProfilePage() {
   const { activeGoal } = useActiveGoal();
   const { data: config } = useAppConfig();
 
+  const { data: authMe } = useAuthMe(Boolean(userId));
   const { data: metrics, isLoading: metricsLoading } = useBehavioralMetrics(
     userId ?? undefined,
     activeGoal?.id,
   );
+  const { data: personasData } = usePersonas();
   const deleteUserDataMutation = useDeleteUserData();
   const deleteUserMutation = useDeleteUser();
   const updateLearnerInfoMutation = useUpdateLearnerInformation();
+  const updatePreferencesMutation = useUpdateLearningPreferences();
   const extractPdf = useExtractPdfText();
 
-  const [learningStyle, setLearningStyle] = useState('Balanced');
-  const [aiDifficulty, setAiDifficulty] = useState(true);
-  const [bilingualContent, setBilingualContent] = useState(false);
+  const [learningStyle, setLearningStyle] = useState(() => getLearningStylePreference());
+  useEffect(() => {
+    setLearningStyle(getLearningStylePreference());
+  }, [activeGoal?.id]);
+  const [showPreferencesModal, setShowPreferencesModal] = useState(false);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [preferencesSaveError, setPreferencesSaveError] = useState<string | null>(null);
   const [showDeleteDataConfirm, setShowDeleteDataConfirm] = useState(false);
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
-  const [resumeName, setResumeName] = useState<string | null>(null);
+  const [resumeName, setResumeName] = useState<string | null>(() => getStoredResumeFileName());
   const [resumeStatus, setResumeStatus] = useState<string | null>(null);
+  const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(null);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAvatarDataUrl(getAvatarDataUrl(userId));
+    setAvatarMessage(null);
+  }, [userId]);
 
   const profileTags: string[] = [];
   if (activeGoal?.learner_profile?.goal_display_name) {
@@ -52,9 +274,12 @@ export function ProfilePage() {
   }
   if (profileTags.length === 0) profileTags.push('Learner');
 
-  const fslsmDims =
-    (activeGoal?.learner_profile?.learning_preferences
-      ?.fslsm_dimensions as Record<string, number> | undefined) ?? {};
+  // Member since: prefer auth/me created_at, then first-login localStorage, then earliest goal timestamp
+  const memberSinceIso =
+    (authMe as { created_at?: string } | undefined)?.created_at ||
+    getMemberSinceIso(userId) ||
+    earliestGoalTimestampIso(goals as unknown as Array<Record<string, unknown>>);
+  const memberSinceDisplay = formatMemberSinceDisplay(memberSinceIso);
 
   const handleRestartOnboarding = async () => {
     if (!userId) return;
@@ -82,14 +307,55 @@ export function ProfilePage() {
     }
   };
 
+  const handleOpenPreferencesModal = () => {
+    setPreferencesSaveError(null);
+    const currentPersona = PERSONA_OPTIONS.find((p) => {
+      const dims = personasData?.personas?.[p.personaKey]?.fslsm_dimensions;
+      if (!dims || !fslsmDims) return false;
+      return Object.keys(dims).every(
+        (k) => Math.abs((dims[k] ?? 0) - (fslsmDims[k] ?? 0)) < 0.15,
+      );
+    });
+    setSelectedPersonaId(currentPersona?.id ?? null);
+    setShowPreferencesModal(true);
+  };
+
+  const handleSavePreferences = async () => {
+    const persona = PERSONA_OPTIONS.find((p) => p.id === selectedPersonaId);
+    if (!persona || !activeGoal || !userId) return;
+    const personaDims = personasData?.personas?.[persona.personaKey]?.fslsm_dimensions;
+    if (!personaDims) return;
+
+    setPreferencesSaveError(null);
+    const currentProfile = activeGoal.learner_profile ?? {};
+    const sliderPayload = {
+      update_mode: 'fslsm_slider_override',
+      slider_values: personaDims,
+    };
+
+    try {
+      const res = await updatePreferencesMutation.mutateAsync({
+        learner_profile: JSON.stringify(currentProfile),
+        learner_interactions: JSON.stringify(sliderPayload),
+        user_id: userId,
+        goal_id: activeGoal.id,
+      });
+      updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
+      setLearningStylePreference(persona.learningStyle);
+      setLearningStyle(persona.learningStyle);
+      setShowPreferencesModal(false);
+    } catch {
+      setPreferencesSaveError('Failed to update preferences. Please try again.');
+    }
+  };
+
   const behavioralMetrics: any = metrics ?? {};
   const masteryHistory: number[] = behavioralMetrics.mastery_history ?? [];
-  const sessionsCompletedMetric: number | undefined = behavioralMetrics.sessions_completed;
-  const totalSessionsMetric: number | undefined = behavioralMetrics.total_sessions_in_path;
-  const totalStudyTimeSec: number | undefined = behavioralMetrics.total_learning_time_sec;
-  const latestMasteryRate: number | undefined = behavioralMetrics.latest_mastery_rate;
-  const motivationalTriggers: number | undefined =
-    behavioralMetrics.motivational_triggers_count;
+  void behavioralMetrics.sessions_completed;
+  void behavioralMetrics.total_sessions_in_path;
+  void behavioralMetrics.total_learning_time_sec;
+  void behavioralMetrics.latest_mastery_rate;
+  void behavioralMetrics.motivational_triggers_count;
 
   let streakDays = 0;
   for (let i = masteryHistory.length - 1; i >= 0; i -= 1) {
@@ -99,10 +365,18 @@ export function ProfilePage() {
 
   const masteryThreshold =
     (config?.mastery_threshold_default as number | undefined) ?? 0.6;
-  const quizzesPassed = masteryHistory.filter((v) => v >= masteryThreshold).length;
-  const quizzesTotal = masteryHistory.length;
+  void masteryHistory.filter((v) => v >= masteryThreshold).length;
+  void masteryHistory.length;
 
   const biasInfo = activeGoal?.profile_fairness as Record<string, unknown> | undefined;
+
+  const learnerInformation = (
+    activeGoal?.learner_profile as { learner_information?: string } | undefined
+  )?.learner_information;
+
+  const fslsmDims = activeGoal?.learner_profile?.learning_preferences?.fslsm_dimensions;
+  const preferenceCards = deriveFslsmPreferenceCards(fslsmDims);
+  const personalizationBullets = deriveFslsmBullets(fslsmDims);
 
   const handleResumeUpload: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const file = e.target.files?.[0];
@@ -126,6 +400,7 @@ export function ProfilePage() {
         goal_id: activeGoal.id,
       });
       updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
+      setStoredResume(file.name, `Resume summary: ${pdfText}`);
       setResumeStatus('Resume connected successfully.');
     } catch {
       setResumeStatus('Upload failed. Please try again.');
@@ -153,6 +428,7 @@ export function ProfilePage() {
       });
       updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
       setResumeName(null);
+      clearStoredResume();
       setResumeStatus('Resume removed from profile.');
     } catch {
       setResumeStatus('Failed to remove resume. Please try again.');
@@ -160,13 +436,84 @@ export function ProfilePage() {
   };
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
       {/* Top profile card */}
       <section className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="w-20 h-20 rounded-full bg-slate-200 shrink-0 flex items-center justify-center overflow-hidden">
-          <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-          </svg>
+        <div className="flex flex-col items-center gap-1 shrink-0">
+          {userId && (
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file || !userId) return;
+                setAvatarMessage(null);
+                const result = await setAvatarFromFile(userId, file);
+                if (result.ok) {
+                  setAvatarDataUrl(getAvatarDataUrl(userId));
+                  setAvatarMessage('Saved on this device.');
+                } else {
+                  setAvatarMessage(result.error);
+                }
+              }}
+            />
+          )}
+          <div className="relative w-20 h-20 rounded-full bg-slate-200 shrink-0 overflow-hidden ring-2 ring-slate-100 group">
+            {avatarDataUrl ? (
+              <img
+                src={avatarDataUrl}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                </svg>
+              </div>
+            )}
+            {userId && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Change profile photo"
+                  className="absolute left-1/2 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white shadow-md transition-colors hover:bg-black/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1"
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  {/* Camera icon — click opens file picker */}
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+                {avatarDataUrl && (
+                  <button
+                    type="button"
+                    aria-label="Remove profile photo"
+                    className="absolute top-0.5 right-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white text-xs hover:bg-black/70"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      clearAvatar(userId);
+                      setAvatarDataUrl(null);
+                      setAvatarMessage('Removed.');
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {avatarMessage && (
+            <p className="text-[10px] text-slate-500 text-center max-w-[140px]">{avatarMessage}</p>
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-semibold text-slate-900">
@@ -183,16 +530,21 @@ export function ProfilePage() {
               </span>
             ))}
           </div>
+          {learnerInformation && (
+            <p className="mt-2 text-xs text-slate-500 whitespace-pre-line">
+              {learnerInformation}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4 shrink-0">
-          {/* Edit profile 可后续接入真实编辑，这里暂留占位 */}
-          <button
+          {/* Edit profile placeholder· */}
+          {/* <button
             type="button"
             className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
             disabled
           >
             Edit Profile
-          </button>
+          </button> */}
           <button
             type="button"
             className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
@@ -231,9 +583,16 @@ export function ProfilePage() {
             </div>
             <div>
               <dt className="text-slate-500 font-medium">Member since</dt>
-              <dd className="text-slate-900 mt-0.5">Not tracked yet</dd>
+              <dd className="text-slate-900 mt-0.5">
+                {memberSinceDisplay}
+                {memberSinceIso == null && userId && (
+                  <span className="block text-xs text-slate-400 mt-0.5">
+                    Shown after first sign-in on this device, or when the API returns account creation time.
+                  </span>
+                )}
+              </dd>
             </div>
-            <div>
+            {/* <div>
               <dt className="text-slate-500 font-medium">Plan</dt>
               <dd className="mt-0.5 flex items-center gap-2">
                 <span className="text-slate-900">Free</span>
@@ -245,7 +604,7 @@ export function ProfilePage() {
                   Upgrade →
                 </button>
               </dd>
-            </div>
+            </div> */}
           </dl>
         </section>
 
@@ -291,62 +650,76 @@ export function ProfilePage() {
       </div>
 
       {/* LEARNING PREFERENCES */}
-      <section className="bg-white rounded-xl border border-slate-200 p-5">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">
-          Learning Preferences
-        </h3>
-        <div className="space-y-5">
-          {/* Presentation style */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-500 tracking-wide uppercase">
-              Learning style
-            </p>
-            <div className="inline-flex w-full rounded-2xl bg-slate-100 p-1 border border-slate-200">
-              {['Visual Learner', 'Balanced', 'Text-first'].map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setLearningStyle(option)}
-                  className={`flex-1 px-4 py-2 text-sm font-medium rounded-2xl transition-all ${
-                    learningStyle === option
-                      ? 'bg-white shadow text-slate-900'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Used by Ami to decide how content is presented.
-            </p>
+      <section className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+            </svg>
+            <h3 className="text-lg font-semibold text-slate-900">How You Learn</h3>
           </div>
-
-          {/* Content settings */}
-          <div className="space-y-3 pt-2 border-t border-slate-100">
-            <p className="text-xs font-semibold text-slate-500 tracking-wide uppercase">
-              Content settings
-            </p>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm text-slate-800">Session reminders</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Daily nudges to keep your learning streak going.
-                </p>
-              </div>
-              <Toggle checked={aiDifficulty} onChange={setAiDifficulty} className="shrink-0" />
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm text-slate-800">AI difficulty adaptation</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Adjust content difficulty based on your performance.
-                </p>
-              </div>
-              <Toggle checked={bilingualContent} onChange={setBilingualContent} className="shrink-0" />
-            </div>
-          </div>
+          <Button
+            size="sm"
+            onClick={handleOpenPreferencesModal}
+          >
+            Edit Preferences
+          </Button>
         </div>
+        <p className="text-sm text-slate-500 flex items-center gap-1.5 mb-6">
+          <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+          </svg>
+          Current preference: {learningStyle ?? 'Balanced'}. Applied by default to new learning goals.
+        </p>
+
+        {preferenceCards.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: preference cards */}
+            <div>
+              <div className="space-y-3">
+                {preferenceCards.map((card) => (
+                  <div
+                    key={card.type}
+                    className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 text-slate-600">
+                      <PreferenceIcon type={card.type} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{card.title}</p>
+                      <p className="text-xs text-slate-500">{card.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right: HOW AMI PERSONALIZES */}
+            <div className="rounded-xl bg-teal-50/60 border border-teal-100 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-4 h-4 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+                </svg>
+                <p className="text-xs font-semibold text-teal-800 uppercase tracking-wider">
+                  How Ami personalizes your content
+                </p>
+              </div>
+              <ul className="space-y-2.5">
+                {personalizationBullets.map((bullet, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-sm text-teal-900">
+                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0" />
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-slate-400">
+            <p className="text-sm">No learning preferences available yet.</p>
+            <p className="text-xs mt-1">Complete onboarding to set your preferences.</p>
+          </div>
+        )}
       </section>
 
       {/* TALENT ASSETS */}
@@ -477,6 +850,69 @@ export function ProfilePage() {
           </div>
         )}
       </section>
+
+      {/* ── Edit Preferences Modal ── */}
+      <Modal
+        open={showPreferencesModal}
+        onClose={() => setShowPreferencesModal(false)}
+        title="Edit Learning Preferences"
+        maxWidth="max-w-2xl"
+      >
+        <p className="text-sm text-slate-500 mb-5">Choose the learning style that fits you best.</p>
+
+        <div className="space-y-2">
+          {PERSONA_OPTIONS.map((persona) => {
+            const isSelected = selectedPersonaId === persona.id;
+            return (
+              <button
+                key={persona.id}
+                type="button"
+                onClick={() => setSelectedPersonaId(persona.id)}
+                className={cn(
+                  'w-full text-left rounded-lg border-2 px-4 py-3 transition-all',
+                  isSelected
+                    ? 'border-primary-500 bg-primary-50/50 ring-1 ring-primary-200'
+                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p
+                    className={cn(
+                      'text-sm font-semibold',
+                      isSelected ? 'text-primary-700' : 'text-slate-900',
+                    )}
+                  >
+                    {persona.title}
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">{persona.description}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        {preferencesSaveError && (
+          <p className="text-sm text-red-600 mt-3">{preferencesSaveError}</p>
+        )}
+
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setShowPreferencesModal(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSavePreferences}
+            disabled={!selectedPersonaId || !activeGoal}
+            loading={updatePreferencesMutation.isPending}
+          >
+            Save
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

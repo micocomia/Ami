@@ -29,6 +29,8 @@ export interface AuthTokenResponse {
 
 export interface AuthMeResponse {
   username: string;
+  /** If backend adds account creation time, Profile "Member since" uses this */
+  created_at?: string;
 }
 
 export interface QuizMix {

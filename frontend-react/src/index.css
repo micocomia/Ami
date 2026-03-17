@@ -13,3 +13,91 @@
   ::-webkit-scrollbar-thumb { @apply bg-primary-300 rounded; }
   ::-webkit-scrollbar-thumb:hover { @apply bg-primary-400; }
 }
+
+@layer components {
+  .primary-teal {
+    background-color: #78B3BA;
+  }
+
+  .text-teal {
+    color: #78B3BA;
+  }
+
+  .border-teal {
+    border-color: #78B3BA;
+  }
+
+  /* Suggestion cards */
+  .suggestion-card {
+    transition: all 0.3s ease;
+    border: 1px solid #f1f5f9;
+    background-color: #ffffff;
+  }
+
+  .suggestion-card:hover {
+    border-color: #78B3BA;
+    color: #78B3BA;
+    background-color: #f0f9fa;
+  }
+
+  .suggestion-card.active {
+    border-color: #78B3BA;
+    background-color: #f0f9fa;
+    color: #78B3BA;
+    box-shadow: 0 4px 12px -4px rgba(120, 179, 186, 0.3);
+  }
+
+  /* Segmented control */
+  .segmented-control {
+    background-color: #f1f5f9;
+    padding: 3px;
+    border-radius: 14px;
+  }
+
+  .segmented-item {
+    transition: all 0.2s ease;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .segmented-item.active {
+    background-color: #ffffff;
+    color: #78B3BA;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+
+  /* Preference detail card */
+  #styleDetailCard {
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    border-left: 3px solid #78B3BA;
+  }
+
+  /* Resume upload pill */
+  .upload-pill {
+    border: 1.5px dashed #e2e8f0;
+    border-radius: 16px;
+    color: #94a3b8;
+    transition: all 0.3s ease;
+  }
+
+  .upload-pill:hover {
+    border-color: #78B3BA;
+    color: #78B3BA;
+    background-color: #f0f9fa;
+  }
+
+  /* Custom input */
+  .custom-input {
+    border: 1.5px solid #f1f5f9;
+    border-radius: 16px;
+    transition: all 0.3s ease;
+  }
+
+  .custom-input:focus {
+    border-color: #78B3BA;
+    background-color: #ffffff;
+    box-shadow: 0 0 0 4px rgba(120, 179, 186, 0.1);
+    outline: none;
+  }
+}

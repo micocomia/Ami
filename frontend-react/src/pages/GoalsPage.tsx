@@ -6,6 +6,13 @@ import { useAuthContext } from '@/context/AuthContext';
 import { useGoalsContext } from '@/context/GoalsContext';
 import { useDeleteGoal, usePatchGoal } from '@/api/endpoints/goals';
 import type { LearningPathSession } from '@/types';
+import {
+  getLearningStylePreference,
+  withLearningStyleInLearnerInformation,
+  LEARNING_STYLE_TO_PERSONA,
+} from '@/lib/learningStylePreference';
+import { getStoredResumeText } from '@/lib/resumeStorage';
+import { usePersonas } from '@/api/endpoints/config';
 
 function getProgress(path: LearningPathSession[] | undefined): number {
   if (!path || path.length === 0) return 0;
@@ -32,6 +39,7 @@ export function GoalsPage() {
   const [isAddGoalModalOpen, setIsAddGoalModalOpen] = useState(false);
   const [newGoalText, setNewGoalText] = useState('');
 
+  const { data: personasData } = usePersonas();
   const deleteGoalMutation = useDeleteGoal(userId ?? undefined);
   const patchGoalMutation = usePatchGoal(userId ?? undefined, editingGoalId ?? undefined);
 
@@ -75,15 +83,52 @@ export function GoalsPage() {
     if (!title) return;
     setIsAddGoalModalOpen(false);
     setNewGoalText('');
+
+    const referenceGoal =
+      activeGoals.find((g) => g.id === selectedGoalId) ?? activeGoals[0];
+    const baseInfo =
+      (referenceGoal?.learner_profile?.learner_information as string | undefined) ?? '';
+
+    let learnerInfo = baseInfo;
+
+    // Include stored resume text when not already present
+    const storedResume = getStoredResumeText();
+    if (storedResume && !learnerInfo.toLowerCase().includes('resume')) {
+      learnerInfo = learnerInfo
+        ? `${learnerInfo}\n${storedResume}`
+        : storedResume;
+    }
+
+    // Derive persona key from the current learning-style preference
+    const style = getLearningStylePreference();
+    const personaKey = LEARNING_STYLE_TO_PERSONA[style] ?? null;
+    const personas = personasData?.personas ?? {};
+
+    if (
+      personaKey &&
+      personas[personaKey] &&
+      !learnerInfo.includes('Learning Persona:')
+    ) {
+      const dims = personas[personaKey].fslsm_dimensions;
+      const dimStr = Object.entries(dims)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ');
+      learnerInfo = `Learning Persona: ${personaKey} (initial FSLSM: ${dimStr}). ${learnerInfo}`;
+    }
+
+    if (!learnerInfo) {
+      learnerInfo = `Learning goal: ${title}.`;
+    }
+
     navigate('/skill-gap', {
       state: {
         goal: title,
-        personaKey: null,
-        learnerInformation: activeGoals[0]?.learner_profile?.learner_information ?? '',
+        personaKey,
+        learnerInformation: withLearningStyleInLearnerInformation(learnerInfo),
         isGoalManagementFlow: true,
       },
     });
-  }, [newGoalText, navigate, activeGoals]);
+  }, [newGoalText, navigate, activeGoals, selectedGoalId, personasData]);
 
   if (isLoading) {
     return (
@@ -100,7 +145,7 @@ export function GoalsPage() {
   const nextSession = currentGoal?.learning_path?.find((s) => !s.if_learned);
 
   return (
-    <div className="max-w-4xl space-y-8">
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
       {/* Header — current goal */}
       {currentGoal && (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
