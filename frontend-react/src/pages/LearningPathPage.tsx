@@ -42,7 +42,7 @@ export function LearningPathPage() {
 
   const [isScheduling, setIsScheduling] = useState(false);
   const [isAdapting, setIsAdapting] = useState(false);
-  const [isDesignBiasExpanded, setIsDesignBiasExpanded] = useState(false);
+  // const [isDesignBiasExpanded, setIsDesignBiasExpanded] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const { data: runtimeState, refetch: refetchRuntime } = useGoalRuntimeState(
