@@ -97,14 +97,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-from fastapi.staticfiles import StaticFiles
-_BACKEND_ROOT = Path(__file__).resolve().parent
-_AUDIO_DIR = _BACKEND_ROOT / "data" / "audio"
-_DIAGRAMS_DIR = _BACKEND_ROOT / "data" / "diagrams"
-_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static/audio", StaticFiles(directory=str(_AUDIO_DIR)), name="audio")
-_DIAGRAMS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static/diagrams", StaticFiles(directory=str(_DIAGRAMS_DIR)), name="diagrams")
 from pydantic import BaseModel, ValidationError
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
@@ -115,9 +107,13 @@ def _load_stores():
     store.load()
     auth_store.load()
     if search_rag_manager.verified_content_manager:
-        search_rag_manager.verified_content_manager.sync_verified_content(
-            app_config.get("verified_content", {}).get("base_dir", "resources/verified-course-content")
-        )
+        try:
+            search_rag_manager.verified_content_manager.sync_verified_content()
+        except Exception as e:
+            logger.warning(
+                f"Verified content sync failed at startup: {e}. "
+                "Retrieval will use whatever is currently in the index."
+            )
 
 
 def _parse_jsonish(value: Any, default: Any = None):
@@ -313,6 +309,8 @@ def _build_learning_content_payload(
         method_name=method_name,
         search_rag_manager=search_rag_manager,
         cancel_event=cancel_event,
+        max_quality_rounds=APP_CONFIG["content_max_quality_rounds"],
+        max_knowledge_points=APP_CONFIG["content_max_knowledge_points"],
     )
     learning_content["view_model"] = build_learning_content_view_model(
         learning_content.get("document", ""),
@@ -692,6 +690,7 @@ async def create_goal(user_id: str, request: GoalCreateRequest, current_user: st
     learner_profile = payload.pop("learner_profile", None)
     goal = store.create_goal(user_id, payload)
     if isinstance(learner_profile, dict) and learner_profile:
+        learner_profile = store.seed_new_goal_profile_shared_fields(user_id, learner_profile)
         store.upsert_profile(user_id, goal["id"], learner_profile)
         gdn = learner_profile.get("goal_display_name", "")
         if gdn:
@@ -872,13 +871,22 @@ async def _session_activity_core(request: SessionActivityRequest):
             current_session_index=request.session_index,
         )
         if next_idx is not None:
-            PREFETCH_SERVICE.enqueue_for_session(
-                user_id=request.user_id,
-                goal_id=request.goal_id,
-                session_index=next_idx,
-                trigger_source="session_start",
-                apply_cooldown=True,
-            )
+            _prefetch_delay = PREFETCH_SERVICE.prefetch_start_delay_secs()
+            _prefetch_user_id = request.user_id
+            _prefetch_goal_id = request.goal_id
+            _prefetch_next_idx = next_idx
+
+            async def _deferred_enqueue() -> None:
+                await asyncio.sleep(_prefetch_delay)
+                PREFETCH_SERVICE.enqueue_for_session(
+                    user_id=_prefetch_user_id,
+                    goal_id=_prefetch_goal_id,
+                    session_index=_prefetch_next_idx,
+                    trigger_source="session_start",
+                    apply_cooldown=True,
+                )
+
+            asyncio.create_task(_deferred_enqueue())
     return {"ok": True, "trigger": trigger}
 
 
@@ -1069,6 +1077,10 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
     session["mastery_score"] = result["score_percentage"]
     session["is_mastered"] = result["is_mastered"]
     session["mastery_threshold"] = result["threshold"]
+    session["mastery_feedback"] = {
+        "quiz_feedback": result.get("quiz_feedback", {}),
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+    }
     learning_path[request.session_index] = session
     store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
 
@@ -1088,9 +1100,12 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
         "correct_count": result["correct_count"],
         "total_count": result["total_count"],
         "session_id": session.get("id", ""),
+        "updated_session": session,
         "plan_adaptation_suggested": bool(runtime_adaptation.get("suggested", False)),
         "fslsm_adjustments": result["fslsm_adjustments"],
     }
+    if result.get("quiz_feedback"):
+        response["quiz_feedback"] = result["quiz_feedback"]
     if result["short_answer_feedback"]:
         response["short_answer_feedback"] = result["short_answer_feedback"]
     if result["open_ended_feedback"]:
@@ -1098,11 +1113,30 @@ async def evaluate_mastery(request: MasteryEvaluationRequest, current_user: str 
     return response
 
 
+@protected_router.post("/reset-mastery-attempt", summary="Clear a session's persisted mastery attempt so the learner can retake the quiz")
+async def reset_mastery_attempt(request: ResetMasteryAttemptRequest, current_user: str = Depends(get_current_user)):
+    """Clear mastery score/status/feedback for a specific session."""
+    _assert_owns(current_user, request.user_id)
+    goal = _goal_or_404(request.user_id, request.goal_id)
+
+    learning_path = goal.get("learning_path", [])
+    if request.session_index < 0 or request.session_index >= len(learning_path):
+        raise HTTPException(status_code=400, detail="Invalid session_index")
+
+    session = dict(learning_path[request.session_index])
+    for key in ("mastery_score", "is_mastered", "mastery_threshold", "mastery_feedback"):
+        session.pop(key, None)
+
+    learning_path[request.session_index] = session
+    store.patch_goal(request.user_id, request.goal_id, {"learning_path": learning_path})
+    return {"ok": True, "updated_session": session}
+
+
 @protected_router.get("/quiz-mix/{user_id}", summary="Get the SOLO Taxonomy-aligned question type distribution for a session's quiz")
 async def get_quiz_mix(user_id: str, goal_id: int, session_index: int, current_user: str = Depends(get_current_user)):
     """Return the question type counts for a session based on its proficiency level."""
     _assert_owns(current_user, user_id)
-    from utils.quiz_scorer import get_quiz_mix_for_session
+    from modules.content_generator.utils.quiz_scorer import get_quiz_mix_for_session
 
     goal = _goal_or_404(user_id, goal_id)
 
@@ -1218,9 +1252,13 @@ async def adapt_learning_path(request: AdaptLearningPathRequest, current_user: s
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Allow origins from FRONTEND_ORIGIN env var (comma-separated for multiple origins).
+# Defaults to "*" for local development. In production (ACI), set to the
+# Streamlit Community Cloud URL, e.g. "https://your-app.streamlit.app".
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("FRONTEND_ORIGIN", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1331,6 +1369,10 @@ async def get_personas():
 
 
 _prefetch_cfg = app_config.get("prefetch", {}) if hasattr(app_config, "get") else {}
+_sg_cfg = app_config.get("skill_gap", {}) if hasattr(app_config, "get") else {}
+_lp_cfg = app_config.get("learning_plan", {}) if hasattr(app_config, "get") else {}
+_cg_cfg = app_config.get("content_generation", {}) if hasattr(app_config, "get") else {}
+_cb_cfg = app_config.get("chatbot", {}) if hasattr(app_config, "get") else {}
 APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
@@ -1343,6 +1385,12 @@ APP_CONFIG = {
     "prefetch_wait_long_secs": int(_prefetch_cfg.get("wait_long_secs", 130)),
     "prefetch_cooldown_secs": int(_prefetch_cfg.get("cooldown_secs", 20)),
     "prefetch_max_workers": int(_prefetch_cfg.get("max_workers", 2)),
+    "skill_gap_max_goal_iterations": int(_sg_cfg.get("max_goal_iterations", 2)),
+    "skill_gap_max_eval_iterations": int(_sg_cfg.get("max_eval_iterations", 2)),
+    "learning_plan_max_refinements": int(_lp_cfg.get("max_refinements", 1)),
+    "content_max_quality_rounds": int(_cg_cfg.get("max_quality_rounds", 2)),
+    "content_max_knowledge_points": int(_cg_cfg.get("max_knowledge_points", 4)),
+    "chatbot_enable_media_search": bool(_cb_cfg.get("enable_media_search", True)),
     "mastery_threshold_default": 70,
     "mastery_threshold_by_proficiency": {
         "beginner": 60,
@@ -1499,6 +1547,7 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             learner_profile,
             search_rag_manager=search_rag_manager,
             safe_preference_update_fn=_safe_tutor_preference_update,
+            goal_context=request.goal_context,
             use_search=request.use_search if request.use_search is not None else True,
             top_k=request.top_k or 5,
             user_id=request.user_id,
@@ -1506,7 +1555,7 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             session_index=request.session_index,
             use_vector_retrieval=request.use_vector_retrieval,
             use_web_search=request.use_web_search,
-            use_media_search=request.use_media_search,
+            use_media_search=request.use_media_search if request.use_media_search is not None else APP_CONFIG["chatbot_enable_media_search"],
             allow_preference_updates=(
                 request.allow_preference_updates
                 if request.allow_preference_updates is not None
@@ -1523,6 +1572,9 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             updated_profile = result.get("updated_learner_profile")
             if isinstance(updated_profile, dict):
                 response_payload["updated_learner_profile"] = updated_profile
+            retrieval_trace = result.get("retrieval_trace")
+            if isinstance(retrieval_trace, dict):
+                response_payload["retrieval_trace"] = retrieval_trace
             return response_payload
         return {"response": result}
     except Exception as e:
@@ -1551,6 +1603,8 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         skill_gaps, skill_requirements = identify_skill_gap_with_llm(
             llm, learning_goal, learner_information, skill_requirements,
             search_rag_manager=search_rag_manager,
+            max_goal_iterations=APP_CONFIG["skill_gap_max_goal_iterations"],
+            max_eval_iterations=APP_CONFIG["skill_gap_max_eval_iterations"],
         )
         results = {**skill_gaps, **skill_requirements}
         return results
@@ -1866,6 +1920,7 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
             learner_profile = {}
         plan, agent_metadata = schedule_learning_path_agentic(
             llm, learner_profile, session_count,
+            max_refinements=APP_CONFIG["learning_plan_max_refinements"],
         )
         return {
             **plan,

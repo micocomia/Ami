@@ -6,10 +6,12 @@ export interface InputFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   hint?: string;
   error?: string;
   leftIcon?: ReactNode;
+  /** e.g. password visibility toggle — sits inside input on the right */
+  rightAdornment?: ReactNode;
 }
 
 export const InputField = forwardRef<HTMLInputElement, InputFieldProps>(
-  ({ label, hint, error, leftIcon, className, id, ...rest }, ref) => {
+  ({ label, hint, error, leftIcon, rightAdornment, className, id, ...rest }, ref) => {
     const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
     return (
       <div className="flex flex-col gap-1">
@@ -36,11 +38,17 @@ export const InputField = forwardRef<HTMLInputElement, InputFieldProps>(
                 ? 'border-danger-500 focus:ring-danger-500'
                 : 'border-slate-300',
               leftIcon ? 'pl-10' : undefined,
+              rightAdornment ? 'pr-10' : undefined,
               className,
             )}
             aria-invalid={!!error}
             {...rest}
           />
+          {rightAdornment && (
+            <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+              {rightAdornment}
+            </span>
+          )}
         </div>
         {hint && !error && (
           <p className="text-xs text-slate-500">{hint}</p>

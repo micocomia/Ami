@@ -4,11 +4,21 @@ import asyncio
 import re
 import uuid
 from pathlib import Path
+from typing import Optional
 
 VOICES = ["en-US-JennyNeural", "en-US-GuyNeural"]
 HOST_VOICE = VOICES[0]
-BACKEND_ROOT = Path(__file__).resolve().parents[3]
-AUDIO_DIR = BACKEND_ROOT / "data" / "audio"
+
+_blob_client: Optional[object] = None
+_audio_container: str = "ami-audio"
+
+
+def _get_blob_client():
+    global _blob_client
+    if _blob_client is None:
+        from base.blob_storage import BlobStorageClient
+        _blob_client = BlobStorageClient.from_env()
+    return _blob_client
 
 
 def _strip_markdown(text: str) -> str:
@@ -61,18 +71,16 @@ def _run_generate_segments(turns, tmp_dir: Path, voice_map: dict):
 
 def generate_tts_audio(document: str) -> str:
     """Parse dialogue turns, generate per-turn MP3s with dual voices,
-    concatenate bytes, save to data/audio/, return /static/audio/ URL.
+    concatenate bytes, upload to Azure Blob Storage, return blob URL.
 
     Args:
         document: Markdown document with **[HOST]**: / **[EXPERT]**: dialogue turns.
 
     Returns:
-        URL string of the form /static/audio/<filename>.mp3
+        Absolute Azure Blob Storage URL for the generated MP3.
     """
     import tempfile
     import random
-
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
     turns = _parse_dialogue_turns(document)
     if not turns:
@@ -81,14 +89,14 @@ def generate_tts_audio(document: str) -> str:
     shuffled = random.sample(VOICES, 2)
     voice_map = {"HOST": shuffled[0], "EXPERT": shuffled[1]}
 
-    filename = f"{uuid.uuid4().hex}.mp3"
-    output_path = AUDIO_DIR / filename
-
+    audio_bytes = b""
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
-        seg_paths = _run_generate_segments(turns, tmp_dir, voice_map)
-        with open(output_path, "wb") as out:
-            for seg in seg_paths:
-                out.write(seg.read_bytes())
+        seg_paths = _run_generate_segments(turns, Path(tmp), voice_map)
+        for seg in seg_paths:
+            audio_bytes += seg.read_bytes()
 
-    return f"/static/audio/{filename}"
+    filename = f"{uuid.uuid4().hex}.mp3"
+    blob_url = _get_blob_client().upload(
+        _audio_container, filename, audio_bytes, content_type="audio/mpeg"
+    )
+    return blob_url

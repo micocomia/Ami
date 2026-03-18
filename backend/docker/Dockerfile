@@ -18,8 +18,8 @@ RUN grep -ivE '^(pyobjc|ocrmac)' requirements.txt > requirements-docker.txt \
 # Copy application code
 COPY . .
 
-RUN mkdir -p data/users data/vectorstore
-
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV UVICORN_WORKERS=2
+
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2}"]

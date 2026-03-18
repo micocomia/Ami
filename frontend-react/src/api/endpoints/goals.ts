@@ -1,6 +1,9 @@
 /**
  * Goals endpoints: list, create, patch, delete, getRuntimeState
  * Pattern: Types → Api functions → React Query hooks
+ *
+ * This mirrors the proven implementation in `frontend-react/src/api/endpoints/goals.ts`,
+ * but uses the shared types from `@/types` and the beta axios client.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
@@ -33,7 +36,11 @@ export async function createGoalApi(userId: string, body: GoalCreateRequest): Pr
   return data;
 }
 
-export async function patchGoalApi(userId: string, goalId: number, body: GoalUpdateRequest): Promise<GoalAggregate> {
+export async function patchGoalApi(
+  userId: string,
+  goalId: number,
+  body: GoalUpdateRequest,
+): Promise<GoalAggregate> {
   const { data } = await apiClient.patch<GoalAggregate>(`goals/${userId}/${goalId}`, body);
   return data;
 }
@@ -102,3 +109,4 @@ export function useGoalRuntimeState(userId: string | undefined, goalId: number |
     refetchOnWindowFocus: false,
   });
 }
+

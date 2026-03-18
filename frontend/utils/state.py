@@ -116,8 +116,6 @@ def initialize_session_state():
 
     if "quiz_answers" not in st.session_state:
         st.session_state["quiz_answers"] = {}
-    if "mastery_status" not in st.session_state:
-        st.session_state["mastery_status"] = {}
 
     if "_state_loaded" not in st.session_state:
         try:
@@ -165,7 +163,6 @@ def clear_user_state():
         "if_simulating_feedback",
         "if_refining_path",
         "quiz_answers",
-        "mastery_status",
     ]:
         st.session_state.pop(k, None)
     # Clear ancillary keys not in PERSIST_KEYS

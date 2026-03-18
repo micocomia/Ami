@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
+from modules.content_generator.utils.quiz_scorer import compute_quiz_score, get_mastery_threshold_for_session
 
 
 THRESHOLD_MAP = {

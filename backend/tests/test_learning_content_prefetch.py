@@ -45,32 +45,19 @@ def _wait_until(predicate, timeout: float = 2.0) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_store(tmp_path, monkeypatch):
-    data_dir = tmp_path / "store_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
-    monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
-    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
-    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
-    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
-    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
-    monkeypatch.setattr(store, "_profiles", {})
-    monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_profile_snapshots", {})
-    monkeypatch.setattr(store, "_goals", {})
-    monkeypatch.setattr(store, "_learning_content_cache", {})
-    monkeypatch.setattr(store, "_session_activity", {})
-    monkeypatch.setattr(store, "_mastery_history", {})
-
-
-@pytest.fixture(autouse=True)
 def _reset_prefetch_state():
     import main
 
+    # Set start_delay_secs=0 so existing tests that trigger session-activity
+    # don't have to wait for the deferred prefetch window.
+    _saved_delay = main.APP_CONFIG.get("prefetch_start_delay_secs")
+    main.APP_CONFIG["prefetch_start_delay_secs"] = 0
     main.PREFETCH_SERVICE.reset_for_test()
     yield
+    if _saved_delay is None:
+        main.APP_CONFIG.pop("prefetch_start_delay_secs", None)
+    else:
+        main.APP_CONFIG["prefetch_start_delay_secs"] = _saved_delay
 
 
 @pytest.fixture()
@@ -532,3 +519,26 @@ def test_prefetch_service_utility_methods():
     before = [_session("Session 1", learned=True), _session("Session 2", title="A"), _session("Session 3", title="B")]
     after = [_session("Session 1", learned=True), _session("Session 2", title="A2"), _session("Session 3", title="B")]
     assert service.changed_unlearned_indices(before, after) == [1]
+
+
+@patch("main.get_llm", return_value=MagicMock())
+@patch("main.generate_learning_content_with_llm", side_effect=_fake_learning_content)
+def test_session_start_deferred_prefetch_does_not_enqueue_immediately(mock_generate, _mock_llm, client, monkeypatch):
+    """When start_delay_secs > 0, the next-session prefetch is not enqueued immediately
+    after a session-activity start event, but is triggered after the delay elapses."""
+    import main
+
+    # Override delay to a long value so the prefetch never fires during the test
+    monkeypatch.setitem(main.APP_CONFIG, "prefetch_start_delay_secs", 60)
+    goal_id = _seed_goal(learning_path=[_session("Session 1"), _session("Session 2")])
+
+    resp = client.post(
+        "/v1/session-activity",
+        json={"user_id": "alice", "goal_id": goal_id, "session_index": 0, "event_type": "start"},
+    )
+    assert resp.status_code == 200
+
+    # Content for session 1 (index 1) must NOT be enqueued immediately
+    time.sleep(0.2)
+    assert store.get_learning_content("alice", goal_id, 1) is None
+    assert mock_generate.call_count == 0

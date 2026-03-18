@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AuthTokenResponse } from '@/types';
+import { ensureMemberSinceRecorded } from '@/lib/memberSince';
 
 const USER_ID_KEY = 'ami_user_id';
 const AUTH_TOKEN_KEY = 'auth_token';
@@ -32,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    ensureMemberSinceRecorded(data.username);
     setUserId(data.username);
   }, []);
 
@@ -58,3 +60,4 @@ export function useAuthContext(): AuthContextValue {
   if (!ctx) throw new Error('useAuthContext must be used within AuthProvider');
   return ctx;
 }
+

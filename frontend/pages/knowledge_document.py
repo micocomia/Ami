@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -11,8 +12,8 @@ from utils.request_api import (
     generate_learning_content,
     get_learning_content,
     post_session_activity,
+    reset_mastery_attempt,
     submit_content_feedback,
-    audit_content_bias,
 )
 from utils.format import inject_citation_tooltips
 from utils.state import get_current_session_uid, get_selected_goal, save_persistent_state
@@ -22,7 +23,9 @@ from utils.document_parser import parse_document_for_section_view
 from components.content_bias import render_content_bias_banners
 
 
-st.markdown('<style>' + open('./assets/css/main.css').read() + '</style>', unsafe_allow_html=True)
+css_path = os.path.join(os.path.dirname(__file__), "../assets/css/main.css")
+with open(css_path) as f:
+    st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
 
 def _current_backend_public_base() -> str:
@@ -154,8 +157,7 @@ def render_learning_content():
 
             # Mastery gating for bottom Complete Session button
             nav_mode_bottom = session_info_bottom.get("navigation_mode", "linear")
-            mastery_info_bottom = st.session_state.get("mastery_status", {}).get(session_uid, {})
-            is_mastered_bottom = mastery_info_bottom.get("is_mastered", False)
+            is_mastered_bottom = bool(session_info_bottom.get("is_mastered", False))
             if nav_mode_bottom == "linear":
                 complete_disabled_bottom = (
                     complete_button_status
@@ -262,8 +264,7 @@ def render_session_details(goal):
 
         # Mastery gating for sequential (linear) learners
         navigation_mode = session_info.get("navigation_mode", "linear")
-        mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
-        is_mastered = mastery_info.get("is_mastered", False)
+        is_mastered = bool(session_info.get("is_mastered", False))
 
         if navigation_mode == "linear":
             complete_disabled = (
@@ -299,7 +300,7 @@ def render_content_preparation(goal):
     session_uid = get_current_session_uid()
     if use_mock_data:
         st.warning("Using mock data for knowledge document.")
-        file_path = "./assets/data_example/knowledge_document.json"
+        file_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/knowledge_document.json")
         learning_content = load_knowledge_point_content(file_path)
         _cache_learning_content(session_uid, learning_content)
         try:
@@ -516,16 +517,38 @@ def render_document_content_by_document(document):
         st.markdown(f"<a name='{anchor}'></a>", unsafe_allow_html=True)
 
 
-def render_questions(quiz_data):
-    """Render quiz questions in Submit All mode (no per-question feedback).
+def _apply_updated_session(updated_session):
+    current_goal = get_selected_goal()
+    selected_sid = st.session_state.get("selected_session_id")
+    if not isinstance(current_goal, dict):
+        return False
+    learning_path = current_goal.get("learning_path", [])
+    if not isinstance(selected_sid, int) or selected_sid < 0 or selected_sid >= len(learning_path):
+        return False
+    if not isinstance(updated_session, dict):
+        return False
+    learning_path[selected_sid] = updated_session
+    return True
 
-    All answers are collected and submitted together for mastery evaluation.
-    """
+
+def _get_current_session_info():
+    current_goal = get_selected_goal()
+    selected_sid = st.session_state.get("selected_session_id")
+    if not isinstance(current_goal, dict):
+        return {}
+    learning_path = current_goal.get("learning_path", [])
+    if not isinstance(selected_sid, int) or selected_sid < 0 or selected_sid >= len(learning_path):
+        return {}
+    session_info = learning_path[selected_sid]
+    return session_info if isinstance(session_info, dict) else {}
+
+
+def render_questions(quiz_data):
+    """Render quiz questions in submit-all mode with backend-persisted mastery state."""
     st.subheader("Test Your Knowledge")
 
     session_uid = get_current_session_uid()
 
-    # Initialize answer storage for this session
     if session_uid not in st.session_state.get("quiz_answers", {}):
         st.session_state.setdefault("quiz_answers", {})[session_uid] = {
             "single_choice_questions": [None] * len(quiz_data.get("single_choice_questions", [])),
@@ -537,22 +560,25 @@ def render_questions(quiz_data):
 
     answers = st.session_state["quiz_answers"][session_uid]
     q_num = 0
+    session_info = _get_current_session_info()
+    quiz_submitted = session_info.get("mastery_score") is not None
+    is_mastered = bool(session_info.get("is_mastered", False))
+    mastery_score = session_info.get("mastery_score", 0.0)
+    mastery_threshold = session_info.get("mastery_threshold", 70.0)
 
-    # Check if quiz has been submitted and mastered already
-    mastery_info = st.session_state.get("mastery_status", {}).get(session_uid, {})
-    quiz_submitted = mastery_info.get("score") is not None
-
-    # Single choice questions
     for i, q in enumerate(quiz_data.get("single_choice_questions", [])):
         q_num += 1
         st.write(f"**{q_num}. {q['question']}**")
         selected = st.radio(
-            "Options", q["options"], key=f"sc_{session_uid}_{i}",
-            index=None, label_visibility="hidden", disabled=quiz_submitted,
+            "Options",
+            q["options"],
+            key=f"sc_{session_uid}_{i}",
+            index=None,
+            label_visibility="hidden",
+            disabled=quiz_submitted,
         )
         answers["single_choice_questions"][i] = selected
 
-    # Multiple choice questions
     for i, q in enumerate(quiz_data.get("multiple_choice_questions", [])):
         q_num += 1
         st.write(f"**{q_num}. {q['question']}** (Select all that apply)")
@@ -562,27 +588,30 @@ def render_questions(quiz_data):
                 selected.append(option)
         answers["multiple_choice_questions"][i] = selected
 
-    # True/False questions
     for i, q in enumerate(quiz_data.get("true_false_questions", [])):
         q_num += 1
         st.write(f"**{q_num}. {q['question']}**")
         selected = st.radio(
-            "True or False?", ["True", "False"], key=f"tf_{session_uid}_{i}",
-            index=None, label_visibility="hidden", disabled=quiz_submitted,
+            "True or False?",
+            ["True", "False"],
+            key=f"tf_{session_uid}_{i}",
+            index=None,
+            label_visibility="hidden",
+            disabled=quiz_submitted,
         )
         answers["true_false_questions"][i] = selected
 
-    # Short answer questions
     for i, q in enumerate(quiz_data.get("short_answer_questions", [])):
         q_num += 1
         st.write(f"**{q_num}. {q['question']}**")
         user_answer = st.text_input(
-            "Your Answer", key=f"sa_{session_uid}_{i}",
-            label_visibility="hidden", disabled=quiz_submitted,
+            "Your Answer",
+            key=f"sa_{session_uid}_{i}",
+            label_visibility="hidden",
+            disabled=quiz_submitted,
         )
         answers["short_answer_questions"][i] = user_answer if user_answer else None
 
-    # Open-ended questions (Sprint 3: SOLO taxonomy — Relational / Extended Abstract)
     if quiz_data.get("open_ended_questions"):
         st.divider()
         st.caption("The following questions require a detailed written response and will be evaluated using the SOLO Taxonomy.")
@@ -591,8 +620,11 @@ def render_questions(quiz_data):
         st.write(f"**{q_num}. {q['question']}**")
         st.caption("Write a detailed response demonstrating your understanding.")
         user_answer = st.text_area(
-            "Your Response", key=f"oe_{session_uid}_{i}",
-            height=150, label_visibility="hidden", disabled=quiz_submitted,
+            "Your Response",
+            key=f"oe_{session_uid}_{i}",
+            height=150,
+            label_visibility="hidden",
+            disabled=quiz_submitted,
         )
         answers["open_ended_questions"][i] = user_answer if user_answer else None
 
@@ -601,65 +633,63 @@ def render_questions(quiz_data):
     except Exception:
         pass
 
-    # Show mastery result or submit button
-    if mastery_info.get("is_mastered"):
+    if is_mastered:
         st.success(
-            f"Mastery achieved! Score: {mastery_info['score']:.0f}% "
-            f"(threshold: {mastery_info.get('threshold', 70):.0f}%)"
+            f"Mastery achieved! Score: {float(mastery_score):.0f}% "
+            f"(threshold: {float(mastery_threshold):.0f}%)"
         )
-        # Show explanations after mastery
-        _render_quiz_explanations(quiz_data, mastery_info)
-    elif quiz_submitted and not mastery_info.get("is_mastered"):
+        _render_quiz_explanations(quiz_data, session_info)
+        return
+
+    if quiz_submitted and not is_mastered:
         st.warning(
-            f"Score: {mastery_info['score']:.0f}%. "
-            f"Need {mastery_info.get('threshold', 70):.0f}% to master this session. "
+            f"Score: {float(mastery_score):.0f}%. "
+            f"Need {float(mastery_threshold):.0f}% to master this session. "
             f"Review the material and try again."
         )
-        # Show explanations after attempt
-        _render_quiz_explanations(quiz_data, mastery_info)
+        _render_quiz_explanations(quiz_data, session_info)
         if st.button("Retake Quiz", icon=":material/refresh:", type="primary"):
-            st.session_state["quiz_answers"].pop(session_uid, None)
-            st.session_state["mastery_status"].pop(session_uid, None)
-            try:
-                save_persistent_state()
-            except Exception:
-                pass
-            st.rerun()
-    else:
-        if st.button("Submit Quiz", type="primary", icon=":material/check_circle:"):
-            with st.spinner("Evaluating your responses..."):
-                result = evaluate_mastery(
-                    user_id=st.session_state.get("userId", ""),
-                    goal_id=st.session_state["selected_goal_id"],
-                    session_index=st.session_state["selected_session_id"],
-                    quiz_answers=answers,
-                )
-            if result:
-                st.session_state.setdefault("mastery_status", {})[session_uid] = {
-                    "score": result["score_percentage"],
-                    "is_mastered": result["is_mastered"],
-                    "threshold": result["threshold"],
-                    "short_answer_feedback": result.get("short_answer_feedback", []),
-                    "open_ended_feedback": result.get("open_ended_feedback", []),
-                }
-                # Mirror mastery data onto the learning path session so it
-                # survives save_persistent_state() and is available for the
-                # adapt-learning-path endpoint.
-                current_goal = get_selected_goal()
-                if not isinstance(current_goal, dict):
-                    st.error("No active goal found. Please reselect your goal and retry.")
-                    return
-                session_obj = current_goal["learning_path"][st.session_state["selected_session_id"]]
-                session_obj["mastery_score"] = result["score_percentage"]
-                session_obj["is_mastered"] = result["is_mastered"]
-                session_obj["mastery_threshold"] = result["threshold"]
+            reset_result = reset_mastery_attempt(
+                user_id=st.session_state.get("userId", ""),
+                goal_id=st.session_state["selected_goal_id"],
+                session_index=st.session_state["selected_session_id"],
+            )
+            if reset_result:
+                _apply_updated_session(reset_result.get("updated_session"))
+                st.session_state["quiz_answers"].pop(session_uid, None)
                 try:
                     save_persistent_state()
                 except Exception:
                     pass
                 st.rerun()
             else:
-                st.error("Failed to evaluate quiz. Please try again.")
+                st.error("Failed to reset quiz attempt. Please try again.")
+        return
+
+    if st.button("Submit Quiz", type="primary", icon=":material/check_circle:"):
+        with st.spinner("Evaluating your responses..."):
+            result = evaluate_mastery(
+                user_id=st.session_state.get("userId", ""),
+                goal_id=st.session_state["selected_goal_id"],
+                session_index=st.session_state["selected_session_id"],
+                quiz_answers=answers,
+            )
+        if result:
+            if not _apply_updated_session(result.get("updated_session")):
+                session_obj = _get_current_session_info()
+                session_obj["mastery_score"] = result.get("score_percentage")
+                session_obj["is_mastered"] = result.get("is_mastered", False)
+                session_obj["mastery_threshold"] = result.get("threshold", 70)
+                session_obj["mastery_feedback"] = {
+                    "quiz_feedback": result.get("quiz_feedback", {}),
+                }
+            try:
+                save_persistent_state()
+            except Exception:
+                pass
+            st.rerun()
+        else:
+            st.error("Failed to evaluate quiz. Please try again.")
 
 
 _SOLO_LEVEL_COLORS = {
@@ -679,46 +709,96 @@ _SOLO_LEVEL_LABELS = {
 }
 
 
-def _render_quiz_explanations(quiz_data, mastery_info=None):
-    """Show quiz explanations and SOLO-level feedback after submission."""
+def _display_answer(answer):
+    if answer is None:
+        return "No answer provided."
+    if isinstance(answer, list):
+        return ", ".join(str(item) for item in answer) if answer else "No answer provided."
+    text = str(answer).strip()
+    return text if text else "No answer provided."
+
+
+def _render_quiz_explanations(quiz_data, session_info=None):
+    """Show question explanations and learner-vs-correct comparisons after submission."""
+    session_info = session_info if isinstance(session_info, dict) else {}
+    mastery_feedback = session_info.get("mastery_feedback", {})
+    if not isinstance(mastery_feedback, dict):
+        mastery_feedback = {}
+    quiz_feedback = mastery_feedback.get("quiz_feedback", {})
+    if not isinstance(quiz_feedback, dict):
+        quiz_feedback = {}
+
     with st.expander("View Explanations", expanded=False, icon=":material/info:"):
         q_num = 0
-        for q in quiz_data.get("single_choice_questions", []):
+        for i, q in enumerate(quiz_data.get("single_choice_questions", [])):
             q_num += 1
-            correct = q["options"][q["correct_option"]]
-            st.write(f"**Q{q_num}.** Correct: {correct}")
-            st.write(f"  {q['explanation']}")
-        for q in quiz_data.get("multiple_choice_questions", []):
-            q_num += 1
-            correct = [q["options"][idx] for idx in q["correct_options"]]
-            st.write(f"**Q{q_num}.** Correct: {', '.join(correct)}")
-            st.write(f"  {q['explanation']}")
-        for q in quiz_data.get("true_false_questions", []):
-            q_num += 1
-            correct = "True" if q["correct_answer"] else "False"
-            st.write(f"**Q{q_num}.** Correct: {correct}")
-            st.write(f"  {q['explanation']}")
+            fb = (quiz_feedback.get("single_choice_questions", []) or [])
+            item = fb[i] if i < len(fb) else {}
+            st.write(f"**Q{q_num}.**")
+            st.write(f"Your answer: {_display_answer(item.get('user_answer'))}")
+            st.write(f"Correct answer: {_display_answer(item.get('correct_answer'))}")
+            if item.get("is_correct"):
+                st.markdown("<span style='color:#22CC66'>✓ Correct</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color:#FF4444'>✗ Incorrect</span>", unsafe_allow_html=True)
+                if item.get("reason"):
+                    st.write(f"Why wrong: {item.get('reason')}")
+            st.write(f"{q.get('explanation', '')}")
 
-        # Short answer: show expected answer plus LLM semantic evaluation feedback
-        sa_feedback = (mastery_info or {}).get("short_answer_feedback", [])
+        for i, q in enumerate(quiz_data.get("multiple_choice_questions", [])):
+            q_num += 1
+            fb = (quiz_feedback.get("multiple_choice_questions", []) or [])
+            item = fb[i] if i < len(fb) else {}
+            st.write(f"**Q{q_num}.**")
+            st.write(f"Your answer: {_display_answer(item.get('user_answer'))}")
+            st.write(f"Correct answer: {_display_answer(item.get('correct_answer'))}")
+            if item.get("is_correct"):
+                st.markdown("<span style='color:#22CC66'>✓ Correct</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color:#FF4444'>✗ Incorrect</span>", unsafe_allow_html=True)
+                if item.get("reason"):
+                    st.write(f"Why wrong: {item.get('reason')}")
+            st.write(f"{q.get('explanation', '')}")
+
+        for i, q in enumerate(quiz_data.get("true_false_questions", [])):
+            q_num += 1
+            fb = (quiz_feedback.get("true_false_questions", []) or [])
+            item = fb[i] if i < len(fb) else {}
+            st.write(f"**Q{q_num}.**")
+            st.write(f"Your answer: {_display_answer(item.get('user_answer'))}")
+            st.write(f"Correct answer: {_display_answer(item.get('correct_answer'))}")
+            if item.get("is_correct"):
+                st.markdown("<span style='color:#22CC66'>✓ Correct</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color:#FF4444'>✗ Incorrect</span>", unsafe_allow_html=True)
+                if item.get("reason"):
+                    st.write(f"Why wrong: {item.get('reason')}")
+            st.write(f"{q.get('explanation', '')}")
+
+        sa_feedback = (quiz_feedback.get("short_answer_questions", []) or [])
         for i, q in enumerate(quiz_data.get("short_answer_questions", [])):
             q_num += 1
-            st.write(f"**Q{q_num}.** Expected: {q['expected_answer']}")
-            st.write(f"  {q['explanation']}")
-            if i < len(sa_feedback):
-                fb = sa_feedback[i]
-                icon = "✓" if fb.get("is_correct") else "✗"
-                color = "#22CC66" if fb.get("is_correct") else "#FF4444"
-                st.markdown(
-                    f"<span style='color:{color}'>{icon} {fb.get('feedback', '')}</span>",
-                    unsafe_allow_html=True,
-                )
+            item = sa_feedback[i] if i < len(sa_feedback) else {}
+            st.write(f"**Q{q_num}.**")
+            st.write(f"Your answer: {_display_answer(item.get('user_answer'))}")
+            st.write(f"Correct answer: {_display_answer(item.get('correct_answer'))}")
+            if item.get("is_correct"):
+                st.markdown("<span style='color:#22CC66'>✓ Correct</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color:#FF4444'>✗ Incorrect</span>", unsafe_allow_html=True)
+                if item.get("reason"):
+                    st.write(f"Why wrong: {item.get('reason')}")
+            st.write(f"{q.get('explanation', '')}")
+            if item.get("feedback"):
+                st.write(f"Feedback: {item.get('feedback')}")
 
-        # Open-ended: show rubric and SOLO-level evaluation feedback
-        oe_feedback = (mastery_info or {}).get("open_ended_feedback", [])
+        oe_feedback = (quiz_feedback.get("open_ended_questions", []) or [])
         for i, q in enumerate(quiz_data.get("open_ended_questions", [])):
             q_num += 1
             st.write(f"**Q{q_num}.** (Open-ended)")
+            item = oe_feedback[i] if i < len(oe_feedback) else {}
+            st.write(f"Your answer: {_display_answer(item.get('user_answer'))}")
+            st.write(f"Reference answer: {_display_answer(item.get('reference_answer'))}")
             with st.container(border=True):
                 st.caption("Rubric")
                 st.write(q.get("rubric", ""))
@@ -726,17 +806,16 @@ def _render_quiz_explanations(quiz_data, mastery_info=None):
                     st.caption("Example answer")
                     st.write(q["example_answer"])
             if i < len(oe_feedback):
-                fb = oe_feedback[i]
-                solo_level = fb.get("solo_level", "")
-                score = fb.get("score", 0.0)
-                label = _SOLO_LEVEL_LABELS.get(solo_level, solo_level.title())
+                solo_level = str(item.get("solo_level", ""))
+                score = float(item.get("score", 0.0))
+                label = _SOLO_LEVEL_LABELS.get(solo_level, solo_level.title() if solo_level else "")
                 color = _SOLO_LEVEL_COLORS.get(solo_level, "#999999")
                 st.markdown(
                     f"**SOLO Level:** <span style='color:{color};font-weight:bold'>{label}</span> "
                     f"— Score: {score:.0%}",
                     unsafe_allow_html=True,
                 )
-                st.write(f"Feedback: {fb.get('feedback', '')}")
+                st.write(f"Feedback: {item.get('feedback', '')}")
 
 def render_content_feedback_form(goal):
     st.header("🌟 Session Feedback") 

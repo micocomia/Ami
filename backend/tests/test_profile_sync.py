@@ -14,30 +14,6 @@ from utils import store
 
 
 # ---------------------------------------------------------------------------
-# Fixtures – redirect store to a temporary directory (same pattern as test_store_and_auth.py)
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def _isolate_store(tmp_path, monkeypatch):
-    """Point store module at a temp directory and reset its in-memory state."""
-    data_dir = tmp_path / "store_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
-    monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
-    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
-    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
-    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
-    monkeypatch.setattr(store, "_profiles", {})
-    monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_goals", {})
-    monkeypatch.setattr(store, "_learning_content_cache", {})
-    monkeypatch.setattr(store, "_session_activity", {})
-    monkeypatch.setattr(store, "_mastery_history", {})
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -219,6 +195,49 @@ class TestMergeSharedProfileFields:
         assert dims["fslsm_input"] == -0.4
         assert dims["fslsm_understanding"] == 0.9
 
+    def test_seed_new_goal_profile_inherits_shared_preferences(self):
+        """New-goal creation should inherit the user's existing FSLSM dimensions."""
+        existing_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": -0.8,
+                "fslsm_perception": 0.6,
+                "fslsm_input": -0.4,
+                "fslsm_understanding": 0.9,
+            }
+        }
+        existing_behavioral = {"engagement_level": "high", "session_frequency": "daily"}
+        fresh_prefs = {
+            "fslsm_dimensions": {
+                "fslsm_processing": 0.0,
+                "fslsm_perception": 0.0,
+                "fslsm_input": 0.0,
+                "fslsm_understanding": 0.0,
+            }
+        }
+        store.upsert_profile(
+            "alice",
+            0,
+            _make_profile(
+                learning_preferences=existing_prefs,
+                behavioral_patterns=existing_behavioral,
+            ),
+        )
+
+        seeded = store.seed_new_goal_profile_shared_fields(
+            "alice",
+            _make_profile(
+                learning_preferences=fresh_prefs,
+                behavioral_patterns={"engagement_level": "low"},
+            ),
+        )
+
+        dims = seeded["learning_preferences"]["fslsm_dimensions"]
+        assert dims["fslsm_processing"] == -0.8
+        assert dims["fslsm_perception"] == 0.6
+        assert dims["fslsm_input"] == -0.4
+        assert dims["fslsm_understanding"] == 0.9
+        assert seeded["behavioral_patterns"]["engagement_level"] == "high"
+
 
 # ===================================================================
 # TestPropagatePreferences
@@ -327,3 +346,48 @@ class TestSyncEndpoint:
         """Returns 404 if target goal has no profile."""
         resp = client.post("/v1/sync-profile/alice/99")
         assert resp.status_code == 404
+
+    def test_create_goal_endpoint_inherits_existing_shared_preferences(self, client):
+        """POST /goals should seed the new goal profile from existing shared prefs."""
+        store.upsert_profile(
+            "alice",
+            0,
+            _make_profile(
+                learning_preferences={
+                    "fslsm_dimensions": {
+                        "fslsm_processing": -0.8,
+                        "fslsm_perception": 0.6,
+                        "fslsm_input": -0.4,
+                        "fslsm_understanding": 0.9,
+                    }
+                },
+                behavioral_patterns={"engagement_level": "high"},
+            ),
+        )
+
+        resp = client.post(
+            "/v1/goals/alice",
+            json={
+                "learning_goal": "Second goal",
+                "learner_profile": _make_profile(
+                    learning_preferences={
+                        "fslsm_dimensions": {
+                            "fslsm_processing": 0.0,
+                            "fslsm_perception": 0.0,
+                            "fslsm_input": 0.0,
+                            "fslsm_understanding": 0.0,
+                        }
+                    },
+                    behavioral_patterns={"engagement_level": "low"},
+                ),
+            },
+        )
+
+        assert resp.status_code == 200
+        created_profile = resp.json()["learner_profile"]
+        dims = created_profile["learning_preferences"]["fslsm_dimensions"]
+        assert dims["fslsm_processing"] == -0.8
+        assert dims["fslsm_perception"] == 0.6
+        assert dims["fslsm_input"] == -0.4
+        assert dims["fslsm_understanding"] == 0.9
+        assert created_profile["behavioral_patterns"]["engagement_level"] == "high"

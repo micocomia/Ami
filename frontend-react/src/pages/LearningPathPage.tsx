@@ -2,24 +2,47 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui';
 import { SessionCard } from '@/components/learning/SessionCard';
+import { PathGenerationLoading } from '@/components/learning/PathGenerationLoading';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
 import { useGoalsContext } from '@/context/GoalsContext';
-import { useActiveGoal } from '@/hooks/useActiveGoal';
+import { useActiveGoal } from '@/context/GoalsContext';
 import { useAppConfig } from '@/api/endpoints/config';
 import { useGoalRuntimeState, patchGoalApi } from '@/api/endpoints/goals';
 import { scheduleLearningPathAgenticApi, adaptLearningPathApi } from '@/api/endpoints/learningPath';
 import { sessionActivityApi } from '@/api/endpoints/content';
 
+const LEARNING_PATH_LOADING = {
+  title: 'Building your learning path',
+  steps: [
+    'Analyzing your skill gaps...',
+    'Reviewing weak knowledge areas...',
+    'Matching the right difficulty level...',
+    'Building your personalized learning path...',
+    'Finalizing your next best steps...',
+  ],
+  tips: [
+    'Short, frequent review sessions usually work better than one long session.',
+    'Practice the hardest items first when your attention is highest.',
+    'Mixing reading, listening, and recall improves retention.',
+    'Repeating a concept in different contexts strengthens memory.',
+    'Small daily progress is usually better than occasional cramming.',
+    'Teaching what you learn to someone else deepens understanding.',
+    'Taking breaks between study blocks boosts long-term recall.',
+  ],
+} as const;
+
 export function LearningPathPage() {
   const navigate = useNavigate();
   const { userId } = useAuthContext();
-  const { goals, selectedGoalId, setSelectedGoalId, refreshGoals, updateGoal } = useGoalsContext();
+  const { goals, selectedGoalId, setSelectedGoalId, refreshGoals, updateGoal, isLoading: goalsLoading } =
+    useGoalsContext();
   const { data: config } = useAppConfig();
-  const activeGoal = useActiveGoal();
+  const { activeGoal } = useActiveGoal();
 
   const [isScheduling, setIsScheduling] = useState(false);
   const [isAdapting, setIsAdapting] = useState(false);
+  const [isDesignBiasExpanded, setIsDesignBiasExpanded] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const { data: runtimeState, refetch: refetchRuntime } = useGoalRuntimeState(
@@ -85,9 +108,13 @@ export function LearningPathPage() {
       new_learner_profile: JSON.stringify(activeGoal.learner_profile ?? {}),
     })
       .then(async (result) => {
-        if (result.adaptation?.status === 'applied' && result.learning_path) {
+        const r = result as typeof result & {
+          adaptation?: { status?: string };
+          learning_path?: unknown;
+        };
+        if (r.adaptation?.status === 'applied' && r.learning_path) {
           const updatedGoal = await patchGoalApi(userId, activeGoal.id, {
-            learning_path: result.learning_path,
+            learning_path: r.learning_path,
           });
           updateGoal(activeGoal.id, updatedGoal);
           void refetchRuntime();
@@ -107,16 +134,28 @@ export function LearningPathPage() {
         session_index: sessionIndex,
         event_type: 'start',
       });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     navigate('/learning-session', { state: { goalId: activeGoal.id, sessionIndex } });
   };
 
   const learningPath = activeGoal?.learning_path ?? [];
-  const evaluation = activeGoal?.plan_agent_metadata?.evaluation;
   const fslsmInput = activeGoal?.learner_profile?.learning_preferences?.fslsm_dimensions?.fslsm_input;
   const threshold = config?.fslsm_activation_threshold ?? 0.3;
   const showModuleMap = typeof fslsmInput === 'number' && fslsmInput <= -threshold;
   const activeGoals = goals.filter((g) => !g.is_deleted);
+
+  if (goalsLoading) {
+    return (
+      <div className="max-w-3xl space-y-4">
+        <div className="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3 text-sm text-primary-800 flex items-center gap-2">
+          <span className="inline-block w-4 h-4 border-2 border-primary-400 border-t-transparent rounded-full animate-spin shrink-0" />
+          Loading your goals…
+        </div>
+      </div>
+    );
+  }
 
   if (!activeGoal) {
     return (
@@ -127,30 +166,51 @@ export function LearningPathPage() {
     );
   }
 
+  const goalTitle =
+    (activeGoal.learner_profile?.goal_display_name as string | undefined) ?? activeGoal.learning_goal;
+
+  if (isScheduling && learningPath.length === 0) {
+    return (
+      <PathGenerationLoading
+        title={LEARNING_PATH_LOADING.title}
+        steps={LEARNING_PATH_LOADING.steps}
+        tips={LEARNING_PATH_LOADING.tips}
+        goalTitle={goalTitle}
+      />
+    );
+  }
+
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">Learning Path</h2>
-          <p className="mt-1 text-sm text-slate-500 line-clamp-2">
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
+      {/* Header: Current goal + Goal dropdown */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <p className="text-base font-medium text-slate-800">
+          Current Goal:{' '}
+          <span className="text-slate-900">
             {(activeGoal.learner_profile?.goal_display_name as string | undefined) ?? activeGoal.learning_goal}
-          </p>
-        </div>
+          </span>
+        </p>
         {activeGoals.length > 1 && (
-          <select
-            value={selectedGoalId ?? ''}
-            onChange={(e) => setSelectedGoalId(Number(e.target.value))}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-400 max-w-[200px]"
-          >
-            {activeGoals.map((g) => (
-              <option key={g.id} value={g.id}>
-                {((g.learner_profile?.goal_display_name as string | undefined) ?? g.learning_goal).slice(0, 40)}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedGoalId ?? ''}
+              onChange={(e) => setSelectedGoalId(Number(e.target.value))}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-400 max-w-[200px]"
+            >
+              {activeGoals.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {((g.learner_profile?.goal_display_name as string | undefined) ?? g.learning_goal).slice(0, 40)}
+                </option>
+              ))}
+            </select>
+            <Button variant="secondary" size="sm" className="shrink-0" onClick={refreshGoals}>
+              Refresh
+            </Button>
+          </div>
         )}
       </div>
 
+      {/* Schedule / adaptation banners */}
       {isScheduling && (
         <div className="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3 text-sm text-primary-800 flex items-center gap-2">
           <span className="inline-block w-4 h-4 border-2 border-primary-400 border-t-transparent rounded-full animate-spin shrink-0" />
@@ -176,88 +236,113 @@ export function LearningPathPage() {
           {scheduleError}
           <button
             className="text-red-600 underline text-xs shrink-0"
-            onClick={() => { hasScheduledRef.current = false; setScheduleError(null); }}
+            onClick={() => {
+              hasScheduledRef.current = false;
+              setScheduleError(null);
+            }}
           >
             Retry
           </button>
         </div>
       )}
 
-      {evaluation && (
-        <div className={cn(
-          'rounded-lg border px-4 py-3 text-sm',
-          evaluation.pass
-            ? 'bg-green-50 border-green-200 text-green-800'
-            : 'bg-amber-50 border-amber-200 text-amber-800',
-        )}>
-          <p className="font-medium mb-1">
-            Plan Quality: {evaluation.pass ? 'Approved' : 'Needs Review'}
-          </p>
-          {evaluation.feedback_summary && (
-            <p className="text-xs">{evaluation.feedback_summary}</p>
-          )}
-        </div>
-      )}
-
-      {learningPath.length === 0 && !isScheduling ? (
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
-          No sessions yet. Your learning path will appear here once generated.
-        </div>
-      ) : showModuleMap ? (
-        <div className="space-y-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mb-3">Module View</p>
-          {learningPath.map((session, idx) => {
-            const runtime = runtimeState?.sessions.find((s) => s.session_index === idx);
-            return (
-              <div key={(session.id as string | undefined) ?? idx} className="flex items-start gap-4">
-                <div className="flex flex-col items-center">
-                  <div className={cn(
-                    'w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border-2 shrink-0',
-                    runtime?.if_learned
-                      ? 'border-green-400 bg-green-100 text-green-700'
-                      : runtime?.is_locked
-                      ? 'border-slate-200 bg-slate-50 text-slate-400'
-                      : 'border-primary-400 bg-primary-50 text-primary-700',
-                  )}>
-                    {idx + 1}
-                  </div>
-                  {idx < learningPath.length - 1 && <div className="w-0.5 h-6 bg-slate-200 mt-1" />}
+      {/* Two columns: Session list | Overall Progress-ish card */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Session list */}
+        <div className="flex-1 space-y-3">
+          {learningPath.length === 0 && !isScheduling ? (
+            hasScheduledRef.current ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center text-slate-600 text-sm space-y-3">
+                <p className="font-medium text-slate-800">
+                  We couldn’t finish building your learning path.
+                </p>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  This can happen if the server took too long or the connection was interrupted. You can refresh your goals or come back and try again in a moment.
+                </p>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <Button size="sm" onClick={refreshGoals}>
+                    Refresh goals
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => navigate('/goals')}>
+                    Back to goals
+                  </Button>
                 </div>
-                <div className="flex-1 pb-4">
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
+                No sessions yet. Your learning path will appear here once generated.
+              </div>
+            )
+          ) : showModuleMap ? (
+            <div className="space-y-1">
+              {learningPath.map((session, idx) => {
+                const runtime = runtimeState?.sessions.find((s) => s.session_index === idx);
+                return (
+                  <div key={(session.id as string | undefined) ?? idx} className="flex items-start gap-4">
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={cn(
+                          'w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border-2 shrink-0',
+                          runtime?.if_learned
+                            ? 'border-green-400 bg-green-100 text-green-700'
+                            : runtime?.is_locked
+                            ? 'border-slate-200 bg-slate-50 text-slate-400'
+                            : 'border-primary-400 bg-primary-50 text-primary-700',
+                        )}
+                      >
+                        {idx + 1}
+                      </div>
+                      {idx < learningPath.length - 1 && <div className="w-0.5 h-6 bg-slate-200 mt-1" />}
+                    </div>
+                    <div className="flex-1 pb-4">
+                      <SessionCard
+                        index={idx}
+                        pathSession={session}
+                        runtimeSession={runtime}
+                        onLaunch={() => handleLaunchSession(idx)}
+                        disabled={isScheduling || isAdapting}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {learningPath.map((session, idx) => {
+                const runtime = runtimeState?.sessions.find((s) => s.session_index === idx);
+                return (
                   <SessionCard
+                    key={(session.id as string | undefined) ?? idx}
                     index={idx}
                     pathSession={session}
                     runtimeSession={runtime}
                     onLaunch={() => handleLaunchSession(idx)}
                     disabled={isScheduling || isAdapting}
                   />
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="space-y-3">
-          {learningPath.map((session, idx) => {
-            const runtime = runtimeState?.sessions.find((s) => s.session_index === idx);
-            return (
-              <SessionCard
-                key={(session.id as string | undefined) ?? idx}
-                index={idx}
-                pathSession={session}
-                runtimeSession={runtime}
-                onLaunch={() => handleLaunchSession(idx)}
-                disabled={isScheduling || isAdapting}
-              />
-            );
-          })}
-        </div>
-      )}
 
-      <div className="flex justify-end">
-        <Button variant="secondary" size="sm" onClick={refreshGoals} disabled={isScheduling}>
-          Refresh
-        </Button>
+        {/* Right-side small card reusing existing beta look */}
+        <div className="lg:w-72 shrink-0">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 sticky top-4 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-800 mb-1">Path Status</h3>
+            <p className="text-xs text-slate-500">
+              Sessions: <span className="font-semibold text-slate-700">{learningPath.length}</span>
+            </p>
+            {runtimeState && (
+              <p className="text-xs text-slate-500">
+                Completed:{' '}
+                <span className="font-semibold text-slate-700">
+                  {runtimeState.sessions.filter((s) => s.if_learned).length}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

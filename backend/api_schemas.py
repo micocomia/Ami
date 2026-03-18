@@ -11,6 +11,7 @@ class ChatWithAutorRequest(BaseRequest):
 
     messages: str
     learner_profile: str = ""
+    goal_context: Optional[Any] = None
     user_id: Optional[str] = None
     goal_id: Optional[int] = None
     session_index: Optional[int] = None
@@ -195,6 +196,12 @@ class MasteryEvaluationRequest(BaseModel):
     goal_id: int
     session_index: int
     quiz_answers: Dict[str, Any]
+
+
+class ResetMasteryAttemptRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
 
 
 class BehavioralMetricsResponse(BaseModel):

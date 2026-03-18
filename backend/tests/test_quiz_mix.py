@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from utils.quiz_scorer import get_quiz_mix_for_session
+from modules.content_generator.utils.quiz_scorer import get_quiz_mix_for_session
 
 
 QUIZ_MIX_CONFIG = {

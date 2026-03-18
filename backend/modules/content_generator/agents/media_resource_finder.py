@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import re
 from typing import List
 from urllib.parse import quote
@@ -31,6 +32,11 @@ def _is_video_on_topic(topic: str, session_context: str, title: str, snippet: st
     return len(overlap) >= 1
 
 
+def _topic_budget(total_topics: int, max_count: int) -> int:
+    """Return the number of topics to query for a given modality."""
+    return min(total_topics, max(3, 2 * max_count))
+
+
 def find_media_resources(
     search_runner,
     knowledge_points,
@@ -55,8 +61,6 @@ def find_media_resources(
     """
     import requests
 
-    results: List[dict] = []
-
     # Extract topic names from knowledge_points
     topic_names: List[str] = []
     for kp in knowledge_points:
@@ -67,24 +71,21 @@ def find_media_resources(
         if name:
             topic_names.append(name)
 
-    # --- YouTube Videos ---
-    if max_videos > 0:
-        seen_video_ids: set = set()
+    all_results: List[List[dict]] = []
+
+    # --- YouTube Videos (per-topic parallel fetch) ---
+    if max_videos > 0 and search_runner is not None:
         focus_terms = "lecture explainer talk" if video_focus == "audio" else "tutorial walkthrough visualization"
-        for topic in topic_names:
-            video_count = sum(1 for r in results if r["type"] == "video")
-            if video_count >= max_videos:
-                break
+        budget = _topic_budget(len(topic_names), max_videos)
+        queried_topics = topic_names[:budget]
+
+        def _fetch_youtube(topic: str) -> List[dict]:
+            context = f" {session_context}" if session_context else ""
+            query = f'site:youtube.com "{topic}"{context} {focus_terms}'
+            out: List[dict] = []
             try:
-                if search_runner is None:
-                    break
-                context = f" {session_context}" if session_context else ""
-                query = f'site:youtube.com "{topic}"{context} {focus_terms}'
                 search_results = search_runner.invoke(query)
                 for sr in search_results:
-                    video_count = sum(1 for r in results if r["type"] == "video")
-                    if video_count >= max_videos:
-                        break
                     link = sr.link or ""
                     title = getattr(sr, "title", "") or topic
                     snippet = getattr(sr, "snippet", "")
@@ -94,34 +95,56 @@ def find_media_resources(
                         continue
                     match = re.search(r"watch\?v=([A-Za-z0-9_-]{11})", link)
                     if match:
-                        video_id = match.group(1)
-                        if video_id not in seen_video_ids:
-                            seen_video_ids.add(video_id)
-                            results.append({
-                                "type": "video",
-                                "title": title,
-                                "url": link,
-                                "video_id": video_id,
-                                "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
-                                "snippet": snippet,
-                                "source": "youtube",
-                            })
+                        out.append({
+                            "type": "video",
+                            "title": title,
+                            "url": link,
+                            "video_id": match.group(1),
+                            "thumbnail_url": f"https://img.youtube.com/vi/{match.group(1)}/mqdefault.jpg",
+                            "snippet": snippet,
+                            "source": "youtube",
+                        })
             except Exception:
-                continue
+                pass
+            return out
 
-    # --- Wikimedia Commons Images (file namespace search for educational diagrams) ---
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(queried_topics) or 1)) as pool:
+            yt_futures = [pool.submit(_fetch_youtube, t) for t in queried_topics]
+            yt_raw: List[dict] = []
+            for fut in yt_futures:
+                try:
+                    yt_raw.extend(fut.result())
+                except Exception:
+                    pass
+
+        # Deduplicate by video_id, preserve topic-index order
+        seen_video_ids: set = set()
+        yt_deduped: List[dict] = []
+        for item in yt_raw:
+            vid = item.get("video_id", "")
+            if vid and vid not in seen_video_ids:
+                seen_video_ids.add(vid)
+                yt_deduped.append(item)
+                if len(yt_deduped) >= max_videos:
+                    break
+        all_results.append(yt_deduped)
+    else:
+        all_results.append([])
+
+    # --- Wikimedia Commons Images (per-topic parallel fetch) ---
     if max_images > 0:
         _img_exts = {'.jpg', '.jpeg', '.png', '.svg', '.gif', '.tiff', '.tif', '.webp'}
-        for topic in topic_names:
-            image_count = sum(1 for r in results if r["type"] == "image")
-            if image_count >= max_images:
-                break
+        budget = _topic_budget(len(topic_names), max_images)
+        queried_topics = topic_names[:budget]
+
+        def _fetch_wiki_image(topic: str) -> List[dict]:
+            out: List[dict] = []
             try:
                 params = {
                     "action": "query",
                     "generator": "search",
                     "gsrsearch": f"{topic} (diagram OR chart OR illustration)",
-                    "gsrnamespace": "6",    # File namespace = images/media files
+                    "gsrnamespace": "6",
                     "gsrlimit": "10",
                     "prop": "imageinfo",
                     "iiprop": "url|thumburl|extmetadata",
@@ -142,43 +165,63 @@ def find_media_resources(
                     full_url = imageinfo.get("url", "")
                     if not thumb_url:
                         continue
-                    # Skip non-image files (audio, video OGG, etc.) that also appear in ns=6
                     if not any(full_url.lower().endswith(e) for e in _img_exts):
                         continue
                     raw_title = page.get("title", topic)
-                    # Clean file title: strip "File:" prefix and extension for display
                     display_title = re.sub(r'^File:', '', raw_title, flags=re.IGNORECASE)
                     display_title = re.sub(r'\.[a-z]+$', '', display_title).replace('_', ' ')
-                    # Description from extmetadata if available
                     ext_meta = imageinfo.get("extmetadata", {})
                     description = (
                         ext_meta.get("ImageDescription", {}).get("value", "")
                         or ext_meta.get("ObjectName", {}).get("value", "")
                         or f"Wikimedia Commons: {display_title}"
                     )
-                    # Strip HTML tags from description
                     description = re.sub(r'<[^>]+>', '', description).strip()
                     page_url = f"https://commons.wikimedia.org/wiki/{quote(raw_title.replace(' ', '_'))}"
-                    results.append({
+                    out.append({
                         "type": "image",
                         "title": display_title,
                         "url": page_url,
                         "image_url": thumb_url,
                         "description": description,
                     })
-                    image_count += 1
-                    if image_count >= max_images:
-                        break
             except Exception:
-                continue
+                pass
+            return out
 
-    # --- Wikimedia Commons Videos (fills remaining slots after YouTube) ---
-    if max_videos > 0:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(queried_topics) or 1)) as pool:
+            img_futures = [pool.submit(_fetch_wiki_image, t) for t in queried_topics]
+            img_raw: List[dict] = []
+            for fut in img_futures:
+                try:
+                    img_raw.extend(fut.result())
+                except Exception:
+                    pass
+
+        # Deduplicate by image_url, cap at max_images
+        seen_image_urls: set = set()
+        img_deduped: List[dict] = []
+        for item in img_raw:
+            key = item.get("image_url", "")
+            if key and key not in seen_image_urls:
+                seen_image_urls.add(key)
+                img_deduped.append(item)
+                if len(img_deduped) >= max_images:
+                    break
+        all_results.append(img_deduped)
+    else:
+        all_results.append([])
+
+    # --- Wikimedia Commons Videos (fills remaining video slots after YouTube) ---
+    yt_count = len(all_results[0]) if all_results else 0
+    remaining_videos = max_videos - yt_count if max_videos > 0 else 0
+    if remaining_videos > 0:
         _video_exts = {'.webm', '.ogv', '.ogg'}
-        for topic in topic_names:
-            video_count = sum(1 for r in results if r["type"] == "video")
-            if video_count >= max_videos:
-                break
+        budget = _topic_budget(len(topic_names), remaining_videos)
+        queried_topics = topic_names[:budget]
+
+        def _fetch_wiki_video(topic: str) -> List[dict]:
+            out: List[dict] = []
             try:
                 params = {
                     "action": "query",
@@ -198,9 +241,6 @@ def find_media_resources(
                 )
                 pages = resp.json().get("query", {}).get("pages", {})
                 for page_id, page in pages.items():
-                    video_count = sum(1 for r in results if r["type"] == "video")
-                    if video_count >= max_videos:
-                        break
                     if int(page_id) < 0:
                         continue
                     imageinfo = (page.get("imageinfo") or [{}])[0]
@@ -212,7 +252,7 @@ def find_media_resources(
                     display_title = re.sub(r'^File:', '', raw_title, flags=re.IGNORECASE)
                     display_title = re.sub(r'\.[a-z]+$', '', display_title).replace('_', ' ')
                     page_url = f"https://commons.wikimedia.org/wiki/{quote(raw_title.replace(' ', '_'))}"
-                    results.append({
+                    out.append({
                         "type": "video",
                         "title": display_title,
                         "url": page_url,
@@ -222,15 +262,39 @@ def find_media_resources(
                         "source": "wikimedia_commons",
                     })
             except Exception:
-                continue
+                pass
+            return out
 
-    # --- Wikimedia Commons Audio (for verbal learners) ---
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(queried_topics) or 1)) as pool:
+            wv_futures = [pool.submit(_fetch_wiki_video, t) for t in queried_topics]
+            wv_raw: List[dict] = []
+            for fut in wv_futures:
+                try:
+                    wv_raw.extend(fut.result())
+                except Exception:
+                    pass
+
+        seen_wv_urls: set = set()
+        wv_deduped: List[dict] = []
+        for item in wv_raw:
+            key = item.get("url", "")
+            if key and key not in seen_wv_urls:
+                seen_wv_urls.add(key)
+                wv_deduped.append(item)
+                if len(wv_deduped) >= remaining_videos:
+                    break
+        all_results.append(wv_deduped)
+    else:
+        all_results.append([])
+
+    # --- Wikimedia Commons Audio (for verbal learners, per-topic parallel fetch) ---
     if max_audio > 0:
         _audio_exts = {'.ogg', '.oga', '.mp3', '.flac', '.wav'}
-        for topic in topic_names:
-            audio_count = sum(1 for r in results if r["type"] == "audio")
-            if audio_count >= max_audio:
-                break
+        budget = _topic_budget(len(topic_names), max_audio)
+        queried_topics = topic_names[:budget]
+
+        def _fetch_wiki_audio(topic: str) -> List[dict]:
+            out: List[dict] = []
             try:
                 params = {
                     "action": "query",
@@ -249,9 +313,6 @@ def find_media_resources(
                 )
                 pages = resp.json().get("query", {}).get("pages", {})
                 for page_id, page in pages.items():
-                    audio_count = sum(1 for r in results if r["type"] == "audio")
-                    if audio_count >= max_audio:
-                        break
                     if int(page_id) < 0:
                         continue
                     imageinfo = (page.get("imageinfo") or [{}])[0]
@@ -262,7 +323,7 @@ def find_media_resources(
                     display_title = re.sub(r'^File:', '', raw_title, flags=re.IGNORECASE)
                     display_title = re.sub(r'\.[a-z]+$', '', display_title).replace('_', ' ')
                     page_url = f"https://commons.wikimedia.org/wiki/{quote(raw_title.replace(' ', '_'))}"
-                    results.append({
+                    out.append({
                         "type": "audio",
                         "title": display_title,
                         "url": page_url,
@@ -271,6 +332,33 @@ def find_media_resources(
                         "source": "wikimedia_commons",
                     })
             except Exception:
-                continue
+                pass
+            return out
 
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(queried_topics) or 1)) as pool:
+            wa_futures = [pool.submit(_fetch_wiki_audio, t) for t in queried_topics]
+            wa_raw: List[dict] = []
+            for fut in wa_futures:
+                try:
+                    wa_raw.extend(fut.result())
+                except Exception:
+                    pass
+
+        seen_audio_urls: set = set()
+        wa_deduped: List[dict] = []
+        for item in wa_raw:
+            key = item.get("audio_url", "") or item.get("url", "")
+            if key and key not in seen_audio_urls:
+                seen_audio_urls.add(key)
+                wa_deduped.append(item)
+                if len(wa_deduped) >= max_audio:
+                    break
+        all_results.append(wa_deduped)
+    else:
+        all_results.append([])
+
+    # Flatten: YouTube videos, Wikimedia images, Wikimedia videos, Wikimedia audio
+    results: List[dict] = []
+    for bucket in all_results:
+        results.extend(bucket)
     return results

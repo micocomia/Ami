@@ -14,8 +14,8 @@ class LLMConfig:
 
 @dataclass
 class EmbeddingConfig:
-    provider: str = "huggingface"
-    model_name: str = "sentence-transformers/all-mpnet-base-v2"
+    provider: str = "openai"
+    model_name: str = "text-embedding-3-small"
 
 
 @dataclass
@@ -25,9 +25,24 @@ class SearchConfig:
 
 
 @dataclass
+class BlobStorageConfig:
+    connection_string: str = ""
+    manifests_container: str = "ami-manifests"
+    audio_container: str = "ami-audio"
+    diagrams_container: str = "ami-diagrams"
+    course_content_container: str = "ami-course-content"
+
+
+@dataclass
+class CosmosConfig:
+    connection_string: str = ""
+    database_name: str = "ami-userdata"
+
+
+@dataclass
 class VectorstoreConfig:
-    persist_directory: str = "data/vectorstore"
-    collection_name: str = "non-verified-content"
+    type: str = "azure_ai_search"
+    collection_name: str = "ami-web-results"
 
 @dataclass
 class RAGConfig:
@@ -47,3 +62,5 @@ class AppConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
     vectorstore: VectorstoreConfig = field(default_factory=VectorstoreConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
+    blob_storage: BlobStorageConfig = field(default_factory=BlobStorageConfig)
+    cosmos: CosmosConfig = field(default_factory=CosmosConfig)

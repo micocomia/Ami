@@ -61,7 +61,7 @@ class SkillGap(BaseModel):
     def limit_reason_words(cls, v: str) -> str:
         words = v.split()
         if len(words) > 20:
-            raise ValueError("Reason must be 20 words or fewer.")
+            return " ".join(words[:20])
         return v
 
     @model_validator(mode="after")

@@ -42,8 +42,8 @@ class SearchRagManager:
     ) -> "SearchRagManager":
         config = ensure_config_dict(config)
         embedder = EmbedderFactory.create(
-            model=config.get("embedder", {}).get("model_name", "sentence-transformers/all-mpnet-base-v2"),
-            model_provider=config.get("embedder", {}).get("provider", "huggingface"),
+            model=config.get("embedding", {}).get("model_name", "text-embedding-3-small"),
+            model_provider=config.get("embedding", {}).get("provider", "openai"),
         )
 
         text_splitter = TextSplitterFactory.create(
@@ -52,11 +52,16 @@ class SearchRagManager:
             chunk_overlap=config.get("rag", {}).get("chunk_overlap", 0),
         )
 
+        azure_cfg = config.get("azure_search", {})
+        azure_endpoint = azure_cfg.get("endpoint") or os.environ.get("AZURE_SEARCH_ENDPOINT")
+        azure_key = azure_cfg.get("key") or os.environ.get("AZURE_SEARCH_KEY")
         vectorstore = VectorStoreFactory.create(
-            vectorstore_type=config.get("vectorstore", {}).get("type", "chroma"),
-            collection_name=config.get("vectorstore", {}).get("collection_name", "default_collection"),
+            vectorstore_type=config.get("vectorstore", {}).get("type", "azure_ai_search"),
+            collection_name=config.get("vectorstore", {}).get("collection_name", "ami-web-results"),
             persist_directory=config.get("vectorstore", {}).get("persist_directory", "./data/vectorstore"),
             embedder=embedder,
+            azure_endpoint=azure_endpoint,
+            azure_key=azure_key,
         )
 
         search_runner = SearchRunner.from_config(
@@ -107,7 +112,7 @@ class SearchRagManager:
             split_docs = self.text_splitter.split_documents(documents)
         else:
             split_docs = documents
-        self.vectorstore.add_documents(split_docs, embedding_function=self.embedder)
+        self.vectorstore.add_documents(split_docs)
         logger.info(f"Added {len(split_docs)} documents to the vectorstore.")
 
     def retrieve(self, query: str, k: Optional[int] = None) -> List[Document]:
