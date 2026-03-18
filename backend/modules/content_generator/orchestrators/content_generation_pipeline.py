@@ -73,7 +73,7 @@ _MAX_SINGLE_DRAFT_CHARS = 6_000
 _MAX_DRAFT_RETRIES = 1
 _MAX_KNOWLEDGE_POINTS = 4  # cap explorer output; prefer 3–4 deep points over 5+ shallow ones
 _MAX_QUALITY_ROUNDS = 2
-_MAX_INTEGRATOR_RETRIES = _MAX_QUALITY_ROUNDS - 1  # all rounds used for integration retries
+_max_integrator_retries = _MAX_QUALITY_ROUNDS - 1  # all rounds used for integration retries
 _MAX_SECTION_REDRAFT_ROUNDS = 1
 _MIN_ACCEPTABLE_DRAFT_RATIO = 0.7
 
@@ -749,6 +749,8 @@ def generate_learning_content_with_llm(
     fast_llm: Any = None,
     evaluator: Optional[Callable[[Any, JSONDict], Mapping[str, Any]]] = None,
     cancel_event: Optional[threading.Event] = None,
+    max_quality_rounds: int = _MAX_QUALITY_ROUNDS,
+    max_knowledge_points: int = _MAX_KNOWLEDGE_POINTS,
 ) -> JSONDict:
     """Unified learning content orchestration pipeline.
 
@@ -814,8 +816,8 @@ def generate_learning_content_with_llm(
             trace["final_failure_reason"] = f"Explorer terminal failure: {exc}"
             raw_knowledge_points = {"knowledge_points": _fallback_knowledge_points(learning_session)}
     knowledge_points = _extract_knowledge_points(raw_knowledge_points)
-    if len(knowledge_points) > _MAX_KNOWLEDGE_POINTS:
-        knowledge_points = knowledge_points[:_MAX_KNOWLEDGE_POINTS]
+    if len(knowledge_points) > max_knowledge_points:
+        knowledge_points = knowledge_points[:max_knowledge_points]
     if not knowledge_points:
         trace["explorer_terminal_failure"] = True
         trace["fallback_mode"] = "best_effort"
@@ -1185,6 +1187,7 @@ def generate_learning_content_with_llm(
 
     quality_rounds = 0
     integrator_retries = 0
+    _max_integrator_retries = max_quality_rounds - 1
     section_redraft_rounds = 0
     final_integration_eval: dict[str, Any] = _integrated_eval_fallback()
     quality_checkpoint_passed = False
@@ -1196,7 +1199,7 @@ def generate_learning_content_with_llm(
         _prev_quality_fingerprint: Optional[tuple] = None
         _prev_issue_count: int = 0
         last_actionable_eval: Optional[dict[str, Any]] = None
-        while quality_rounds < _MAX_QUALITY_ROUNDS:
+        while quality_rounds < max_quality_rounds:
             quality_rounds += 1
             _check_cancel(cancel_event)
             deterministic_doc_eval = _deterministic_integrated_section_audit(
@@ -1345,7 +1348,7 @@ def generate_learning_content_with_llm(
             _prev_quality_fingerprint = _current_fingerprint
             _prev_issue_count = _current_issue_count
 
-            if repair_scope == "integrator_only" and integrator_retries < _MAX_INTEGRATOR_RETRIES:
+            if repair_scope == "integrator_only" and integrator_retries < _max_integrator_retries:
                 integrator_retries += 1
                 learning_document = _integrate_document(directives)
                 continue
@@ -1513,7 +1516,7 @@ def generate_learning_content_with_llm(
                         if targeted_applied:
                             learning_document = _integrate_document(directives)
                             continue
-                if integrator_retries < _MAX_INTEGRATOR_RETRIES:
+                if integrator_retries < _max_integrator_retries:
                     integrator_retries += 1
                     learning_document = _integrate_document(directives)
                     continue

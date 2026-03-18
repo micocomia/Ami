@@ -60,3 +60,17 @@ prefetch:
   cooldown_secs: 20
   max_workers: 3
   start_delay_secs: 30
+
+skill_gap:
+  max_goal_iterations: 2     # goal clarification loop iterations
+  max_eval_iterations: 2     # skill gap reflexion loop iterations
+
+learning_plan:
+  max_refinements: 1         # plan reflexion passes (0 = no reflexion)
+
+content_generation:
+  max_quality_rounds: 2      # content quality check-and-repair cycles
+  max_knowledge_points: 4    # knowledge points explored per session
+
+chatbot:
+  enable_media_search: true  # include media search tool in chatbot by default

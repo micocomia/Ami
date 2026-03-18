@@ -28,26 +28,30 @@ def identify_skill_gap_with_llm(
     learner_information: str,
     skill_requirements: Optional[Dict[str, Any]] = None,
     search_rag_manager: Optional[SearchRagManager] = None,
+    max_goal_iterations: int = 2,
+    max_eval_iterations: int = 2,
 ) -> Tuple[JSONDict, JSONDict]:
     """Identify skill gaps using a two-loop reflexion architecture.
 
     Loop 1 (Goal Clarification): GoalContextParser ↔ LearningGoalRefiner
-      Iterates until the goal is specific (is_vague=False) or MAX_GOAL_ITERATIONS reached.
+      Iterates until the goal is specific (is_vague=False) or max_goal_iterations reached.
       All goal-related decisions happen here and only here.
 
     Between loops: SkillRequirementMapper called once with the finalized goal + retrieved context.
 
     Loop 2 (Skill Gap Reflexion): SkillGapIdentifier ↔ SkillGapEvaluator
-      Iterates until the evaluator accepts or MAX_EVAL_ITERATIONS reached.
+      Iterates until the evaluator accepts or max_eval_iterations reached.
       Evaluator assesses skill gap quality only — no goal refinement.
 
     After loops: BiasAuditor runs unconditionally.
 
+    Args:
+        max_goal_iterations: Maximum goal clarification loop iterations (default 2).
+        max_eval_iterations: Maximum skill gap reflexion loop iterations (default 2).
+
     Returns:
         Tuple of (skill_gaps dict, effective_requirements dict).
     """
-    MAX_GOAL_ITERATIONS = 2
-    MAX_EVAL_ITERATIONS = 2
 
     original_goal = learning_goal
     was_auto_refined = False
@@ -58,7 +62,7 @@ def identify_skill_gap_with_llm(
     retrieved_docs: List[Document] = []
     verified_content_flag = False
 
-    for attempt in range(MAX_GOAL_ITERATIONS):
+    for attempt in range(max_goal_iterations):
         goal_context = GoalContextParser(fast_llm).parse({
             "learning_goal": learning_goal,
             "learner_information": learner_information,
@@ -76,7 +80,7 @@ def identify_skill_gap_with_llm(
         if not goal_context.get("is_vague", False):
             break  # goal is specific — proceed to skill gap identification
 
-        if attempt < MAX_GOAL_ITERATIONS - 1:
+        if attempt < max_goal_iterations - 1:
             try:
                 refined = LearningGoalRefiner(fast_llm).refine_goal({
                     "learning_goal": learning_goal,
@@ -110,7 +114,7 @@ def identify_skill_gap_with_llm(
     skill_gaps_result: JSONDict = {}
     evaluator_feedback = ""
 
-    for iteration in range(MAX_EVAL_ITERATIONS):
+    for iteration in range(max_eval_iterations):
         skill_gaps_result = SkillGapIdentifier(llm).identify_skill_gap(
             {
                 "learning_goal": learning_goal,
@@ -122,7 +126,7 @@ def identify_skill_gap_with_llm(
         )
 
         # Skip evaluator on last iteration to avoid a wasted LLM call
-        if iteration < MAX_EVAL_ITERATIONS - 1:
+        if iteration < max_eval_iterations - 1:
             try:
                 evaluation = SkillGapEvaluator(fast_llm).evaluate({
                     "learning_goal": learning_goal,
