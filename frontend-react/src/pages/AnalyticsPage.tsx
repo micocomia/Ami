@@ -398,8 +398,7 @@ function AnalyticsActiveGoal() {
   const isLoading = dashLoading || behavLoading;
 
   const overallProgress = metrics?.overall_progress ?? 0;
-  const goalProgressPct = Math.round((overallProgress ?? 0) * 100);
-
+  const goalProgressPct = Math.round(overallProgress);
   const sessionsCompleted = behavMetrics?.sessions_completed
     ?? (activeGoal?.learning_path ?? []).filter(
       (s: { if_learned?: boolean }) => s.if_learned,
@@ -407,7 +406,8 @@ function AnalyticsActiveGoal() {
   const masterySeries = metrics?.mastery_time_series ?? [];
   const sessionSeries = metrics?.session_time_series ?? [];
 
-  const quizAvgPct =
+  // This metric is mastery-derived (not a standalone quiz average endpoint).
+  const masteryRatePct =
     behavMetrics?.latest_mastery_rate != null
       ? Math.round(behavMetrics.latest_mastery_rate * 100)
       : masterySeries.length > 0
@@ -496,7 +496,7 @@ function AnalyticsActiveGoal() {
         {/* Goal progress */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Goal progress</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Path completed</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
@@ -504,29 +504,29 @@ function AnalyticsActiveGoal() {
               `${goalProgressPct}%`
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">How far you are in this learning path.</p>
+          <p className="text-xs text-slate-500 mt-1">How much of your learning path you have finished.</p>
         </div>
 
-        {/* Quiz score avg */}
+        {/* Mastery rate */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Quiz score avg</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Current understanding</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
-            ) : quizAvgPct != null ? (
-              `${quizAvgPct}%`
+            ) : masteryRatePct != null ? (
+              `${masteryRatePct}%`
             ) : (
               '—'
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Average mastery percentage across sessions.</p>
+          <p className="text-xs text-slate-500 mt-1">How well you understand your recent sessions.</p>
         </div>
 
         {/* Study time */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Study time</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Time spent learning</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-20 rounded bg-slate-100 animate-pulse" />
@@ -536,21 +536,21 @@ function AnalyticsActiveGoal() {
               '0h'
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Total time recorded for this goal.</p>
+          <p className="text-xs text-slate-500 mt-1">Total time you have spent on this goal.</p>
         </div>
 
         {/* Streak */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Streak</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Sessions completed</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
             ) : (
-              `${streakDays} days`
+              String(streakDays)
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Number of sessions logged for this goal.</p>
+          <p className="text-xs text-slate-500 mt-1">How many sessions you have completed for this goal.</p>
         </div>
       </div>
 

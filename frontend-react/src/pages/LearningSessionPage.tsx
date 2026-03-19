@@ -722,6 +722,14 @@ export function LearningSessionPage() {
     sessionIndex ?? undefined,
   );
 
+  useEffect(() => {
+    if (contentCacheResult) {
+      console.log('contentCacheResult:', contentCacheResult);
+      // 方便直接复制
+      (window as Window & { __contentCacheResult?: unknown }).__contentCacheResult = contentCacheResult;
+    }
+  }, [contentCacheResult]);
+
   const generateMutation = useGenerateLearningContent();
   const deleteMutation = useDeleteLearningContent();
   const sessionActivityMutation = useSessionActivity();
@@ -731,6 +739,14 @@ export function LearningSessionPage() {
 
   type ContentData = NonNullable<typeof contentCacheResult>['data'];
   const [content, setContent] = useState<ContentData>(null);
+
+  useEffect(() => {
+    if (content) {
+      console.log('final content used by page:', content);
+      (window as Window & { __learningContent?: unknown }).__learningContent = content;
+    }
+  }, [content]);
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const hasTriggeredGenRef = useRef(false);
