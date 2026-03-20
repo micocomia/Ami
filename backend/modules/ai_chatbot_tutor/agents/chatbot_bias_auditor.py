@@ -15,6 +15,7 @@ JSONDict: TypeAlias = Dict[str, Any]
 
 # Known biased phrases mapped to suggested alternatives
 _BIASED_PHRASES: Dict[str, str] = {
+    # Gendered language
     "mankind": "humankind",
     "manmade": "artificial",
     "man-made": "artificial",
@@ -22,14 +23,38 @@ _BIASED_PHRASES: Dict[str, str] = {
     "policeman": "police officer",
     "fireman": "firefighter",
     "stewardess": "flight attendant",
+    "businessman": "businessperson",
+    "cameraman": "camera operator",
+    "mailman": "mail carrier",
+    "spokesman": "spokesperson",
+    "housewife": "homemaker",
+    "manpower": "workforce",
+    "man hours": "person hours",
+    "freshman": "first-year student",
+    # Disability / ableist language
     "normal people": "most people",
     "suffers from": "lives with",
     "confined to a wheelchair": "uses a wheelchair",
     "the disabled": "people with disabilities",
     "the blind": "people who are blind",
     "the deaf": "people who are deaf",
+    "crippled": "disabled",
+    "lame": "inadequate",
+    "blind spot": "oversight",
+    "tone deaf": "insensitive",
+    "crazy": "unexpected",
+    "dumb": "uninformed",
+    "mentally retarded": "intellectually disabled",
+    "handicapped": "having a disability",
+    # Cultural / racial
     "third world": "developing countries",
     "primitive": "traditional",
+    "blacklist": "blocklist",
+    "whitelist": "allowlist",
+    "master/slave": "primary/replica",
+    "master-slave": "primary-replica",
+    "grandfathered": "legacy",
+    "spirit animal": "inspiration",
 }
 
 # Patronizing phrases that may indicate tone bias
@@ -48,6 +73,17 @@ _PATRONIZING_PHRASES: List[str] = [
     "you should already know",
     "as a beginner you wouldn't",
     "don't worry, it's simple",
+    "let me dumb it down",
+    "i'll make it simple for you",
+    "you probably don't understand",
+    "just think about it",
+    "that's a basic concept",
+    "this is trivial",
+    "as i already explained",
+    "you're overthinking this",
+    "it's common sense",
+    "even a child could",
+    "surely you can see",
 ]
 
 

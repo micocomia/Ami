@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui';
+import { useAuthContext } from '@/context/AuthContext';
+import { useBiasAuditHistory } from '@/api/endpoints/skillGap';
+import { HighRiskBanner } from '@/components/analytics';
 
 const quickLinks = [
   { to: '/goals', label: 'Set Learning Goals', description: 'Define and refine what you want to learn.' },
@@ -7,8 +10,14 @@ const quickLinks = [
 ];
 
 export function HomePage() {
+  const { userId } = useAuthContext();
+  const { data: biasHistory } = useBiasAuditHistory(userId ?? undefined);
+
   return (
     <div className="space-y-8">
+      {/* High-risk bias warning */}
+      <HighRiskBanner entries={biasHistory?.entries ?? []} />
+
       {/* Welcome banner */}
       <div className="bg-gradient-to-br from-primary-400 to-primary-600 rounded-xl p-8 text-white">
         <h2 className="text-2xl font-bold">Welcome back!</h2>

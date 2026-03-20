@@ -16,6 +16,7 @@ JSONDict: TypeAlias = Dict[str, Any]
 
 # Known biased phrases mapped to suggested alternatives
 _BIASED_PHRASES: Dict[str, str] = {
+    # Gendered language
     "mankind": "humankind",
     "manmade": "artificial",
     "man-made": "artificial",
@@ -23,14 +24,38 @@ _BIASED_PHRASES: Dict[str, str] = {
     "policeman": "police officer",
     "fireman": "firefighter",
     "stewardess": "flight attendant",
+    "businessman": "businessperson",
+    "cameraman": "camera operator",
+    "mailman": "mail carrier",
+    "spokesman": "spokesperson",
+    "housewife": "homemaker",
+    "manpower": "workforce",
+    "man hours": "person hours",
+    "freshman": "first-year student",
+    # Disability / ableist language
     "normal people": "most people",
     "suffers from": "lives with",
     "confined to a wheelchair": "uses a wheelchair",
     "the disabled": "people with disabilities",
     "the blind": "people who are blind",
     "the deaf": "people who are deaf",
+    "crippled": "disabled",
+    "lame": "inadequate",
+    "blind spot": "oversight",
+    "tone deaf": "insensitive",
+    "crazy": "unexpected",
+    "dumb": "uninformed",
+    "mentally retarded": "intellectually disabled",
+    "handicapped": "having a disability",
+    # Cultural / racial
     "third world": "developing countries",
     "primitive": "traditional",
+    "blacklist": "blocklist",
+    "whitelist": "allowlist",
+    "master/slave": "primary/replica",
+    "master-slave": "primary-replica",
+    "grandfathered": "legacy",
+    "spirit animal": "inspiration",
 }
 
 
