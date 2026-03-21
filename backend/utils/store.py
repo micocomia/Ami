@@ -1,13 +1,19 @@
-"""JSON file-backed persistence for learner profiles, goals, content, and activity."""
+"""JSON file-backed persistence for learner profiles, goals, content, and activity.
+
+Bias audit log storage uses Azure Cosmos DB (same backend as beta-release-public).
+"""
 
 import copy
 import json
+import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.learner_profiler.schemas import refresh_learning_preferences_derived_fields
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "users"
 _PROFILES_PATH = _DATA_DIR / "profiles.json"
@@ -17,7 +23,6 @@ _GOALS_PATH = _DATA_DIR / "goals.json"
 _LEARNING_CONTENT_PATH = _DATA_DIR / "learning_content.json"
 _SESSION_ACTIVITY_PATH = _DATA_DIR / "session_activity.json"
 _MASTERY_HISTORY_PATH = _DATA_DIR / "mastery_history.json"
-_BIAS_AUDIT_LOG_PATH = _DATA_DIR / "bias_audit_log.json"
 
 _lock = threading.Lock()
 
@@ -35,8 +40,9 @@ _learning_content_cache: Dict[str, Dict[str, Any]] = {}
 _session_activity: Dict[str, Dict[str, Any]] = {}
 # keyed by "{user_id}:{goal_id}"
 _mastery_history: Dict[str, List[Dict[str, Any]]] = {}
-# keyed by user_id
-_bias_audit_log: Dict[str, List[Dict[str, Any]]] = {}
+
+# Module-level Cosmos DB client for bias audit log. Initialised by load().
+_cosmos: Optional[Any] = None  # CosmosUserStore
 
 
 def _now_iso() -> str:
@@ -44,8 +50,8 @@ def _now_iso() -> str:
 
 
 def load():
-    """Read persisted data from disk into memory. Call once at startup."""
-    global _profiles, _events, _profile_snapshots, _goals, _learning_content_cache, _session_activity, _mastery_history, _bias_audit_log
+    """Read persisted data from disk into memory and init Cosmos DB. Call once at startup."""
+    global _profiles, _events, _profile_snapshots, _goals, _learning_content_cache, _session_activity, _mastery_history, _cosmos
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     for path, target_name in (
         (_PROFILES_PATH, "_profiles"),
@@ -55,7 +61,6 @@ def load():
         (_LEARNING_CONTENT_PATH, "_learning_content_cache"),
         (_SESSION_ACTIVITY_PATH, "_session_activity"),
         (_MASTERY_HISTORY_PATH, "_mastery_history"),
-        (_BIAS_AUDIT_LOG_PATH, "_bias_audit_log"),
     ):
         target = {}
         if path.exists():
@@ -64,6 +69,26 @@ def load():
             except Exception:
                 target = {}
         globals()[target_name] = target
+
+    # Initialise Cosmos DB client for bias audit log storage
+    from base.cosmos_client import CosmosUserStore
+    try:
+        _cosmos = CosmosUserStore.from_env()
+        if not _cosmos.check_connection():
+            logger.warning("Cosmos DB connection check failed — bias audit log will raise on first use")
+    except ValueError as exc:
+        logger.warning("Cosmos DB not configured: %s. Bias audit log unavailable.", exc)
+        _cosmos = None
+
+
+def _get_cosmos():
+    """Return the Cosmos DB client, raising RuntimeError if not initialised."""
+    if _cosmos is None:
+        raise RuntimeError(
+            "Cosmos DB client not initialised. "
+            "Ensure AZURE_COSMOS_CONNECTION_STRING is set and store.load() was called."
+        )
+    return _cosmos
 
 
 def _flush_json(path: Path, payload: Dict[str, Any]) -> None:
@@ -304,7 +329,7 @@ def append_bias_audit_log(
     audit_type: str,
     audit_result: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Append a compact bias audit entry. Retains last 200 per user."""
+    """Append a compact bias audit entry. Retains last 200 per user (Cosmos DB)."""
     flags = audit_result.get("flags") or audit_result.get("flagged_items") or []
     flagged = [f for f in flags if isinstance(f, dict)]
     audited_items = audit_result.get("audited_items") or audit_result.get("items_audited")
@@ -322,19 +347,22 @@ def append_bias_audit_log(
             for f in flagged[:20]
         ],
     }
-    with _lock:
-        _bias_audit_log.setdefault(user_id, []).append(entry)
-        _bias_audit_log[user_id] = _bias_audit_log[user_id][-200:]
-        _flush_json(_BIAS_AUDIT_LOG_PATH, _bias_audit_log)
-        return copy.deepcopy(_bias_audit_log[user_id])
+    db = _get_cosmos()
+    existing = db.get("bias_audit_log", user_id, user_id)
+    entries: List[Dict[str, Any]] = existing.get("entries", []) if existing else []
+    entries.append(entry)
+    entries = entries[-200:]
+    db.upsert("bias_audit_log", {"id": user_id, "user_id": user_id, "entries": entries})
+    return list(entries)
 
 
 def get_bias_audit_log(user_id: str, goal_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Return all bias audit entries for a user, optionally filtered by goal_id."""
-    entries = _bias_audit_log.get(user_id, [])
+    item = _get_cosmos().get("bias_audit_log", user_id, user_id)
+    entries = copy.deepcopy(item.get("entries", [])) if item is not None else []
     if goal_id is not None:
         entries = [e for e in entries if e.get("goal_id") == goal_id]
-    return copy.deepcopy(entries) if isinstance(entries, list) else []
+    return entries
 
 
 _PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
@@ -493,5 +521,8 @@ def delete_all_user_data(user_id: str):
         _events.pop(user_id, None)
         _flush_json(_EVENTS_PATH, _events)
 
-        _bias_audit_log.pop(user_id, None)
-        _flush_json(_BIAS_AUDIT_LOG_PATH, _bias_audit_log)
+    # Delete bias audit log from Cosmos DB
+    try:
+        _get_cosmos().delete("bias_audit_log", user_id, user_id)
+    except RuntimeError:
+        pass  # Cosmos not configured; nothing to delete

@@ -10,7 +10,69 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
+from typing import Any, Dict, List, Optional
 from utils import store
+
+
+# ---------------------------------------------------------------------------
+# FakeCosmosUserStore — in-memory implementation for tests
+# ---------------------------------------------------------------------------
+
+class FakeCosmosUserStore:
+    """In-memory dict-backed fake that implements the CosmosUserStore interface."""
+
+    def __init__(self):
+        self._data: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def _cdata(self, container: str) -> Dict[str, Dict[str, Any]]:
+        return self._data.setdefault(container, {})
+
+    def upsert(self, container: str, item: Dict[str, Any]) -> Dict[str, Any]:
+        self._cdata(container)[item["id"]] = dict(item)
+        return dict(item)
+
+    def get(self, container: str, item_id: str, partition_key_value: str) -> Optional[Dict[str, Any]]:
+        item = self._cdata(container).get(item_id)
+        return dict(item) if item is not None else None
+
+    def delete(self, container: str, item_id: str, partition_key_value: str) -> bool:
+        return self._cdata(container).pop(item_id, None) is not None
+
+    def query(
+        self,
+        container: str,
+        query: str,
+        parameters: List[Dict[str, Any]],
+        partition_key_value: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        uid = next((p["value"] for p in parameters if p["name"] == "@uid"), None)
+        items = list(self._cdata(container).values())
+        if uid is not None:
+            items = [
+                i for i in items
+                if i.get("user_id") == uid or i.get("username") == uid
+            ]
+        if "c.is_deleted = false" in query:
+            items = [i for i in items if not i.get("is_deleted", False)]
+        return [dict(i) for i in items]
+
+    def patch(
+        self,
+        container: str,
+        item_id: str,
+        partition_key_value: str,
+        patch_operations: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        doc = dict(self._cdata(container).get(item_id, {}))
+        for op in patch_operations:
+            if op.get("op") == "set":
+                field = op["path"].lstrip("/")
+                doc[field] = op["value"]
+        self._cdata(container)[item_id] = doc
+        return dict(doc)
+
+    def check_connection(self) -> bool:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -19,13 +81,11 @@ from utils import store
 
 @pytest.fixture(autouse=True)
 def _isolate_store(tmp_path, monkeypatch):
-    """Point store module at a temp directory and reset in-memory state."""
+    """Point store module at a temp directory for JSON stores and use a fake Cosmos client."""
     data_dir = tmp_path / "store_data"
     data_dir.mkdir()
     monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_BIAS_AUDIT_LOG_PATH", data_dir / "bias_audit_log.json")
-    monkeypatch.setattr(store, "_bias_audit_log", {})
-    # Also patch other paths to avoid accidental writes
+    # Patch JSON-backed stores to temp dir
     monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
     monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
     monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
@@ -40,6 +100,8 @@ def _isolate_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_session_activity", {})
     monkeypatch.setattr(store, "_mastery_history", {})
     monkeypatch.setattr(store, "_profile_snapshots", {})
+    # Use a fake Cosmos client for bias audit log
+    monkeypatch.setattr(store, "_cosmos", FakeCosmosUserStore())
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +162,7 @@ class TestAppendBiasAuditLog:
     def test_empty_user_returns_empty(self):
         assert store.get_bias_audit_log("nonexistent") == []
 
-    def test_returns_deep_copy(self):
+    def test_returns_isolated_data(self):
         result = _make_audit_result("high", [{"category": "age", "severity": "high"}])
         store.append_bias_audit_log("alice", 0, "profile_fairness", result)
 
@@ -128,17 +190,15 @@ class TestAppendBiasAuditLog:
         assert store.get_bias_audit_log("alice")[0]["audit_type"] == "skill_gap_bias"
         assert store.get_bias_audit_log("bob")[0]["audit_type"] == "content_bias"
 
-    def test_persistence_to_disk(self, tmp_path):
-        """Verify data is flushed to JSON file."""
+    def test_cosmos_container_stores_data(self):
+        """Verify data is stored in the Cosmos bias_audit_log container."""
         result = _make_audit_result("medium")
         store.append_bias_audit_log("alice", 0, "skill_gap_bias", result)
 
-        log_path = store._BIAS_AUDIT_LOG_PATH
-        assert log_path.exists()
-        import json
-        data = json.loads(log_path.read_text(encoding="utf-8"))
-        assert "alice" in data
-        assert len(data["alice"]) == 1
+        # Verify the data is in the Cosmos container via the client
+        item = store._cosmos.get("bias_audit_log", "alice", "alice")
+        assert item is not None
+        assert len(item["entries"]) == 1
 
     def test_flags_summary_capped_at_20(self):
         flags = [{"category": f"cat_{i}", "severity": "low"} for i in range(30)]
