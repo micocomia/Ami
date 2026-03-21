@@ -159,6 +159,7 @@ RULES:
 - Do NOT derive learner_information from the learning goal, skill gaps, or FSLSM persona values.
 - If no resume was provided, set learner_information to "No prior background provided." — do not invent biographical details.
 - Summarize the provided resume into a concise biographical paragraph (2–4 sentences) for the output learner_information field. Do NOT copy the resume verbatim.
+- Use gender-neutral pronouns (they/them/their) when referring to the learner in the summary. Do not infer or assign gender.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
