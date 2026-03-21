@@ -129,15 +129,19 @@ az group create --name ami-rg --location eastus
 az acr create --resource-group ami-rg --name amiregistry --sku Basic --admin-enabled true
 ```
 
+> **No free tier:** Azure Container Registry has no free tier. `Basic` (~$5/month) is the lowest available SKU.
+
 ### Step 6: Create Azure AI Search
 
 ```bash
 az search service create \
   --resource-group ami-rg \
   --name ami-dti5902-search \
-  --sku standard \
+  --sku free \
   --location eastus
 ```
+
+> **Free tier limits:** 50 MB total storage, 3 indexes max (Ami uses 2 ✓), shared infrastructure, no SLA. The service may be automatically deleted after extended inactivity. Upgrade to `--sku basic` or higher for production.
 
 Retrieve the admin key:
 
@@ -162,8 +166,11 @@ az cosmosdb create \
   --name ami-dti5902-cosmos \
   --kind GlobalDocumentDB \
   --locations regionName=eastus isZoneRedundant=false \
-  --default-consistency-level Session
+  --default-consistency-level Session \
+  --enable-free-tier true
 ```
+
+> **Free tier:** 1,000 RU/s + 25 GB storage, lifetime free. Only one free-tier Cosmos DB account is allowed per Azure subscription. The backend provisions the `ami-userdata` database with 1,000 RU/s shared throughput so all 8 containers share the budget without exceeding the free tier.
 
 Retrieve the connection string:
 
@@ -185,6 +192,8 @@ az storage account create \
   --sku Standard_LRS
 ```
 
+> **No CLI free-tier flag:** Azure's always-free tier includes 5 GB Blob Storage (LRS) + 15 GB egress/month automatically — no special flag needed. `Standard_LRS` is already the lowest-cost SKU. Charges apply beyond those limits.
+
 Retrieve the connection string:
 
 ```bash
@@ -201,10 +210,12 @@ az cognitiveservices account create \
   --resource-group ami-rg \
   --name ami-dti5902-document-intelligence \
   --kind FormRecognizer \
-  --sku S0 \
+  --sku F0 \
   --location eastus \
   --yes
 ```
+
+> **Free tier limits (F0):** 500 pages/month, 20 calls/minute, 4 MB file size limit. Suitable for pre-indexing a small course content library. If your `resources/verified-course-content/` folder grows large, upgrade to `--sku S0`.
 
 Retrieve the endpoint and key:
 
@@ -273,10 +284,11 @@ az containerapp env create \
 
 ### Step 14: Deploy the backend to Azure Container Apps
 
-This deployment shape is a reasonable starting point for Ami:
+This deployment shape targets the Azure Container Apps free tier:
 - `UVICORN_WORKERS=2`
 - `min replicas = 1`
-- `max replicas = 5`
+- `max replicas = 3`
+- `cpu=0.5`, `memory=1Gi` per replica
 - HTTP scaling threshold = `1` concurrent request per replica
 
 The low HTTP concurrency threshold is intentional because content generation is long-running and resource-heavy.
@@ -292,10 +304,10 @@ az containerapp create \
   --registry-server amiregistry.azurecr.io \
   --registry-username $(az acr credential show --name amiregistry --query username -o tsv) \
   --registry-password $(az acr credential show --name amiregistry --query "passwords[0].value" -o tsv) \
-  --cpu 2 \
-  --memory 4Gi \
+  --cpu 0.5 \
+  --memory 1Gi \
   --min-replicas 1 \
-  --max-replicas 5 \
+  --max-replicas 3 \
   --scale-rule-name http-scale \
   --scale-rule-type http \
   --scale-rule-http-concurrency 1 \
@@ -378,13 +390,15 @@ Common startup errors:
 
 This backend does long-running, LLM-heavy content generation. Start conservatively.
 
-Recommended initial settings:
+Recommended initial settings (free tier):
 - `UVICORN_WORKERS=2`
-- `cpu=2`
-- `memory=4Gi`
+- `cpu=0.5`
+- `memory=1Gi`
 - `min-replicas=1`
-- `max-replicas=5`
+- `max-replicas=3`
 - `http concurrency=1`
+
+> **Free tier allocation:** 180,000 vCPU-seconds + 360,000 GiB-seconds per month. At 0.5 vCPU/1 GiB this supports roughly 100 hours of continuous single-replica runtime before incurring charges — adequate for development and low-traffic use.
 
 If latency is still high under concurrent users:
 - increase `max-replicas`
@@ -397,6 +411,8 @@ Update the app later with:
 az containerapp update \
   --name ami-backend \
   --resource-group ami-rg \
+  --cpu 2 \
+  --memory 4Gi \
   --min-replicas 1 \
   --max-replicas 8 \
   --set-env-vars UVICORN_WORKERS=3

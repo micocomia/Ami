@@ -45,7 +45,10 @@ class CosmosUserStore:
     def __init__(self, connection_string: str, database_name: str = "ami-userdata"):
         from azure.cosmos import CosmosClient, PartitionKey
         self._client = CosmosClient.from_connection_string(connection_string)
-        self._db = self._client.create_database_if_not_exists(id=database_name)
+        self._db = self._client.create_database_if_not_exists(
+            id=database_name,
+            offer_throughput=1000,
+        )
         self._containers: Dict[str, Any] = {}
         self._PartitionKey = PartitionKey
 
