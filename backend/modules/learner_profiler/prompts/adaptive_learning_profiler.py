@@ -72,7 +72,45 @@ Chain of Thoughts for Task A
 1. Interpret the learner's resume to identify relevant skills and knowledge.
 2. Determine the learner's learning goal and the required proficiency levels, must put entire learning goal into the profile.
 3. Assess the learner's cognitive status, including mastered skills and knowledge gaps (If the current proficiency level is equal or higher than the required proficiency level, must move the skill to the mastered list). Use SOLO-level reasoning when categorizing skills: determine whether the learner has no understanding (unlearned), grasps a single aspect (beginner), knows multiple aspects without integration (intermediate), integrates concepts coherently (advanced), or can generalize to new contexts (expert).
-4. If the learner information includes initial FSLSM dimension values (from a persona selection), use those as the baseline. Only adjust values if the resume or other learner information provides strong evidence for a different learning style. Otherwise, preserve the provided values.
+4. Determine FSLSM dimensions using the following rules based on what is available:
+
+   Resume signal mapping — scan the learner's background for evidence per dimension:
+   - fslsm_processing  (-1 active/hands-on ↔ +1 reflective):
+       Negative signals: internships, "built/implemented/shipped", hackathons, lab/practical work, hands-on projects
+       Positive signals: research roles, publications, analysis-heavy positions, theoretical study
+   - fslsm_perception  (-1 sensing/concrete ↔ +1 intuitive/abstract):
+       Negative signals: engineering, data analysis, statistics, technical roles focused on facts/measurements
+       Positive signals: R&D, innovation, design thinking, theoretical research, conceptual/strategic work
+   - fslsm_input       (-1 visual ↔ +1 verbal):
+       Negative signals: design, data visualization, UI/UX, CAD, media production, diagram-heavy roles
+       Positive signals: writing, documentation, communication roles, journalism, teaching, verbal presentations
+   - fslsm_understanding (-1 sequential ↔ +1 global):
+       Negative signals: procedural engineering, operations, step-by-step project management, strict workflows
+       Positive signals: systems architecture, strategy, interdisciplinary work, leadership, holistic design
+
+   Case 1 — Persona provided (Selected Persona is not "None selected"), no resume (Biographical Background is "None provided"):
+     Use the persona's FSLSM baseline values exactly. Do not modify any dimension.
+
+   Case 2 — Resume only (Biographical Background is not "None provided"), no persona (Selected Persona is "None selected"):
+     Infer each dimension independently from resume signals:
+     - No evidence for a dimension → 0.0 (balanced; do not guess)
+     - Mild signals (1 indirect mention) → ±0.2–0.3
+     - Clear signals (consistent pattern across role) → ±0.4–0.6
+     - Strong, repeated evidence (career-defining pattern) → ±0.7–0.9
+     Final value must be clamped to [-1, 1].
+
+   Case 3 — Both persona and resume provided:
+     Start from the persona's FSLSM baseline for each dimension.
+     For each dimension, scan the resume for signals that contradict or reinforce it:
+     - No resume signals → preserve baseline exactly
+     - Mild signals → adjust ±0.1–0.2 from baseline toward signal direction
+     - Clear signals → adjust ±0.2–0.4 from baseline
+     - Strong, repeated signals → adjust up to ±0.5 from baseline
+     Do not flip the sign of a dimension (i.e., do not move more than the distance to 0 if that would change polarity) unless evidence is overwhelming.
+     Final value must be clamped to [-1, 1].
+
+   Case 4 — Neither persona nor resume provided:
+     Default all dimensions to 0.0.
 5. Consider the learner's behavioral patterns to enhance engagement and motivation.
 
 Task B. Profile Update:
@@ -106,12 +144,18 @@ Task A. Initial Profiling.
 
 Generate an initial profile for the learner based on the provided details:
 
-- Learning Goal: {learning_goal}
-- Learner Resume: {learner_information}
-- Skill Gaps: {skill_gaps}
+## Learner Context
+
+**Learning Goal:** {learning_goal}
+
+**Selected Persona:** {persona_section}
+
+**Biographical Background (from resume):** {resume_section}
+
+**Identified Skill Gaps:** {skill_gaps}
 
 RULES:
-- learner_information must contain only biographical background from the provided resume.
+- learner_information in the output must contain only biographical background from the provided resume.
 - Do NOT derive learner_information from the learning goal, skill gaps, or FSLSM persona values.
 - If no resume was provided, set learner_information to "No prior background provided." — do not invent biographical details.
 

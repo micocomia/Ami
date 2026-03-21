@@ -10,7 +10,7 @@ from components.gap_identification import (
     has_any_gap,
 )
 from utils.state import add_new_goal, save_persistent_state
-from utils.request_api import create_learner_profile, validate_profile_fairness
+from utils.request_api import create_learner_profile, validate_profile_fairness, get_personas
 
 
 def render_skill_gap():
@@ -21,7 +21,8 @@ def render_skill_gap():
         st.switch_page("pages/onboarding.py")
         return
 
-    if not goal.get("learning_goal") or not st.session_state.get("learner_information"):
+    has_info = st.session_state.get("learner_information") or st.session_state.get("learner_persona")
+    if not goal.get("learning_goal") or not has_info:
         st.switch_page("pages/onboarding.py")
         return
 
@@ -75,10 +76,15 @@ def render_skill_gap():
                     if skill_gaps and not goal.get("learner_profile"):
                         with st.spinner('Creating your profile ...'):
                             try:
+                                _PERSONAS = get_personas()
+                                _persona_name = st.session_state.get("learner_persona", "")
+                                _fslsm_baseline = _PERSONAS[_persona_name]["fslsm_dimensions"] if _persona_name in _PERSONAS else {}
                                 learner_profile = create_learner_profile(
                                     goal["learning_goal"],
                                     st.session_state["learner_information"],
                                     skill_gaps,
+                                    persona_name=_persona_name,
+                                    fslsm_baseline=_fslsm_baseline,
                                 )
                             except Exception as e:
                                 st.error("Backend call failed while creating learner profile.")

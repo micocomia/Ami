@@ -43,6 +43,8 @@ class LearnerProfileInitializationWithInfoRequest(BaseRequest):
     learning_goal: str
     learner_information: str
     skill_gaps: str
+    persona_name: Optional[str] = None
+    fslsm_baseline: Optional[Dict[str, Any]] = None
     user_id: Optional[str] = None
     goal_id: Optional[int] = None
 

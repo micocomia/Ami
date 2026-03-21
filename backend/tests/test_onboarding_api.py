@@ -389,6 +389,48 @@ class TestCreateLearnerProfileEndpoint:
         # No user_id/goal_id => not stored
         assert store.get_profile("alice", 0) is None
 
+    @patch("main.initialize_learner_profile_with_llm")
+    @patch("main.get_llm")
+    def test_create_profile_forwards_persona_and_fslsm_baseline(self, mock_get_llm, mock_init, client):
+        """Verify persona_name and fslsm_baseline are forwarded to the LLM function."""
+        mock_get_llm.return_value = MagicMock()
+        mock_init.return_value = MOCK_LEARNER_PROFILE
+
+        fslsm = {"fslsm_processing": -0.7, "fslsm_perception": -0.5,
+                  "fslsm_input": -0.5, "fslsm_understanding": -0.5}
+        resp = client.post("/v1/create-learner-profile-with-info", json={
+            "learning_goal": "Learn Python",
+            "learner_information": "",
+            "skill_gaps": json.dumps([]),
+            "persona_name": "Hands-on Explorer",
+            "fslsm_baseline": fslsm,
+        })
+        assert resp.status_code == 200
+        # Verify persona fields were forwarded as keyword args to the LLM function
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("persona_name") == "Hands-on Explorer"
+        assert call_kwargs.get("fslsm_baseline", {}).get("fslsm_processing") == -0.7
+
+    @patch("main.initialize_learner_profile_with_llm")
+    @patch("main.get_llm")
+    def test_create_profile_resume_only_no_persona(self, mock_get_llm, mock_init, client):
+        """Verify resume-only path succeeds when no persona is provided."""
+        mock_get_llm.return_value = MagicMock()
+        mock_init.return_value = MOCK_LEARNER_PROFILE
+
+        resp = client.post("/v1/create-learner-profile-with-info", json={
+            "learning_goal": "Learn Python",
+            "learner_information": "Software engineer with 5 years of Python experience",
+            "skill_gaps": json.dumps([]),
+            # persona_name and fslsm_baseline intentionally omitted
+        })
+        assert resp.status_code == 200
+        assert "learner_profile" in resp.json()
+        # Verify empty defaults were forwarded
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("persona_name") == ""
+        assert call_kwargs.get("fslsm_baseline") == {}
+
 
 # ===================================================================
 # POST /events/log  (Event logging during onboarding)

@@ -130,24 +130,10 @@ def render_onboard():
                 ):
                     _select_persona(name)
 
-        # Build learner_information from persona
-        persona_name = st.session_state.get("learner_persona", "")
-        if persona_name and persona_name in PERSONAS:
-            dims = PERSONAS[persona_name]["fslsm_dimensions"]
-            persona_prefix = (
-                f"Learning Persona: {persona_name} "
-                f"(initial FSLSM: processing={dims['fslsm_processing']}, "
-                f"perception={dims['fslsm_perception']}, "
-                f"input={dims['fslsm_input']}, "
-                f"understanding={dims['fslsm_understanding']}). "
-            )
-        else:
-            persona_prefix = ""
-
         # --- Upload Resume ---
         st.write("")  # spacing
         uploaded_file = st.file_uploader(
-            "Upload your resume for a more personalized experience",
+            "Upload your resume for a more personalized experience (optional)",
             type="pdf",
             label_visibility="visible",
         )
@@ -159,8 +145,9 @@ def render_onboard():
         else:
             learner_information_pdf = st.session_state.get("learner_information_pdf", "")
 
-        # Combine learner information
-        st.session_state["learner_information"] = persona_prefix + learner_information_pdf
+        # learner_information is biographical text only (resume); FSLSM baseline
+        # is carried separately via learner_persona + PERSONAS lookup in skill_gap.py
+        st.session_state["learner_information"] = learner_information_pdf
         try:
             save_persistent_state()
         except Exception:
@@ -171,8 +158,13 @@ def render_onboard():
         _, btn_col, _ = st.columns([2, 1, 2])
         with btn_col:
             if st.button("Begin Learning", type="primary", use_container_width=True):
-                if not goal["learning_goal"] or not st.session_state.get("learner_persona"):
-                    st.warning("Please provide both a learning goal and select a learning persona before continuing.")
+                has_persona = bool(st.session_state.get("learner_persona"))
+                has_resume = bool(st.session_state.get("learner_information_pdf", ""))
+                if not goal["learning_goal"] or not (has_persona or has_resume):
+                    st.warning(
+                        "Please provide a learning goal and either select a learning persona "
+                        "or upload a resume (or both)."
+                    )
                 else:
                     # Clear stale skill gaps if the learning goal changed
                     previous_goal = goal.get("_last_identified_goal", "")

@@ -371,11 +371,15 @@ def create_learner_profile(
     skill_gaps,
     user_id=None,
     goal_id=None,
+    persona_name="",
+    fslsm_baseline=None,
 ):
     data = {
         "learning_goal": str(learning_goal),
         "learner_information": _normalize_learner_information(learner_information),
         "skill_gaps": _normalize_skill_gaps(skill_gaps),
+        "persona_name": persona_name or "",
+        "fslsm_baseline": fslsm_baseline or {},
     }
     if user_id is not None:
         data["user_id"] = user_id

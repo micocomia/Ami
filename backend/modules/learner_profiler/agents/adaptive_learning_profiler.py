@@ -189,6 +189,8 @@ class LearnerProfileInitializationPayload(BaseModel):
     learning_goal: str = Field(...)
     learner_information: Union[str, Dict[str, Any], Mapping[str, Any]]
     skill_gaps: Union[str, Dict[str, Any], Mapping[str, Any], List[Any]]
+    persona_name: str = ""
+    fslsm_baseline: Dict[str, Any] = Field(default_factory=dict)
 
 class LearnerProfileUpdatePayload(BaseModel):
     """Payload for updating an existing learner profile (validated)."""
@@ -240,6 +242,31 @@ class AdaptiveLearnerProfiler(BaseAgent):
         """Generate an initial learner profile using the provided onboarding information."""
         task_prompt = adaptive_learner_profiler_task_prompt_initialization
         payload_dict = LearnerProfileInitializationPayload(**input_dict).model_dump()
+
+        # Render persona section for the prompt template
+        persona_name = payload_dict.get("persona_name", "")
+        fslsm_baseline = payload_dict.get("fslsm_baseline") or {}
+        if persona_name and fslsm_baseline:
+            payload_dict["persona_section"] = (
+                f"{persona_name} — FSLSM baseline: "
+                f"processing={fslsm_baseline.get('fslsm_processing', 0)}, "
+                f"perception={fslsm_baseline.get('fslsm_perception', 0)}, "
+                f"input={fslsm_baseline.get('fslsm_input', 0)}, "
+                f"understanding={fslsm_baseline.get('fslsm_understanding', 0)}"
+            )
+        elif persona_name:
+            payload_dict["persona_section"] = persona_name
+        else:
+            payload_dict["persona_section"] = "None selected"
+
+        # Render resume section for the prompt template
+        learner_info = payload_dict.get("learner_information", "")
+        if isinstance(learner_info, dict):
+            raw_text = learner_info.get("raw", "") or str(learner_info)
+        else:
+            raw_text = str(learner_info or "")
+        payload_dict["resume_section"] = raw_text.strip() if raw_text.strip() else "None provided"
+
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated_output = LearnerProfile.model_validate(raw_output)
         return validated_output.model_dump()
@@ -293,6 +320,8 @@ def initialize_learner_profile_with_llm(
     learning_goal: str,
     learner_information: Union[str, Mapping[str, Any]],
     skill_gaps: Union[str, Mapping[str, Any], List[Any]],
+    persona_name: str = "",
+    fslsm_baseline: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Public helper for generating a learner profile with minimal boilerplate."""
     learner_profiler = AdaptiveLearnerProfiler(llm)
@@ -300,6 +329,8 @@ def initialize_learner_profile_with_llm(
         "learning_goal": learning_goal,
         "learner_information": learner_information,
         "skill_gaps": skill_gaps,
+        "persona_name": persona_name,
+        "fslsm_baseline": fslsm_baseline or {},
     }
     learner_profile = learner_profiler.initialize_profile(payload_dict)
     return learner_profile

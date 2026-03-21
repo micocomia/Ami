@@ -102,6 +102,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
 
+@app.get("/")
+async def health_check():
+    return {"status": "ok"}
+
+
 @app.on_event("startup")
 def _load_stores():
     store.load()
@@ -1650,8 +1655,11 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
                 skill_gaps = ast.literal_eval(skill_gaps)
             except Exception:
                 skill_gaps = {"raw": skill_gaps}
+        persona_name = request.persona_name or ""
+        fslsm_baseline = request.fslsm_baseline or {}
         learner_profile = initialize_learner_profile_with_llm(
-            llm, learning_goal, learner_information, skill_gaps
+            llm, learning_goal, learner_information, skill_gaps,
+            persona_name=persona_name, fslsm_baseline=fslsm_baseline,
         )
         if request.user_id is not None and request.goal_id is not None:
             store.upsert_profile(request.user_id, request.goal_id, learner_profile)
