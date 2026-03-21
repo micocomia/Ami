@@ -150,7 +150,7 @@ Generate an initial profile for the learner based on the provided details:
 
 **Selected Persona:** {persona_section}
 
-**Biographical Background (from resume):** {resume_section}
+**Learner Resume (raw input):** {resume_section}
 
 **Identified Skill Gaps:** {skill_gaps}
 
@@ -158,6 +158,7 @@ RULES:
 - learner_information in the output must contain only biographical background from the provided resume.
 - Do NOT derive learner_information from the learning goal, skill gaps, or FSLSM persona values.
 - If no resume was provided, set learner_information to "No prior background provided." — do not invent biographical details.
+- Summarize the provided resume into a concise biographical paragraph (2–4 sentences) for the output learner_information field. Do NOT copy the resume verbatim.
 
 LEARNER_PROFILE_OUTPUT_FORMAT
 """
