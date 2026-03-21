@@ -262,7 +262,10 @@ def render_behavioral_patterns(goal):
     goal_id = None
     if isinstance(goal, dict) and "id" in goal:
         goal_id = goal["id"]
-    metrics = get_behavioral_metrics(user_id, goal_id) if user_id else None
+    bm_key = f"behavioral_metrics_{goal_id}"
+    if bm_key not in st.session_state:
+        st.session_state[bm_key] = get_behavioral_metrics(user_id, goal_id) if user_id else None
+    metrics = st.session_state.get(bm_key)
 
     if metrics is None:
         # Fallback to LLM-generated text if endpoint unavailable

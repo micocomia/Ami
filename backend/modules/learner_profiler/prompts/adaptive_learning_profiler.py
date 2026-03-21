@@ -157,7 +157,7 @@ Generate an initial profile for the learner based on the provided details:
 RULES:
 - learner_information in the output must contain only biographical background from the provided resume.
 - Do NOT derive learner_information from the learning goal, skill gaps, or FSLSM persona values.
-- If no resume was provided, set learner_information to "No prior background provided." — do not invent biographical details.
+- If the resume section says "None provided", output learner_information as exactly "No prior background provided." — do NOT write anything about the learner's persona, learning preferences, or learning goal.
 - Summarize the provided resume into a concise biographical paragraph (2–4 sentences) for the output learner_information field. Do NOT copy the resume verbatim.
 - Use gender-neutral pronouns (they/them/their) when referring to the learner in the summary. Do not infer or assign gender.
 

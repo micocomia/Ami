@@ -265,11 +265,17 @@ class AdaptiveLearnerProfiler(BaseAgent):
             raw_text = learner_info.get("raw", "") or str(learner_info)
         else:
             raw_text = str(learner_info or "")
-        payload_dict["resume_section"] = raw_text.strip() if raw_text.strip() else "None provided"
+        no_resume = not raw_text.strip()
+        payload_dict["resume_section"] = raw_text.strip() if not no_resume else "None provided"
 
         raw_output = self.invoke(payload_dict, task_prompt=task_prompt)
         validated_output = LearnerProfile.model_validate(raw_output)
-        return validated_output.model_dump()
+        result = validated_output.model_dump()
+        # Guardrail: if no resume was provided, learner_information must never contain
+        # FSLSM, persona, or goal-derived content — enforce the default unconditionally.
+        if no_resume:
+            result["learner_information"] = "No prior background provided."
+        return result
 
     def update_profile(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing learner profile with fresh interaction data."""

@@ -19,10 +19,11 @@ def render_dashboard():
 
     user_id = st.session_state.get("userId")
 
-    if user_id:
+    if user_id and st.session_state.get("goals_dirty", True):
         fresh_goals = list_goals(user_id)
         if fresh_goals:
             st.session_state["goals"] = fresh_goals
+        st.session_state["goals_dirty"] = False
 
     st.title("Learning Analytics")
     st.write("Track your learning progress and view learning insights here.")
@@ -62,8 +63,11 @@ def render_dashboard():
     selected_goal = goal_options[selected_label]
     selected_goal_id = selected_goal.get("id")
 
-    # Fetch metrics for the selected goal
-    metrics = get_dashboard_metrics(user_id, selected_goal_id) if user_id and selected_goal_id is not None else None
+    # Fetch metrics for the selected goal — cached per goal in session state
+    metrics_key = f"dashboard_metrics_{selected_goal_id}"
+    if metrics_key not in st.session_state:
+        st.session_state[metrics_key] = get_dashboard_metrics(user_id, selected_goal_id) if user_id and selected_goal_id is not None else None
+    metrics = st.session_state.get(metrics_key)
     if not metrics:
         st.warning("Analytics are not available yet for this goal.")
         return

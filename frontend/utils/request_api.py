@@ -850,12 +850,17 @@ def save_learner_profile(user_id, goal_id, learner_profile):
         return False
 
 
+@st.cache_resource
 def get_personas():
-    """GET /personas → dict of personas. Falls back to local data on failure."""
+    """GET /personas → dict of personas. Falls back to local data on failure.
+
+    Cached at the process level — personas are static data that never change
+    per user or session, so one fetch per server process is sufficient.
+    """
     from utils.personas import PERSONAS as LOCAL_PERSONAS
     if use_mock_data:
         return LOCAL_PERSONAS
-    url = f"{_get_backend_endpoint()}personas"
+    url = f"{backend_endpoint}personas"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:

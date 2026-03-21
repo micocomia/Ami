@@ -1641,7 +1641,7 @@ async def create_learner_profile_with_info(request: LearnerProfileInitialization
     if request.user_id:
         _assert_owns(current_user, request.user_id)
     llm = get_llm()
-    learner_information = request.learner_information
+    learner_information = request.learner_information or ""
     learning_goal = request.learning_goal
     skill_gaps = request.skill_gaps
     try:
