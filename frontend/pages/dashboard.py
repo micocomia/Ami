@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-from utils.request_api import get_app_config, get_dashboard_metrics, list_goals
+from utils.request_api import get_app_config, get_bias_audit_history, get_dashboard_metrics, list_goals
 from utils.state import get_selected_goal
 
 
@@ -82,6 +82,8 @@ def render_dashboard():
         render_session_learning_timeseries(metrics)
     with st.container(border=True):
         render_mastery_skills_timeseries(metrics)
+    with st.container(border=True):
+        render_bias_ethics_review(user_id, selected_goal_id)
 
 
 def render_learning_progress(metrics):
@@ -178,6 +180,58 @@ def render_mastery_skills_timeseries(metrics):
         "Mastery Rate": [float(item.get("mastery_rate", 0.0) or 0.0) for item in series],
     })
     st.line_chart(chart_data, x="Time", y="Mastery Rate")
+
+
+def render_bias_ethics_review(user_id, goal_id):
+    st.markdown("#### Bias & Ethics Review")
+    st.write("Track bias audit results across your learning journey.")
+
+    data = get_bias_audit_history(user_id, goal_id) if user_id else None
+    if not data or not data.get("entries"):
+        st.info("No bias audits recorded yet.")
+        return
+
+    entries = data["entries"]
+    summary = data.get("summary", {})
+
+    # Summary metrics row
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Audits", summary.get("total_audits", 0))
+    col2.metric("Flags Detected", summary.get("total_flags", 0))
+    col3.metric("Current Risk", (summary.get("current_risk", "low")).capitalize())
+
+    # Risk distribution chart
+    risk_dist = summary.get("risk_distribution", {})
+    if any(risk_dist.values()):
+        st.markdown("**Risk Distribution**")
+        risk_df = pd.DataFrame({
+            "Risk Level": list(risk_dist.keys()),
+            "Count": list(risk_dist.values()),
+        })
+        st.bar_chart(risk_df, x="Risk Level", y="Count")
+
+    # Bias category breakdown
+    cat_counts = summary.get("category_counts", {})
+    if cat_counts:
+        st.markdown("**Bias Categories Flagged**")
+        cat_df = pd.DataFrame({
+            "Category": list(cat_counts.keys()),
+            "Count": list(cat_counts.values()),
+        })
+        cat_df = cat_df.sort_values("Count", ascending=False).head(10)
+        st.bar_chart(cat_df, x="Category", y="Count")
+
+    # Audit timeline table
+    st.markdown("**Recent Audits**")
+    timeline_rows = []
+    for e in reversed(entries[-20:]):
+        timeline_rows.append({
+            "Time": e.get("timestamp", "")[:19].replace("T", " "),
+            "Type": e.get("audit_type", "").replace("_", " ").title(),
+            "Risk": e.get("overall_risk", "low").capitalize(),
+            "Flags": e.get("flagged_count", 0),
+        })
+    st.dataframe(pd.DataFrame(timeline_rows), use_container_width=True, hide_index=True)
 
 
 render_dashboard()

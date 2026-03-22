@@ -118,6 +118,8 @@ def render_identifying_skill_gap(goal):
             bias_audit = audit_skill_gap_bias(
                 skill_gaps_dict,
                 learner_information,
+                user_id=st.session_state.get("userId"),
+                goal_id=goal.get("id"),
             )
             goal["bias_audit"] = bias_audit
         except Exception:

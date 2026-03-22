@@ -26,6 +26,7 @@ _PARTITION_KEYS: Dict[str, str] = {
     "session_activity": "/user_id",
     "mastery_history": "/user_id",
     "events": "/user_id",
+    "bias_audit_log": "/user_id",
 }
 
 

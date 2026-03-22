@@ -7,7 +7,8 @@ import { useGoalsContext } from '@/context/GoalsContext';
 import { useActiveGoal } from '@/context/GoalsContext';
 import { useDashboardMetrics } from '@/api/endpoints/content';
 import { useBehavioralMetrics } from '@/api/endpoints/metrics';
-import { SkillRadarChart, SessionTimeChart, MasteryChart } from '@/components/analytics';
+import { useBiasAuditHistory } from '@/api/endpoints/skillGap';
+import { SkillRadarChart, SessionTimeChart, MasteryChart, BiasRiskTrendChart, RecentAuditsTable, HighRiskBanner } from '@/components/analytics';
 
 const TIME_OPTIONS = ['Last 7 days', 'Last 30 days', 'All time'] as const;
 type TimeRange = (typeof TIME_OPTIONS)[number];
@@ -388,6 +389,8 @@ function AnalyticsActiveGoal() {
   const { goals, selectedGoalId, setSelectedGoalId } = useGoalsContext();
   const { activeGoal } = useActiveGoal();
 
+  const { data: biasHistory } = useBiasAuditHistory(userId ?? undefined, activeGoal?.id);
+
   const goalOptions = goals.map((g) => ({
     value: String(g.id),
     label: ((g.learner_profile?.goal_display_name as string | undefined) ?? g.learning_goal).slice(0, 50),
@@ -454,6 +457,9 @@ function AnalyticsActiveGoal() {
 
   return (
     <div className="space-y-6">
+      {/* High-risk bias warning */}
+      <HighRiskBanner entries={biasHistory?.entries ?? []} />
+
       {/* Header: title + goal dropdown + time filter */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -770,6 +776,55 @@ function AnalyticsActiveGoal() {
           </div>
         </div>
       </section>
+
+      {/* Bias & Ethics Review */}
+      {biasHistory && biasHistory.entries.length > 0 && (
+        <section>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Bias & Ethics Review</h3>
+
+          {/* Bias KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Total Audits</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{biasHistory.summary.total_audits}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Total Flags</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{biasHistory.summary.total_flags}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Current Risk</p>
+              <p className={`text-2xl font-bold mt-1 capitalize ${
+                biasHistory.summary.current_risk === 'low' ? 'text-green-600' :
+                biasHistory.summary.current_risk === 'medium' ? 'text-amber-600' :
+                'text-red-600'
+              }`}>
+                {biasHistory.summary.current_risk}
+              </p>
+            </div>
+          </div>
+
+          {/* Trend chart + Recent Audits table */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <h4 className="font-semibold text-slate-700 mb-4">Risk Level Over Time</h4>
+              <BiasRiskTrendChart entries={biasHistory.entries} />
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <h4 className="font-semibold text-slate-700 mb-4">Recent Audits</h4>
+              <RecentAuditsTable entries={biasHistory.entries} />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!isLoading && !metrics && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <p className="text-slate-400 text-sm">
+            No analytics data yet. Complete some sessions to see your progress.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

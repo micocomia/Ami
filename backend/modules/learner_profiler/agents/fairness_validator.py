@@ -60,6 +60,14 @@ _STEREOTYPE_PHRASES = [
     "given their age",
     "from that background",
     "people from",
+    "for someone like you",
+    "your kind of",
+    "not typical for",
+    "despite being",
+    "for your level",
+    "as a young person",
+    "as an older person",
+    "culturally speaking",
 ]
 
 # Threshold for flagging FSLSM deviation from persona baseline

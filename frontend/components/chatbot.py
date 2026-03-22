@@ -64,7 +64,11 @@ def ask_autor_chatbot():
         # Run chatbot bias audit (non-blocking)
         try:
             learner_information = st.session_state.get("learner_information", "")
-            chatbot_audit_result = audit_chatbot_bias(response, learner_information)
+            chatbot_audit_result = audit_chatbot_bias(
+                response, learner_information,
+                user_id=st.session_state.get("userId"),
+                goal_id=goal.get("id") if isinstance(goal, dict) else None,
+            )
             st.session_state["chatbot_bias_audit"] = chatbot_audit_result
         except Exception:
             st.session_state["chatbot_bias_audit"] = None

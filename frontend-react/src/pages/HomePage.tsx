@@ -5,6 +5,8 @@ import { useGoalsContext } from '@/context/GoalsContext';
 import { useActiveGoal } from '@/context/GoalsContext';
 import { useDashboardMetrics } from '@/api/endpoints/content';
 import { useBehavioralMetrics } from '@/api/endpoints/metrics';
+import { useBiasAuditHistory } from '@/api/endpoints/skillGap';
+import { HighRiskBanner } from '@/components/analytics';
 
 function formatDuration(secs: number | undefined): string {
   if (!secs || !Number.isFinite(secs)) return '—';
@@ -33,6 +35,7 @@ export function HomePage() {
     isLoading: behavLoading,
     error: behavError,
   } = useBehavioralMetrics(userId ?? undefined, activeGoal?.id);
+  const { data: biasHistory } = useBiasAuditHistory(userId ?? undefined);
   const isLoading = dashLoading || behavLoading;
 
   const overallProgressPct = (() => {
@@ -76,6 +79,9 @@ export function HomePage() {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
+      {/* High-risk bias warning */}
+      <HighRiskBanner entries={biasHistory?.entries ?? []} />
+
       {/* Welcome banner — colors: bg #D9EEF1, title #12333A, body #355C63, button #FFF / #0F5968 */}
       <div className="rounded-xl p-8 bg-[#D9EEF1]">
         <h2 className="text-2xl font-bold text-[#12333A]">Welcome back!</h2>

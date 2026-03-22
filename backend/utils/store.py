@@ -424,6 +424,50 @@ def append_mastery_history(
 # Cross-goal operations
 # ---------------------------------------------------------------------------
 
+# ---------------- bias audit log ----------------
+
+def append_bias_audit_log(
+    user_id: str,
+    goal_id: Optional[int],
+    audit_type: str,
+    audit_result: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Append a compact bias audit entry. Retains last 200 per user (Cosmos DB)."""
+    flags = audit_result.get("flags") or audit_result.get("flagged_items") or []
+    flagged = [f for f in flags if isinstance(f, dict)]
+    audited_items = audit_result.get("audited_items") or audit_result.get("items_audited")
+    audited_count = int(audited_items) if audited_items is not None else len(flagged)
+
+    entry: Dict[str, Any] = {
+        "timestamp": _now_iso(),
+        "goal_id": goal_id,
+        "audit_type": audit_type,
+        "overall_risk": str(audit_result.get("overall_risk", "low")).lower(),
+        "flagged_count": len(flagged),
+        "audited_count": audited_count,
+        "flags_summary": [
+            {"category": f.get("category", "unknown"), "severity": f.get("severity", "low")}
+            for f in flagged[:20]
+        ],
+    }
+    db = _get_cosmos()
+    existing = db.get("bias_audit_log", user_id, user_id)
+    entries: List[Dict[str, Any]] = existing.get("entries", []) if existing else []
+    entries.append(entry)
+    entries = entries[-200:]
+    db.upsert("bias_audit_log", {"id": user_id, "user_id": user_id, "entries": entries})
+    return list(entries)
+
+
+def get_bias_audit_log(user_id: str, goal_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return all bias audit entries for a user, optionally filtered by goal_id."""
+    item = _get_cosmos().get("bias_audit_log", user_id, user_id)
+    entries = copy.deepcopy(item.get("entries", [])) if item is not None else []
+    if goal_id is not None:
+        entries = [e for e in entries if e.get("goal_id") == goal_id]
+    return entries
+
+
 _PROFICIENCY_ORDER = ["unlearned", "beginner", "intermediate", "advanced", "expert"]
 
 
@@ -576,6 +620,7 @@ def delete_all_user_data(user_id: str) -> None:
         "session_activity",
         "mastery_history",
         "events",
+        "bias_audit_log",
     ]
     for container in containers:
         items = db.query(

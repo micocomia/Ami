@@ -1631,6 +1631,8 @@ async def audit_skill_gap_bias(request: BiasAuditRequest):
         if not isinstance(skill_gaps, dict):
             skill_gaps = {"skill_gaps": []}
         result = audit_skill_gap_bias_with_llm(llm, learner_information, skill_gaps)
+        if request.user_id and isinstance(result, dict):
+            store.append_bias_audit_log(request.user_id, request.goal_id, "skill_gap_bias", result)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -1688,6 +1690,8 @@ async def validate_profile_fairness(request: ProfileFairnessRequest):
         result = validate_profile_fairness_with_llm(
             llm, learner_information, learner_profile, persona_name
         )
+        if request.user_id and isinstance(result, dict):
+            store.append_bias_audit_log(request.user_id, request.goal_id, "profile_fairness", result)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -1700,6 +1704,8 @@ async def audit_content_bias(request: ContentBiasAuditRequest):
     learner_information = request.learner_information
     try:
         result = audit_content_bias_with_llm(llm, generated_content, learner_information)
+        if request.user_id and isinstance(result, dict):
+            store.append_bias_audit_log(request.user_id, request.goal_id, "content_bias", result)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -1712,9 +1718,40 @@ async def audit_chatbot_bias(request: ChatbotBiasAuditRequest):
     learner_information = request.learner_information
     try:
         result = audit_chatbot_bias_with_llm(llm, tutor_responses, learner_information)
+        if request.user_id and isinstance(result, dict):
+            store.append_bias_audit_log(request.user_id, request.goal_id, "chatbot_bias", result)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@protected_router.get("/bias-audit-history/{user_id}", summary="Retrieve bias audit history for a user with summary statistics")
+async def get_bias_audit_history(user_id: str, goal_id: Optional[int] = None, current_user: str = Depends(get_current_user)):
+    _assert_owns(current_user, user_id)
+    entries = store.get_bias_audit_log(user_id, goal_id=goal_id)
+    # Compute summary stats
+    total = len(entries)
+    risk_distribution = {"low": 0, "medium": 0, "high": 0}
+    category_counts: Dict[str, int] = {}
+    for e in entries:
+        risk = e.get("overall_risk", "low")
+        risk_distribution[risk] = risk_distribution.get(risk, 0) + 1
+        for flag in e.get("flags_summary", []):
+            cat = flag.get("category", "unknown")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+    # Current risk = risk of most recent audit, or "low" if none
+    current_risk = entries[-1].get("overall_risk", "low") if entries else "low"
+    total_flags = sum(e.get("flagged_count", 0) for e in entries)
+    return {
+        "entries": entries,
+        "summary": {
+            "total_audits": total,
+            "total_flags": total_flags,
+            "current_risk": current_risk,
+            "risk_distribution": risk_distribution,
+            "category_counts": category_counts,
+        },
+    }
 
 
 @protected_router.post("/update-cognitive-status", summary="Update the cognitive status section of a learner profile after a session")

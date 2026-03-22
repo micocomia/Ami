@@ -162,6 +162,7 @@ API_NAMES = {
     "audit_content_bias": "audit-content-bias",
     "audit_chatbot_bias": "audit-chatbot-bias",
     "reset_mastery_attempt": "reset-mastery-attempt",
+    "bias_audit_history": "bias-audit-history",
 }
 
 
@@ -328,41 +329,71 @@ def identify_skill_gap(
     )
 
 
-def audit_skill_gap_bias(skill_gaps_dict, learner_information):
+def audit_skill_gap_bias(skill_gaps_dict, learner_information, user_id=None, goal_id=None):
     """Call the bias audit endpoint and return the audit result."""
     data = {
         "skill_gaps": json.dumps(skill_gaps_dict),
         "learner_information": _normalize_learner_information(learner_information),
     }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
     return make_post_request(API_NAMES["audit_skill_gap_bias"], data)
 
 
-def validate_profile_fairness(learner_profile, learner_information, persona_name=""):
+def validate_profile_fairness(learner_profile, learner_information, persona_name="", user_id=None, goal_id=None):
     """Call the fairness validation endpoint and return the result."""
     data = {
         "learner_profile": json.dumps(learner_profile) if isinstance(learner_profile, dict) else str(learner_profile),
         "learner_information": _normalize_learner_information(learner_information),
         "persona_name": persona_name,
     }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
     return make_post_request(API_NAMES["validate_profile_fairness"], data)
 
 
-def audit_content_bias(generated_content, learner_information):
+def audit_content_bias(generated_content, learner_information, user_id=None, goal_id=None):
     """Call the content bias audit endpoint and return the audit result."""
     data = {
         "generated_content": str(generated_content),
         "learner_information": _normalize_learner_information(learner_information),
     }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
     return make_post_request(API_NAMES["audit_content_bias"], data)
 
 
-def audit_chatbot_bias(tutor_responses, learner_information):
+def audit_chatbot_bias(tutor_responses, learner_information, user_id=None, goal_id=None):
     """Call the chatbot bias audit endpoint and return the audit result."""
     data = {
         "tutor_responses": str(tutor_responses),
         "learner_information": _normalize_learner_information(learner_information),
     }
+    if user_id is not None:
+        data["user_id"] = user_id
+    if goal_id is not None:
+        data["goal_id"] = goal_id
     return make_post_request(API_NAMES["audit_chatbot_bias"], data)
+
+
+def get_bias_audit_history(user_id, goal_id=None):
+    """Fetch bias audit history for a user, optionally filtered by goal."""
+    url = f"{_get_backend_endpoint()}{API_NAMES['bias_audit_history']}/{user_id}"
+    if goal_id is not None:
+        url += f"?goal_id={goal_id}"
+    try:
+        resp = httpx.get(url, headers=_auth_headers(), timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
 
 def create_learner_profile(

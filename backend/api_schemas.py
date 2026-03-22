@@ -158,6 +158,8 @@ class BiasAuditRequest(BaseRequest):
 
     learner_information: str
     skill_gaps: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
 
 
 class ProfileFairnessRequest(BaseRequest):
@@ -165,18 +167,24 @@ class ProfileFairnessRequest(BaseRequest):
     learner_profile: str
     learner_information: str
     persona_name: str = ""
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
 
 
 class ContentBiasAuditRequest(BaseRequest):
 
     generated_content: str
     learner_information: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
 
 
 class ChatbotBiasAuditRequest(BaseRequest):
 
     tutor_responses: str
     learner_information: str
+    user_id: Optional[str] = None
+    goal_id: Optional[int] = None
 
 
 class AuthRegisterRequest(BaseModel):
