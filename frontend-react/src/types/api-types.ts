@@ -646,7 +646,8 @@ export interface DashboardMetricsResponse {
 
 export interface LearnerInformationUpdateRequest extends BaseRequest {
   learner_profile: string;
-  updated_learner_information: string;
+  /** Matches backend `LearnerInformationUpdateRequest.edited_learner_information`. */
+  edited_learner_information: string;
   resume_text?: string;
   user_id?: string;
   goal_id?: number;
