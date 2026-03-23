@@ -309,6 +309,8 @@ def _build_learning_content_payload(
         method_name=method_name,
         search_rag_manager=search_rag_manager,
         cancel_event=cancel_event,
+        max_quality_rounds=APP_CONFIG["content_max_quality_rounds"],
+        max_knowledge_points=APP_CONFIG["content_max_knowledge_points"],
     )
     learning_content["view_model"] = build_learning_content_view_model(
         learning_content.get("document", ""),
@@ -1367,6 +1369,10 @@ async def get_personas():
 
 
 _prefetch_cfg = app_config.get("prefetch", {}) if hasattr(app_config, "get") else {}
+_sg_cfg = app_config.get("skill_gap", {}) if hasattr(app_config, "get") else {}
+_lp_cfg = app_config.get("learning_plan", {}) if hasattr(app_config, "get") else {}
+_cg_cfg = app_config.get("content_generation", {}) if hasattr(app_config, "get") else {}
+_cb_cfg = app_config.get("chatbot", {}) if hasattr(app_config, "get") else {}
 APP_CONFIG = {
     "skill_levels": ["unlearned", "beginner", "intermediate", "advanced", "expert"],
     "default_session_count": 8,
@@ -1379,6 +1385,12 @@ APP_CONFIG = {
     "prefetch_wait_long_secs": int(_prefetch_cfg.get("wait_long_secs", 130)),
     "prefetch_cooldown_secs": int(_prefetch_cfg.get("cooldown_secs", 20)),
     "prefetch_max_workers": int(_prefetch_cfg.get("max_workers", 2)),
+    "skill_gap_max_goal_iterations": int(_sg_cfg.get("max_goal_iterations", 2)),
+    "skill_gap_max_eval_iterations": int(_sg_cfg.get("max_eval_iterations", 2)),
+    "learning_plan_max_refinements": int(_lp_cfg.get("max_refinements", 1)),
+    "content_max_quality_rounds": int(_cg_cfg.get("max_quality_rounds", 2)),
+    "content_max_knowledge_points": int(_cg_cfg.get("max_knowledge_points", 4)),
+    "chatbot_enable_media_search": bool(_cb_cfg.get("enable_media_search", True)),
     "mastery_threshold_default": 70,
     "mastery_threshold_by_proficiency": {
         "beginner": 60,
@@ -1543,7 +1555,7 @@ async def chat_with_autor(request: ChatWithAutorRequest, current_user: str = Dep
             session_index=request.session_index,
             use_vector_retrieval=request.use_vector_retrieval,
             use_web_search=request.use_web_search,
-            use_media_search=request.use_media_search,
+            use_media_search=request.use_media_search if request.use_media_search is not None else APP_CONFIG["chatbot_enable_media_search"],
             allow_preference_updates=(
                 request.allow_preference_updates
                 if request.allow_preference_updates is not None
@@ -1591,6 +1603,8 @@ async def identify_skill_gap_with_info(request: SkillGapIdentificationRequest):
         skill_gaps, skill_requirements = identify_skill_gap_with_llm(
             llm, learning_goal, learner_information, skill_requirements,
             search_rag_manager=search_rag_manager,
+            max_goal_iterations=APP_CONFIG["skill_gap_max_goal_iterations"],
+            max_eval_iterations=APP_CONFIG["skill_gap_max_eval_iterations"],
         )
         results = {**skill_gaps, **skill_requirements}
         return results
@@ -1906,6 +1920,7 @@ async def schedule_learning_path_agentic_endpoint(request: AgenticLearningPathRe
             learner_profile = {}
         plan, agent_metadata = schedule_learning_path_agentic(
             llm, learner_profile, session_count,
+            max_refinements=APP_CONFIG["learning_plan_max_refinements"],
         )
         return {
             **plan,
