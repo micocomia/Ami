@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ProfileFairnessPanel } from '@/components/ethics';
 import { Button, Modal } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
+import { useSidebarCollapse } from '@/context/SidebarCollapseContext';
 import { useGoalsContext } from '@/context/GoalsContext';
 import { useActiveGoal } from '@/context/GoalsContext';
 import { useDeleteUserData, useUpdateLearnerInformation, useUpdateLearningPreferences } from '@/api/endpoints/content';
@@ -30,6 +32,60 @@ import {
   setStoredResume,
   clearStoredResume,
 } from '@/lib/resumeStorage';
+import type { LearnerProfile } from '@/types';
+
+/**
+ * Goals / profile APIs sometimes return `learner_profile` as a JSON string.
+ * Without this, `learner_information` never updates in the UI after resume upload.
+ */
+function normalizeLearnerProfile(raw: unknown): LearnerProfile | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return undefined;
+    try {
+      const p = JSON.parse(s) as unknown;
+      if (typeof p === 'object' && p !== null && !Array.isArray(p)) return p as LearnerProfile;
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    return raw as LearnerProfile;
+  }
+  return undefined;
+}
+
+/** POST bodies expect JSON text; list APIs may return `learner_profile` already as a JSON string — avoid double-encoding. */
+function serializeLearnerProfileForApi(raw: unknown): string {
+  if (raw == null) return '{}';
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return '{}';
+    try {
+      JSON.parse(s);
+      return s;
+    } catch {
+      return JSON.stringify({ learner_information: s });
+    }
+  }
+  return JSON.stringify(raw);
+}
+
+/** Backend may store `learner_information` as structured JSON; UI and edit payloads need a string. */
+function learnerInformationToString(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') {
+    try {
+      return JSON.stringify(raw, null, 2);
+    } catch {
+      return String(raw);
+    }
+  }
+  return String(raw);
+}
 
 function formatDuration(secs: number): string {
   if (secs <= 0 || !Number.isFinite(secs)) return '—';
@@ -38,6 +94,425 @@ function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.round((secs % 3600) / 60);
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** Right column card titles (Activity Summary, How You Learn, Talent Assets, Data & Account) — same level. */
+const PROFILE_PAGE_SECTION_TITLE =
+  'text-sm font-semibold uppercase tracking-wider text-slate-900';
+
+/** Left column subsection labels (Education, Experience, …) — match weight/case; compact size for narrow column. */
+const PROFILE_SIDEBAR_SECTION_LABEL =
+  'text-xs font-semibold uppercase tracking-wider text-slate-900';
+
+/** Strip onboarding/system prefixes so the profile reads as a bio. */
+function displayLearnerInformationBody(text: string): string {
+  let t = text.trim();
+  t = t.replace(/^Learning style preference:\s*[^.]+\.\s*/i, '');
+  t = t.replace(/^Learning Persona:\s[^.]+\([^)]*\)\.\s*/, '');
+  return t.trim();
+}
+
+function normalizeBackgroundSnippet(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    return s.length ? s : null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((x) => (typeof x === 'string' ? x.trim() : JSON.stringify(x)))
+      .filter(Boolean);
+    return parts.length ? parts.join('\n') : null;
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+const EDU_HINT =
+  /\b(Master|Bachelor|B\.?\s*S\.?|B\.?\s*A\.?|M\.?\s*S\.?|M\.?\s*A\.?|Ph\.?\s*D|Doctorate|University|College|degree|diploma|concentration|School of|Faculty of|undergraduate|graduate|coursework|student at)\b/i;
+const WORK_HINT =
+  /\b(worked|employment|intern(?:ship)?|engineer|developer|manager|analyst|consultant|software|full[\s-]?time|part[\s-]?time|Corporation|Corp\.|Ltd\.|Inc\.|LLC|years? (?:of |at )|role as|position|Co-?op)\b/i;
+
+/** Heuristic extraction from free-text learner_information (no LLM). */
+function parseLearnerInformationSections(body: string): { education: string[]; work: string[] } {
+  const education: string[] = [];
+  const work: string[] = [];
+  const t = body.trim();
+  if (!t) return { education, work };
+
+  const pushUnique = (arr: string[], item: string) => {
+    const s = item.trim();
+    if (s.length < 16) return;
+    if (!arr.includes(s)) arr.push(s);
+  };
+
+  const paragraphs = t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const blocks = paragraphs.length > 0 ? paragraphs : [t];
+
+  const classify = (p: string) => {
+    const edu = EDU_HINT.test(p);
+    const wo = WORK_HINT.test(p);
+    if (edu && !wo) pushUnique(education, p);
+    else if (wo && !edu) pushUnique(work, p);
+    else if (edu && wo) {
+      if (/\b(University|College|School of|Bachelor|Master|Ph\.?\s*D|concentration)\b/i.test(p)) pushUnique(education, p);
+      else pushUnique(work, p);
+    }
+  };
+
+  for (const p of blocks) {
+    if (p.length > 400) {
+      p.split(/(?<=[.!?])\s+/).forEach((s) => classify(s.trim()));
+    } else {
+      classify(p);
+    }
+  }
+
+  if (education.length === 0 && work.length === 0 && t.length > 40) {
+    t.split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 20)
+      .forEach((s) => {
+        const edu = EDU_HINT.test(s);
+        const wo = WORK_HINT.test(s);
+        if (edu && !wo) pushUnique(education, s);
+        else if (wo && !edu) pushUnique(work, s);
+        else if (edu && wo) {
+          if (/\b(University|College|Master|Bachelor|Ph\.?\s*D)\b/i.test(s)) pushUnique(education, s);
+          else pushUnique(work, s);
+        }
+      });
+  }
+
+  return { education, work };
+}
+
+/** Raw strings → timeline entries (title / subtitle / optional status). */
+interface ProfileTimelineEntry {
+  title: string;
+  subtitle?: string;
+  status?: string;
+  /** Full-width narrative (no ellipsis); sidebar scrolls when long. */
+  subtitleFull?: boolean;
+}
+
+function shortenLine(s: string, max: number): string {
+  const t = s.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return `${sp > max * 0.5 ? cut.slice(0, sp) : cut}…`;
+}
+
+/** Optional date / range for timeline status line (portfolio-style: shown when parse finds it). */
+function extractResumeTimeMarker(text: string): string | undefined {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (!t) return undefined;
+
+  const range = t.match(
+    /\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2}|present|current|now|today)\b/i,
+  );
+  if (range) {
+    const end = /present|current|now|today/i.test(range[2]) ? 'Present' : range[2];
+    return `${range[1]}–${end}`;
+  }
+
+  const monthRange = t.match(
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–—]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\b/i,
+  );
+  if (monthRange) return monthRange[0].replace(/\s+/g, ' ');
+  const monthToPresent = t.match(
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}\s*[-–—]\s*(?:Present|Current|Now)\b/i,
+  );
+  if (monthToPresent) return monthToPresent[0].replace(/\s+/g, ' ');
+
+  const slash = t.match(/\b\d{1,2}\/\d{4}\s*[-–—]\s*\d{1,2}\/\d{4}\b/);
+  if (slash) return slash[0];
+
+  const cof = t.match(/\bclass of\s+((?:19|20)\d{2})\b/i);
+  if (cof) return `Class of ${cof[1]}`;
+
+  const grad = t.match(/\b(?:graduated|grad\.?)\s+((?:19|20)\d{2})\b/i);
+  if (grad) return `Graduated ${grad[1]}`;
+
+  const exp = t.match(/\b(?:expected|exp\.?)\s*(?:graduation|to graduate)?\s*[:.]?\s*((?:19|20)\d{2})\b/i);
+  if (exp) return `Expected ${exp[1]}`;
+
+  return undefined;
+}
+
+function inferDegreeLabel(text: string): string | undefined {
+  const structured = extractEducationDegreeLine(text);
+  if (structured?.trim()) return structured.trim();
+  const t = text.replace(/\s+/g, ' ').trim();
+  const m = t.match(
+    /\b((?:Bachelor|Master|Ph\.?\s*D|Doctorate|Associate|Diploma|Certificate|MBA|B\.?A\.?|B\.?S\.?|M\.?S\.?|M\.?A\.?)\s+(?:of|in)\s+[^.;]{2,62})/i,
+  );
+  if (m) return m[1].trim().replace(/\s+/g, ' ');
+  const m2 = t.match(/\b(Ph\.?\s*D\.?\s*(?:in\s+)?[A-Za-z][^.;]{2,44})/i);
+  if (m2) return m2[1].trim().replace(/\s+/g, ' ');
+  return undefined;
+}
+
+/** Strip resume-style lead-ins before a role (e.g. "having worked as a Data Analyst" → "Data Analyst"). */
+function stripNarrativeWorkPrefix(s: string): string {
+  let t = s.replace(/\s+/g, ' ').trim();
+  let prev = '';
+  while (prev !== t) {
+    prev = t;
+    t = t
+      .replace(/^having\s+worked\s+as\s+(?:a\s+)?/i, '')
+      .replace(/^worked\s+as\s+(?:a\s+)?/i, '')
+      .replace(/^and\s+as\s+a\s+/i, '')
+      .replace(/^as\s+a\s+/i, '')
+      .replace(/^and\s+/i, '')
+      .trim();
+  }
+  return t;
+}
+
+/** Split "… at X and as a Senior … at Y" into clauses so each can match Role at Company. */
+function splitWorkRoleClauses(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    const t = line.replace(/\s+/g, ' ').trim();
+    if (!t) continue;
+    const parts = t.split(/\s+and\s+as\s+a\s+/i).map((s) => s.trim()).filter(Boolean);
+    if (parts.length <= 1) {
+      out.push(t);
+      continue;
+    }
+    out.push(parts[0]);
+    for (let i = 1; i < parts.length; i += 1) {
+      out.push(`as a ${parts[i]}`);
+    }
+  }
+  return out;
+}
+
+/** Degree / program line only (no institution, no narrative). */
+function extractEducationDegreeLine(text: string): string | undefined {
+  const t = text.replace(/\s+/g, ' ').trim();
+
+  const concPair = t.match(
+    /\b(?:Master|Bachelor|PhD|Doctorate)\s+of\s+(.+?)\s+with\s+a\s+concentration\s+in\s+([A-Za-z0-9&\s-]+?)(?:\s+at\s+the|\s+at\s+[A-Z]|\s*$|\.)/i,
+  );
+  if (concPair) {
+    const prog = concPair[1].trim().replace(/\s+/g, ' ');
+    const conc = concPair[2].trim();
+    const progShort = prog.length > 44 ? `${prog.split(/\s+/).slice(0, 6).join(' ')}…` : prog;
+    return `${progShort} · ${conc}`;
+  }
+
+  const bsc = t.match(/\bBachelor\s+of\s+Science\s+in\s+([^.,]+?)(?:\s+from\s|\s+at\s|$|\.)/i);
+  if (bsc) return `BSc · ${bsc[1].trim()}`;
+
+  const ba = t.match(/\bBachelor\s+of\s+(Arts|Science)\s+in\s+([^.,]+)/i);
+  if (ba) return `${ba[1] === 'Arts' ? 'BA' : 'BSc'} · ${ba[2].trim()}`;
+
+  const mShort = t.match(
+    /\b(?:Master|Bachelor|PhD|Doctorate)\s+of\s+([^.,]+?)(?:\s+at\s+the\s|\s+at\s+[A-Z]|\s+from\s|$|\.)/i,
+  );
+  if (mShort) return shortenLine(mShort[1].trim(), 76);
+
+  const phd = t.match(/\bPh\.?\s*D\.?\s+(?:in\s+)?([^.,]+)/i);
+  if (phd) return shortenLine(`PhD · ${phd[1].trim()}`, 80);
+
+  return undefined;
+}
+
+/**
+ * Portfolio-style education row: school (title) + major/degree (subtitle) required; dates in status when found.
+ */
+function parseEducationEntryStrict(raw: string): ProfileTimelineEntry | null {
+  const text = raw.replace(/\s+/g, ' ').trim();
+  if (text.length < 16) return null;
+
+  const atInst = text.match(
+    /\b(?:at)\s+(?:the\s+)?((?:[A-Za-z][A-Za-z0-9&.'\s-]*?)?(?:University|College|Institute|School)(?:\s+of\s+[A-Za-z0-9&.'\s-]+)*)(?=\s*[,\.;)\]]|\s|$)/i,
+  );
+  const fromInst = text.match(
+    /\bfrom\s+(?:the\s+)?((?:[A-Za-z][A-Za-z0-9&.'\s-]*?)?(?:University|College|Institute|UP\s+[A-Za-z]+)(?:\s+of\s+[A-Za-z0-9&.'\s-]+)*)(?=\s*[,\.;)\]]|\s|$)/i,
+  );
+  const upOnly = text.match(/\b(UP\s+[A-Za-z]+)\b/);
+
+  let institution: string | undefined;
+  if (atInst) institution = atInst[1].replace(/[,.]$/, '').trim();
+  else if (fromInst) institution = fromInst[1].replace(/[,.]$/, '').trim();
+  else if (upOnly) institution = upOnly[1];
+  if (!institution || institution.length < 3) return null;
+
+  const degree = inferDegreeLabel(text);
+  if (!degree || degree.length < 3) return null;
+
+  const time = extractResumeTimeMarker(text);
+
+  return {
+    title: institution,
+    subtitle: degree,
+    status: time,
+  };
+}
+
+/** One narrative may list multiple roles — split into company + role lines. */
+function parseWorkTimelineEntries(raw: string): ProfileTimelineEntry[] {
+  const text = raw.replace(/\s+/g, ' ').trim();
+  const out: ProfileTimelineEntry[] = [];
+
+  const roleAtRe =
+    /\b((?:Senior\s+|Lead\s+|Principal\s+)?(?:Junior\s+)?[A-Za-z][A-Za-z\s]{0,44}?(?:Scientist|Analyst|Engineer|Developer|Designer|Architect|Manager|Director|Consultant|Intern|Researcher|Specialist|Officer))\s+at\s+(?:the\s+)?([A-Z0-9][A-Za-z0-9&.'\s-]*?(?:\s+(?:Inc\.|Ltd\.|LLC|Corp\.?|Office|Bank))?)(?=[\s,]*(?:and\s+as|and\s+|$|[.,]))/gi;
+  let m: RegExpExecArray | null;
+  while ((m = roleAtRe.exec(text)) !== null) {
+    const subtitle = stripNarrativeWorkPrefix(m[1]).replace(/\s+/g, ' ');
+    const title = m[2].trim().replace(/[,.]$/, '');
+    if (title.length >= 2 && subtitle.length >= 4) out.push({ title, subtitle });
+  }
+
+  if (!out.some((e) => e.title.toLowerCase().includes('intellectual property'))) {
+    const ipMatch =
+      text.match(
+        /\b(Data\s+Analyst)\s+(?:at\s+)?(?:the\s+)?((?:Intellectual\s+Property\s+Office|Canadian\s+IP\s+Office|IP\s+Office))/i,
+      ) ?? text.match(/\b(Data\s+Analyst)\s+(Intellectual\s+Property\s+Office)/i);
+    if (ipMatch) {
+      out.push({ title: ipMatch[2].replace(/\s+/g, ' '), subtitle: ipMatch[1] });
+    }
+  }
+
+  if (out.length > 0) return dedupeWorkEntries(out);
+
+  const atCo = text.match(
+    /\b(?:at|@)\s+(?:the\s+)?([A-Z0-9][A-Za-z0-9&.'\s-]*?(?:\s+(?:Inc\.|Ltd\.|LLC|Corp\.?|Office|Bank))?)\b/,
+  );
+  if (atCo) {
+    const title = atCo[1].trim();
+    const rest = text.replace(atCo[0], ' ').replace(/\s+/g, ' ').trim();
+    const cleaned = stripNarrativeWorkPrefix(rest);
+    const subtitle =
+      cleaned.length > 4 && cleaned.toLowerCase() !== title.toLowerCase()
+        ? shortenLine(cleaned, 88)
+        : undefined;
+    return [{ title, subtitle }];
+  }
+
+  const first = text.split(/(?<=[.!?])\s+/)[0]?.trim() ?? text;
+  const cleanedFirst = stripNarrativeWorkPrefix(first);
+  return [{ title: shortenLine(cleanedFirst || first, 52), subtitle: undefined }];
+}
+
+function dedupeWorkEntries(entries: ProfileTimelineEntry[]): ProfileTimelineEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const k = `${e.title}|${e.subtitle ?? ''}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/** Portfolio-style work row: company + role required; dates in status when found on the same block. */
+function strictWorkTimelineFromLine(raw: string): ProfileTimelineEntry[] {
+  const time = extractResumeTimeMarker(raw);
+  const entries = dedupeWorkEntries(parseWorkTimelineEntries(raw));
+  return entries
+    .filter((e) => e.title.trim().length >= 2 && (e.subtitle?.trim().length ?? 0) >= 3)
+    .map((e) => ({ ...e, status: time }));
+}
+
+function splitBackgroundIntoLines(snippet: string | null, parsed: string[]): string[] {
+  if (snippet?.trim()) {
+    const byPara = snippet.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    if (byPara.length > 1) return byPara;
+    const bySentence = snippet.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 20);
+    return bySentence.length > 1 ? bySentence : [snippet.trim()];
+  }
+  return parsed;
+}
+
+function ProfileTimeline({
+  entries,
+  emptyLabel,
+}: {
+  entries: ProfileTimelineEntry[];
+  /** Pass empty string to hide (e.g. when a parent hint already explains the empty state). */
+  emptyLabel: string;
+}) {
+  if (entries.length === 0) {
+    if (!emptyLabel.trim()) return null;
+    return <p className="mt-1 text-xs text-slate-400">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul className="mt-3 space-y-0">
+      {entries.map((entry, i) => {
+        const isFirst = i === 0;
+        const isLast = i === entries.length - 1;
+        return (
+          <li key={`${entry.title}-${i}`} className="flex gap-3 items-stretch">
+            <div className="flex w-4 shrink-0 flex-col items-center self-stretch pt-0.5">
+              <span
+                className={cn(
+                  'z-[1] h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white',
+                  isFirst ? 'bg-teal-500' : 'bg-slate-300',
+                )}
+                aria-hidden
+              />
+              {!isLast ? <span className="mt-0 w-px flex-1 bg-slate-200" /> : null}
+            </div>
+            <div className={cn('min-w-0 flex-1', !isLast ? 'pb-5' : 'pb-0')}>
+              <p className="text-xs font-semibold leading-snug text-slate-900">{entry.title}</p>
+              {entry.subtitle ? (
+                <p
+                  className={cn(
+                    'mt-0.5 text-[11px] leading-snug text-slate-600',
+                    entry.subtitleFull &&
+                      'max-h-44 overflow-y-auto overscroll-contain pr-0.5 [scrollbar-width:thin]',
+                  )}
+                >
+                  {entry.subtitle}
+                </p>
+              ) : null}
+              {entry.status ? (
+                <p className="mt-1 text-[10px] text-slate-500">{entry.status}</p>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Left column: when education + experience are both empty, explain resume-optional and multi-user variance. */
+function ProfileBackgroundHint({
+  hasSubstantialLearnerText,
+  hasResumeFile,
+}: {
+  hasSubstantialLearnerText: boolean;
+  hasResumeFile: boolean;
+}) {
+  let body: string;
+  if (hasSubstantialLearnerText) {
+    body =
+      'Education needs a school and major/degree; experience needs a company and role. Dates appear when listed. Use “Learner information” below for the full text.';
+  } else if (hasResumeFile) {
+    body =
+      'Structured education or experience is not shown yet. If you recently uploaded a resume, content may still sync; you can also try a clearer PDF on the right.';
+  } else {
+    body =
+      'Uploading a resume (optional) on the right can enrich these sections. You can also keep learning without a resume — skills and profile text will fill in over time.';
+  }
+  return (
+    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/90 px-3 py-2.5 text-[11px] leading-snug text-slate-600">
+      <p className="font-medium text-slate-700">Background</p>
+      <p className="mt-1 text-slate-500">{body}</p>
+    </div>
+  );
 }
 
 /* ── Persona definitions (aligned with OnboardingPage) ────────────── */
@@ -229,7 +704,8 @@ function PreferenceIcon({ type }: { type: string }) {
 export function ProfilePage() {
   const navigate = useNavigate();
   const { userId, logout } = useAuthContext();
-  const { goals, refreshGoals, updateGoal } = useGoalsContext();
+  const { setCollapsed } = useSidebarCollapse();
+  const { goals, refreshGoals, updateGoal, mergeLearnerProfile } = useGoalsContext();
   const { activeGoal } = useActiveGoal();
   const { data: config } = useAppConfig();
 
@@ -260,10 +736,27 @@ export function ProfilePage() {
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  /** localStorage filename + Talent Assets UI — clear when server data is wiped or user removes resume. */
+  const clearLocalResumeUi = useCallback(() => {
+    clearStoredResume();
+    setResumeName(null);
+    setResumeStatus(null);
+  }, []);
+
   useEffect(() => {
     setAvatarDataUrl(getAvatarDataUrl(userId));
     setAvatarMessage(null);
   }, [userId]);
+
+  useEffect(() => {
+    setCollapsed(true);
+  }, [setCollapsed]);
+
+  /** Sync goals (and embedded learner profile) from server when opening Profile — other flows may have updated the profile. */
+  useEffect(() => {
+    if (!userId) return;
+    void refreshGoals();
+  }, [userId, refreshGoals]);
 
   const profileTags: string[] = [];
   if (activeGoal?.learner_profile?.goal_display_name) {
@@ -273,6 +766,9 @@ export function ProfilePage() {
     profileTags.push(learningStyle);
   }
   if (profileTags.length === 0) profileTags.push('Learner');
+
+  const goalDisplayName =
+    (activeGoal?.learner_profile?.goal_display_name as string | undefined) ?? '';
 
   // Member since: prefer auth/me created_at, then first-login localStorage, then earliest goal timestamp
   const memberSinceIso =
@@ -285,7 +781,8 @@ export function ProfilePage() {
     if (!userId) return;
     try {
       await deleteUserDataMutation.mutateAsync(userId);
-      refreshGoals();
+      clearLocalResumeUi();
+      await refreshGoals();
       navigate('/onboarding');
     } catch {
       // ignore
@@ -298,6 +795,7 @@ export function ProfilePage() {
     if (!userId) return;
     try {
       await deleteUserMutation.mutateAsync();
+      clearLocalResumeUi();
       logout();
       navigate('/login');
     } catch {
@@ -327,7 +825,6 @@ export function ProfilePage() {
     if (!personaDims) return;
 
     setPreferencesSaveError(null);
-    const currentProfile = activeGoal.learner_profile ?? {};
     const sliderPayload = {
       update_mode: 'fslsm_slider_override',
       slider_values: personaDims,
@@ -335,12 +832,20 @@ export function ProfilePage() {
 
     try {
       const res = await updatePreferencesMutation.mutateAsync({
-        learner_profile: JSON.stringify(currentProfile),
+        learner_profile: serializeLearnerProfileForApi(activeGoal.learner_profile),
         learner_interactions: JSON.stringify(sliderPayload),
         user_id: userId,
         goal_id: activeGoal.id,
       });
-      updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
+      const mergedLp =
+        normalizeLearnerProfile(res.learner_profile) ?? normalizeLearnerProfile(activeGoal.learner_profile);
+      if (mergedLp) {
+        updateGoal(activeGoal.id, { ...activeGoal, learner_profile: mergedLp });
+      }
+      await refreshGoals();
+      if (mergedLp) {
+        mergeLearnerProfile(activeGoal.id, mergedLp);
+      }
       setLearningStylePreference(persona.learningStyle);
       setLearningStyle(persona.learningStyle);
       setShowPreferencesModal(false);
@@ -354,7 +859,6 @@ export function ProfilePage() {
   void behavioralMetrics.sessions_completed;
   void behavioralMetrics.total_sessions_in_path;
   void behavioralMetrics.total_learning_time_sec;
-  void behavioralMetrics.latest_mastery_rate;
   void behavioralMetrics.motivational_triggers_count;
 
   let streakDays = 0;
@@ -368,11 +872,45 @@ export function ProfilePage() {
   void masteryHistory.filter((v) => v >= masteryThreshold).length;
   void masteryHistory.length;
 
-  const biasInfo = activeGoal?.profile_fairness as Record<string, unknown> | undefined;
+  const profileFairness = activeGoal?.profile_fairness as Record<string, unknown> | undefined;
 
-  const learnerInformation = (
-    activeGoal?.learner_profile as { learner_information?: string } | undefined
-  )?.learner_information;
+  const learnerProfileNormalized = normalizeLearnerProfile(activeGoal?.learner_profile);
+  const learnerInformation = learnerInformationToString(learnerProfileNormalized?.learner_information);
+
+  const learnerProfileRecord = learnerProfileNormalized as Record<string, unknown> | undefined;
+  const learnerInfoBody = learnerInformation ? displayLearnerInformationBody(learnerInformation) : '';
+  const parsedFromLearnerInfo = learnerInfoBody ? parseLearnerInformationSections(learnerInfoBody) : { education: [], work: [] };
+  const educationSnippet =
+    normalizeBackgroundSnippet(learnerProfileRecord?.education) ??
+    normalizeBackgroundSnippet(learnerProfileRecord?.education_history);
+  const workSnippet =
+    normalizeBackgroundSnippet(learnerProfileRecord?.work_experience) ??
+    normalizeBackgroundSnippet(learnerProfileRecord?.work_history);
+
+  const educationTimelineLines = splitBackgroundIntoLines(
+    educationSnippet,
+    parsedFromLearnerInfo.education,
+  );
+  const educationTimelineEntries = educationTimelineLines
+    .map((line) => parseEducationEntryStrict(line))
+    .filter((e): e is ProfileTimelineEntry => e != null);
+  const workTimelineLines = splitWorkRoleClauses(
+    splitBackgroundIntoLines(workSnippet, parsedFromLearnerInfo.work),
+  );
+  const workTimelineEntries = workTimelineLines.flatMap((line) => strictWorkTimelineFromLine(line));
+
+  const bothTimelinesEmpty = educationTimelineEntries.length === 0 && workTimelineEntries.length === 0;
+  const hasSubstantialLearnerText = learnerInfoBody.replace(/\s+/g, ' ').trim().length >= 36;
+  const hasResumeFile = Boolean(resumeName);
+
+  const showEducationSection = educationTimelineEntries.length > 0;
+  const showExperienceSection = workTimelineEntries.length > 0;
+  /** No parsed timeline rows — show full learner text inline (portfolio-style fallback). */
+  const showLearnerInfoExpanded = bothTimelinesEmpty && Boolean(learnerInformation?.trim());
+  /** Timelines present — keep detailed bio behind disclosure when long enough. */
+  const showLearnerInfoCollapsible = !bothTimelinesEmpty && Boolean(learnerInformation && hasSubstantialLearnerText);
+  /** Dashed hint only when there is nothing to show in learner text either. */
+  const showProfileBackgroundHint = bothTimelinesEmpty && !learnerInformation?.trim();
 
   const fslsmDims = activeGoal?.learner_profile?.learning_preferences?.fslsm_dimensions;
   const preferenceCards = deriveFslsmPreferenceCards(fslsmDims);
@@ -390,16 +928,24 @@ export function ProfilePage() {
         setResumeStatus('Failed to read PDF. Please try another file.');
         return;
       }
-      const currentProfile = (activeGoal.learner_profile ?? {}) as Record<string, unknown>;
+      const parsedProfile = normalizeLearnerProfile(activeGoal.learner_profile);
+      const currentProfile = (parsedProfile ?? {}) as Record<string, unknown>;
       const res = await updateLearnerInfoMutation.mutateAsync({
-        learner_profile: JSON.stringify(currentProfile),
-        updated_learner_information:
-          (currentProfile.learner_information as string | undefined) ?? '',
+        learner_profile: serializeLearnerProfileForApi(activeGoal.learner_profile),
+        edited_learner_information: learnerInformationToString(currentProfile.learner_information),
         resume_text: pdfText,
         user_id: userId,
         goal_id: activeGoal.id,
       });
-      updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
+      const mergedLp =
+        normalizeLearnerProfile(res.learner_profile) ?? normalizeLearnerProfile(activeGoal.learner_profile);
+      if (mergedLp) {
+        updateGoal(activeGoal.id, { ...activeGoal, learner_profile: mergedLp });
+      }
+      await refreshGoals();
+      if (mergedLp) {
+        mergeLearnerProfile(activeGoal.id, mergedLp);
+      }
       setStoredResume(file.name, `Resume summary: ${pdfText}`);
       setResumeStatus('Resume connected successfully.');
     } catch {
@@ -411,24 +957,30 @@ export function ProfilePage() {
 
   const handleResumeRemove = async () => {
     if (!userId || !activeGoal) {
-      setResumeName(null);
-      setResumeStatus(null);
+      clearLocalResumeUi();
       return;
     }
     try {
       setResumeStatus(null);
-      const currentProfile = (activeGoal.learner_profile ?? {}) as Record<string, unknown>;
+      const parsedProfile = normalizeLearnerProfile(activeGoal.learner_profile);
+      const currentProfile = (parsedProfile ?? {}) as Record<string, unknown>;
       const res = await updateLearnerInfoMutation.mutateAsync({
-        learner_profile: JSON.stringify(currentProfile),
-        updated_learner_information:
-          (currentProfile.learner_information as string | undefined) ?? '',
+        learner_profile: serializeLearnerProfileForApi(activeGoal.learner_profile),
+        edited_learner_information: learnerInformationToString(currentProfile.learner_information),
         resume_text: '',
         user_id: userId,
         goal_id: activeGoal.id,
       });
-      updateGoal(activeGoal.id, { ...activeGoal, learner_profile: res.learner_profile });
-      setResumeName(null);
-      clearStoredResume();
+      const mergedLp =
+        normalizeLearnerProfile(res.learner_profile) ?? normalizeLearnerProfile(activeGoal.learner_profile);
+      if (mergedLp) {
+        updateGoal(activeGoal.id, { ...activeGoal, learner_profile: mergedLp });
+      }
+      await refreshGoals();
+      if (mergedLp) {
+        mergeLearnerProfile(activeGoal.id, mergedLp);
+      }
+      clearLocalResumeUi();
       setResumeStatus('Resume removed from profile.');
     } catch {
       setResumeStatus('Failed to remove resume. Please try again.');
@@ -436,10 +988,10 @@ export function ProfilePage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
-      {/* Top profile card */}
-      <section className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="flex flex-col items-center gap-1 shrink-0">
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pb-10">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-x-10 lg:gap-y-8">
+        {/* Left: identity & account (fixed width on large screens) */}
+        <aside className="flex w-full min-w-0 shrink-0 flex-col rounded-xl border border-slate-200 bg-white p-4 lg:min-h-[calc(100vh-7rem)] lg:sticky lg:top-0 lg:self-start">
           {userId && (
             <input
               ref={avatarInputRef}
@@ -461,7 +1013,10 @@ export function ProfilePage() {
               }}
             />
           )}
-          <div className="relative w-20 h-20 rounded-full bg-slate-200 shrink-0 overflow-hidden ring-2 ring-slate-100 group">
+          <div className="flex flex-1 flex-col gap-4">
+            <div>
+              <div className="flex flex-col items-center gap-1">
+          <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full bg-slate-200 ring-2 ring-slate-100 group">
             {avatarDataUrl ? (
               <img
                 src={avatarDataUrl}
@@ -511,152 +1066,212 @@ export function ProfilePage() {
               </>
             )}
           </div>
-          {avatarMessage && (
-            <p className="text-[10px] text-slate-500 text-center max-w-[140px]">{avatarMessage}</p>
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold text-slate-900">
-            {userId ?? 'Learner'}
-          </h2>
-          <p className="mt-0.5 text-sm text-slate-500">@{userId ?? 'guest'}</p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {profileTags.map((tag) => (
-              <span
-                key={tag}
-                className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-          {learnerInformation && (
-            <p className="mt-2 text-xs text-slate-500 whitespace-pre-line">
-              {learnerInformation}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-4 shrink-0">
-          {/* Edit profile placeholder· */}
-          {/* <button
-            type="button"
-            className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
-            disabled
-          >
-            Edit Profile
-          </button> */}
-          <button
-            type="button"
-            className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
-            onClick={() => {
-              logout();
-              navigate('/login');
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </section>
-
-      {/* Bias / fairness info banner (if available) */}
-      {biasInfo && (
-        <section className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
-          <p className="font-medium">Bias & fairness notice</p>
-          <p className="mt-1 text-xs text-amber-800">
-            Your current learning profile has been evaluated for potential bias. Review analytics
-            and skill gaps to ensure your goals are inclusive and fair.
-          </p>
-        </section>
-      )}
-
-      {/* Grid: Account | Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ACCOUNT */}
-        <section className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Account</h3>
-          <dl className="space-y-3 text-sm">
-            <div>
-              <dt className="text-slate-500 font-medium">Email</dt>
-              <dd className="text-slate-900 mt-0.5">
-                {userId ? `${userId}@example` : 'Not connected'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-500 font-medium">Member since</dt>
-              <dd className="text-slate-900 mt-0.5">
-                {memberSinceDisplay}
-                {memberSinceIso == null && userId && (
-                  <span className="block text-xs text-slate-400 mt-0.5">
-                    Shown after first sign-in on this device, or when the API returns account creation time.
-                  </span>
+                {avatarMessage && (
+                  <p className="max-w-[140px] text-center text-[10px] text-slate-500">{avatarMessage}</p>
                 )}
-              </dd>
+              </div>
+
+              <div className="mt-4 w-full text-left">
+                <h2 className="text-lg font-semibold leading-tight text-slate-900">{userId ?? 'Learner'}</h2>
+                {goalDisplayName ? (
+                  <p className="mt-1 text-xs font-medium text-primary-700 line-clamp-2">{goalDisplayName}</p>
+                ) : null}
+                <p className="mt-0.5 text-sm text-slate-500">@{userId ?? 'guest'}</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {profileTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
-            {/* <div>
-              <dt className="text-slate-500 font-medium">Plan</dt>
-              <dd className="mt-0.5 flex items-center gap-2">
-                <span className="text-slate-900">Free</span>
+
+            {showProfileBackgroundHint && (
+              <ProfileBackgroundHint
+                hasSubstantialLearnerText={hasSubstantialLearnerText}
+                hasResumeFile={hasResumeFile}
+              />
+            )}
+
+            {(showEducationSection || showExperienceSection) && (
+              <div className="border-b border-slate-100 pb-4 space-y-4">
+                {showEducationSection ? (
+                  <div>
+                    <p className={PROFILE_SIDEBAR_SECTION_LABEL}>Education</p>
+                    <ProfileTimeline entries={educationTimelineEntries} emptyLabel="" />
+                  </div>
+                ) : null}
+                {showExperienceSection ? (
+                  <div>
+                    <p className={PROFILE_SIDEBAR_SECTION_LABEL}>Experience</p>
+                    <ProfileTimeline entries={workTimelineEntries} emptyLabel="" />
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {showLearnerInfoExpanded ? (
+              <div className="rounded-lg border border-slate-200 bg-white text-left">
+                <p className="px-3 py-2 text-xs font-semibold text-slate-900">Learner information</p>
+                <div className="max-h-64 overflow-y-auto border-t border-slate-100 px-3 py-2 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap">
+                  {learnerInfoBody || learnerInformation}
+                </div>
+              </div>
+            ) : showLearnerInfoCollapsible ? (
+              <details className="group rounded-lg border border-slate-200 bg-white text-left">
+                <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-primary-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                  <span className="underline decoration-primary-300 underline-offset-2">View full learner information</span>
+                  <span className="ml-1 text-slate-400 group-open:hidden">▸</span>
+                  <span className="ml-1 text-slate-400 hidden group-open:inline">▾</span>
+                </summary>
+                <div className="max-h-56 overflow-y-auto border-t border-slate-100 px-3 py-2 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap">
+                  {learnerInfoBody || learnerInformation}
+                </div>
+              </details>
+            ) : null}
+
+            <div className="border-t border-slate-100 pt-4">
+              <h3 className={PROFILE_SIDEBAR_SECTION_LABEL}>Account</h3>
+              <dl className="mt-2 space-y-2.5 text-xs">
+                <div>
+                  <dt className="text-slate-500">Email</dt>
+                  <dd className="mt-0.5 text-slate-900">{userId ? `${userId}@example` : 'Not connected'}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Member since</dt>
+                  <dd className="mt-0.5 text-slate-900">
+                    {memberSinceDisplay}
+                    {memberSinceIso == null && userId && (
+                      <span className="mt-0.5 block text-[10px] text-slate-400">
+                        Shown after first sign-in on this device, or when the API returns account creation time.
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <div className="mt-auto border-t border-slate-100 pt-4 space-y-4">
+            <button
+              type="button"
+              className="w-full rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-50"
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+            >
+              Sign out
+            </button>
+            <div className="space-y-3">
+              {!showDeleteDataConfirm ? (
                 <button
                   type="button"
-                  className="text-slate-600 hover:text-slate-900 font-medium text-xs"
-                  disabled
+                  onClick={() => setShowDeleteDataConfirm(true)}
+                  className="w-full text-left text-sm text-slate-600 hover:text-slate-800 underline"
                 >
-                  Upgrade →
+                  Restart onboarding (clear all data)
                 </button>
-              </dd>
-            </div> */}
-          </dl>
-        </section>
-
-        {/* ACTIVITY SUMMARY */}
-        <section className="bg-white rounded-xl border border-slate-200 p-5">
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Activity Summary</h3>
-          <dl className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-slate-500">Goals created</dt>
-              <dd className="text-slate-900 font-medium">{goals.length}</dd>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 space-y-2">
+                  <p className="text-[11px] leading-snug text-amber-900">
+                    This will delete all your goals, learning history, and profile data. Are you sure?
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <Button
+                      size="sm"
+                      onClick={handleRestartOnboarding}
+                      loading={deleteUserDataMutation.isPending}
+                      className="!bg-amber-600 hover:!bg-amber-700 !text-white w-full"
+                    >
+                      Yes, restart
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setShowDeleteDataConfirm(false)} className="w-full">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {!showDeleteAccountConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteAccountConfirm(true)}
+                  className="w-full text-left text-sm text-red-500 hover:text-red-700 underline"
+                >
+                  Delete account
+                </button>
+              ) : (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 space-y-2">
+                  <p className="text-[11px] leading-snug text-red-900">
+                    This will permanently delete your account and all data. This cannot be undone.
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <Button
+                      size="sm"
+                      onClick={handleDeleteAccount}
+                      loading={deleteUserMutation?.isPending}
+                      className="!bg-red-600 hover:!bg-red-700 !text-white w-full"
+                    >
+                      Delete account
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setShowDeleteAccountConfirm(false)} className="w-full">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex justify-between">
-              <dt className="text-slate-500">Sessions completed</dt>
-              <dd className="text-slate-900 font-medium">
+          </div>
+        </aside>
+
+        {/* Right: dynamic / interactive content — grid column aligns top edge with aside */}
+        <div className="min-w-0 space-y-6 lg:min-w-0">
+          {activeGoal?.learner_profile && (
+            <ProfileFairnessPanel fairness={profileFairness ?? null} disclaimerOnly />
+          )}
+
+        {/* ACTIVITY SUMMARY — horizontal metrics + vertical dividers; tight label/value gap */}
+        <section className="bg-white rounded-xl border border-slate-200 p-5">
+          <h3 className={cn(PROFILE_PAGE_SECTION_TITLE, 'mb-4')}>Activity Summary</h3>
+          <dl className="flex flex-col divide-y divide-slate-200 text-sm sm:flex-row sm:divide-x sm:divide-y-0 sm:divide-slate-200">
+            <div className="flex flex-1 flex-col px-0 py-3 sm:px-3 sm:py-0">
+              <dt className="text-left text-slate-500 leading-snug">Goals created</dt>
+              <dd className="mt-px text-left text-slate-900 font-medium tabular-nums">
+                {goals.length}
+              </dd>
+            </div>
+            <div className="flex flex-1 flex-col px-0 py-3 sm:px-3 sm:py-0">
+              <dt className="text-left text-slate-500 leading-snug">Sessions completed</dt>
+              <dd className="mt-px text-left text-slate-900 font-medium tabular-nums">
                 {metricsLoading || !metrics
                   ? '—'
                   : `${metrics.sessions_completed} / ${metrics.total_sessions_in_path}`}
               </dd>
             </div>
-            <div className="flex justify-between">
-              <dt className="text-slate-500">Total study time</dt>
-              <dd className="text-slate-900 font-bold">
+            <div className="flex flex-1 flex-col px-0 py-3 sm:px-3 sm:py-0">
+              <dt className="text-left text-slate-500 leading-snug">Total study time</dt>
+              <dd className="mt-px text-left text-slate-900 font-bold tabular-nums">
                 {metricsLoading || !metrics ? '—' : formatDuration(metrics.total_learning_time_sec)}
               </dd>
             </div>
-            <div className="flex justify-between items-center">
-              <dt className="text-slate-500">Latest mastery rate</dt>
-              <dd className="text-slate-900 font-bold">
-                {metricsLoading || !metrics || metrics.latest_mastery_rate == null
-                  ? '—'
-                  : `${Math.round(metrics.latest_mastery_rate * 100)}%`}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-slate-500">Motivational triggers</dt>
-              <dd className="text-slate-900 font-medium">
+            <div className="flex flex-1 flex-col px-0 py-3 sm:px-3 sm:py-0">
+              <dt className="text-left text-slate-500 leading-snug">Motivational triggers</dt>
+              <dd className="mt-px text-left text-slate-900 font-medium tabular-nums">
                 {metricsLoading || !metrics ? '—' : metrics.motivational_triggers_count}
               </dd>
             </div>
           </dl>
         </section>
 
-      </div>
-
-      {/* LEARNING PREFERENCES */}
-      <section className="bg-white rounded-xl border border-slate-200 p-6">
-        <div className="flex items-center justify-between mb-1">
+      {/* How You Learn + How Ami uses your profile (single card) */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-            </svg>
-            <h3 className="text-lg font-semibold text-slate-900">How You Learn</h3>
+            <h3 className={PROFILE_PAGE_SECTION_TITLE}>How You Learn</h3>
           </div>
           <Button
             size="sm"
@@ -665,24 +1280,28 @@ export function ProfilePage() {
             Edit Preferences
           </Button>
         </div>
-        <p className="text-sm text-slate-500 flex items-center gap-1.5 mb-6">
-          <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <p className="mb-6 flex items-center gap-1.5 text-sm text-slate-500">
+          <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
           </svg>
           Current preference: {learningStyle ?? 'Balanced'}. Applied by default to new learning goals.
         </p>
 
-        {preferenceCards.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: preference cards */}
-            <div>
+        <div
+          className={cn(
+            'grid gap-6 items-start',
+            personalizationBullets.length > 0 ? 'lg:grid-cols-2 lg:gap-8' : 'grid-cols-1',
+          )}
+        >
+          <div className="min-w-0">
+            {preferenceCards.length > 0 ? (
               <div className="space-y-3">
                 {preferenceCards.map((card) => (
                   <div
                     key={card.type}
                     className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3"
                   >
-                    <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 text-slate-600">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
                       <PreferenceIcon type={card.type} />
                     </div>
                     <div>
@@ -692,39 +1311,48 @@ export function ProfilePage() {
                   </div>
                 ))}
               </div>
-            </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/80 py-8 text-center text-slate-400">
+                <p className="text-sm">No learning preferences available yet.</p>
+                <p className="mt-1 text-xs">Complete onboarding to set your preferences.</p>
+              </div>
+            )}
+          </div>
 
-            {/* Right: HOW AMI PERSONALIZES */}
-            <div className="rounded-xl bg-teal-50/60 border border-teal-100 p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <svg className="w-4 h-4 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+          {personalizationBullets.length > 0 && (
+            <div className="min-w-0 rounded-xl border border-teal-100 bg-teal-50/60 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <svg
+                  className="h-4 w-4 shrink-0 text-teal-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0-3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.456-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0-2.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.456 2.456Z"
+                  />
                 </svg>
-                <p className="text-xs font-semibold text-teal-800 uppercase tracking-wider">
-                  How Ami personalizes your content
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-teal-800">How Ami uses your profile</p>
               </div>
               <ul className="space-y-2.5">
                 {personalizationBullets.map((bullet, i) => (
                   <li key={i} className="flex items-start gap-2.5 text-sm text-teal-900">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-teal-500 shrink-0" />
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-500" />
                     {bullet}
                   </li>
                 ))}
               </ul>
             </div>
-          </div>
-        ) : (
-          <div className="text-center py-8 text-slate-400">
-            <p className="text-sm">No learning preferences available yet.</p>
-            <p className="text-xs mt-1">Complete onboarding to set your preferences.</p>
-          </div>
-        )}
+          )}
+        </div>
       </section>
 
       {/* TALENT ASSETS */}
       <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Talent Assets</h3>
+        <h3 className={PROFILE_PAGE_SECTION_TITLE}>Talent Assets</h3>
         <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-lg bg-slate-200 flex items-center justify-center shrink-0">
@@ -781,75 +1409,8 @@ export function ProfilePage() {
         )}
       </section>
 
-      {/* Data & account actions */}
-      <section className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Data & Account</h3>
-        {!showDeleteDataConfirm ? (
-          <button
-            type="button"
-            onClick={() => setShowDeleteDataConfirm(true)}
-            className="text-sm text-slate-600 hover:text-slate-800 underline"
-          >
-            Restart onboarding (clear all data)
-          </button>
-        ) : (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-            <p className="text-sm text-amber-800">
-              This will delete all your goals, learning history, and profile data. Are you sure?
-            </p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={handleRestartOnboarding}
-                loading={deleteUserDataMutation.isPending}
-                className="!bg-amber-600 hover:!bg-amber-700 !text-white"
-              >
-                Yes, restart
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowDeleteDataConfirm(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {!showDeleteAccountConfirm ? (
-          <button
-            type="button"
-            onClick={() => setShowDeleteAccountConfirm(true)}
-            className="text-sm text-red-500 hover:text-red-700 underline"
-          >
-            Delete account
-          </button>
-        ) : (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-            <p className="text-sm text-red-800">
-              This will permanently delete your account and all data. This cannot be undone.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={handleDeleteAccount}
-                loading={deleteUserMutation?.isPending}
-                className="!bg-red-600 hover:!bg-red-700 !text-white"
-              >
-                Delete account
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowDeleteAccountConfirm(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-      </section>
+        </div>
+      </div>
 
       {/* ── Edit Preferences Modal ── */}
       <Modal

@@ -13,6 +13,7 @@ import {
   type LearningStyleOption,
 } from '@/lib/learningStylePreference';
 import { clearStoredResume, setStoredResume } from '@/lib/resumeStorage';
+import { OnboardingDataUseCollapsible } from '@/components/ethics';
 
 /* ------------------------------------------------------------------ */
 /*  Mock data                                                         */
@@ -370,7 +371,17 @@ export function OnboardingPage() {
                 })}
               </div>
 
-              <div className="flex justify-center pt-2">
+              <div className="flex flex-row flex-wrap justify-center items-center gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => setStep(1)}
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto min-w-[8rem] rounded-full px-10 py-4 text-lg font-semibold border-slate-200"
+                >
+                  Back
+                </Button>
                 <Button
                   size="lg"
                   onClick={() => setStep(3)}
@@ -385,7 +396,7 @@ export function OnboardingPage() {
 
           {/* Step 3 */}
           {step === 3 && (
-            <div className="space-y-8">
+            <div className="space-y-6">
               <div className="space-y-2 text-center">
                 <p className="text-sm font-medium text-slate-700">Upload resume</p>
                 <p className="text-xs text-slate-500">
@@ -470,16 +481,29 @@ export function OnboardingPage() {
                 </button>
               </div>
 
-              <div className="flex justify-center pt-1">
-                <Button
-                  size="lg"
-                  onClick={handleBeginLearning}
-                  loading={false}
-                  disabled={isSubmitting || !composedLearningGoal.trim()}
-                  className="w-full sm:w-auto rounded-full !bg-[#78B3BA] hover:!bg-[#6aa3aa] !text-white px-10 py-4 text-lg font-semibold shadow-xl shadow-teal-500/20"
-                >
-                  Begin learning &rarr;
-                </Button>
+              <div className="max-w-md mx-auto w-full space-y-3 pt-0.5">
+                <div className="flex flex-row flex-wrap justify-center items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    onClick={() => setStep(2)}
+                    disabled={isSubmitting}
+                    className="w-full sm:w-auto min-w-[8rem] rounded-full px-8 py-3 text-base font-semibold border-slate-200"
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={handleBeginLearning}
+                    loading={false}
+                    disabled={isSubmitting || !composedLearningGoal.trim()}
+                    className="w-full sm:w-auto rounded-full !bg-[#78B3BA] hover:!bg-[#6aa3aa] !text-white px-8 py-3 text-base font-semibold shadow-md shadow-teal-500/15"
+                  >
+                    Begin learning
+                  </Button>
+                </div>
+                <OnboardingDataUseCollapsible className="max-w-full" />
               </div>
             </div>
           )}

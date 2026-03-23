@@ -21,7 +21,9 @@ import {
   generateLearningContentApi,
   reportDiagramRenderFailureApi,
 } from '@/api/endpoints/content';
+import { auditContentBiasApi, auditChatbotBiasApi } from '@/api/endpoints/audits';
 import { useChatWithTutor } from '@/api/endpoints/chat';
+import { ContentBiasAuditPanel, ChatbotBiasAuditPanel } from '@/components/ethics';
 import { SessionLoadingPanel } from '@/components/learning/SessionLoadingPanel';
 import type { MasteryEvaluationResponse, ContentSection } from '@/types';
 
@@ -836,12 +838,47 @@ export function LearningSessionPage() {
   const isCompleteEnabled = hasMastered;
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
-  // Chat
+  const [contentBiasAudit, setContentBiasAudit] = useState<Record<string, unknown> | null>(null);
+  const [chatbotBiasAudit, setChatbotBiasAudit] = useState<Record<string, unknown> | null>(null);
+
+  const learnerInformationForAudit =
+    (activeGoal?.learner_profile as { learner_information?: string } | undefined)?.learner_information ?? '';
+
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const quizRef = useRef<HTMLDivElement | null>(null);
   const sectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!content) {
+      setContentBiasAudit(null);
+      return;
+    }
+    const doc =
+      typeof content.document === 'string'
+        ? content.document
+        : JSON.stringify(content.document ?? '');
+    let cancelled = false;
+    auditContentBiasApi({
+      generated_content: doc,
+      learner_information: learnerInformationForAudit,
+    })
+      .then((r) => {
+        if (!cancelled) setContentBiasAudit(r);
+      })
+      .catch(() => {
+        if (!cancelled) setContentBiasAudit(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [content, learnerInformationForAudit]);
+
+  useEffect(() => {
+    setChatMessages([]);
+    setChatbotBiasAudit(null);
+  }, [goalId, sessionIndex]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -860,10 +897,30 @@ export function LearningSessionPage() {
         learner_profile: JSON.stringify(activeGoal?.learner_profile ?? {}),
       });
       setChatMessages((prev) => [...prev, { role: 'assistant', content: res.response }]);
+      try {
+        const audit = await auditChatbotBiasApi({
+          tutor_responses: res.response,
+          learner_information: learnerInformationForAudit,
+        });
+        setChatbotBiasAudit(audit);
+      } catch {
+        setChatbotBiasAudit(null);
+      }
     } catch {
       setChatMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error.' }]);
+      setChatbotBiasAudit(null);
     }
-  }, [chatInput, chatMessages, userId, goalId, sessionIndex, activeGoal, chatMutation, updateGoal]);
+  }, [
+    chatInput,
+    chatMessages,
+    userId,
+    goalId,
+    sessionIndex,
+    activeGoal,
+    chatMutation,
+    updateGoal,
+    learnerInformationForAudit,
+  ]);
 
   // Feedback
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -948,6 +1005,7 @@ export function LearningSessionPage() {
     setContent(null);
     setGenerateError(null);
     setMasteryResult(null);
+    setContentBiasAudit(null);
     hasTriggeredGenRef.current = false;
     deleteMutation.mutate({ userId, goalId, sessionIndex });
   }, [userId, goalId, sessionIndex, sessionActivityMutation, deleteMutation]);
@@ -1070,6 +1128,8 @@ export function LearningSessionPage() {
               <p className="text-sm font-medium text-purple-800">This session includes enhanced visual elements.</p>
             </div>
           )}
+
+          <ContentBiasAuditPanel audit={contentBiasAudit} />
 
           {/* ── Progress bar ── */}
           {sections.length > 1 && !isOnQuiz && (
@@ -1465,6 +1525,9 @@ export function LearningSessionPage() {
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
               Ready
             </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            <ChatbotBiasAuditPanel audit={chatbotBiasAudit} />
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
