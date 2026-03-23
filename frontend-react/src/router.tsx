@@ -48,7 +48,10 @@ function RootRedirect() {
     );
   }
 
-  if (goals.length > 0) return <Navigate to="/goals" replace />;
+  // Route by goal existence only:
+  // - has goal -> dashboard
+  // - no goal -> onboarding
+  if (goals.length > 0) return <Navigate to="/dashboard" replace />;
   return <Navigate to="/onboarding" replace />;
 }
 

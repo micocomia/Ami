@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui';
 import { SessionCard } from '@/components/learning/SessionCard';
+import { PlanQualityPanel } from '@/components/learning/PlanQualityPanel';
 import { PathGenerationLoading } from '@/components/learning/PathGenerationLoading';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
@@ -42,7 +43,7 @@ export function LearningPathPage() {
 
   const [isScheduling, setIsScheduling] = useState(false);
   const [isAdapting, setIsAdapting] = useState(false);
-  const [isDesignBiasExpanded, setIsDesignBiasExpanded] = useState(false);
+  // const [isDesignBiasExpanded, setIsDesignBiasExpanded] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const { data: runtimeState, refetch: refetchRuntime } = useGoalRuntimeState(
@@ -246,6 +247,9 @@ export function LearningPathPage() {
         </div>
       )}
 
+      {/* Plan quality — backend `plan_agent_metadata` from agentic scheduler (mirrors Streamlit learning_path) */}
+      <PlanQualityPanel planAgentMetadata={activeGoal.plan_agent_metadata} />
+
       {/* Two columns: Session list | Overall Progress-ish card */}
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Session list */}
@@ -277,6 +281,7 @@ export function LearningPathPage() {
             <div className="space-y-1">
               {learningPath.map((session, idx) => {
                 const runtime = runtimeState?.sessions.find((s) => s.session_index === idx);
+                const showConnector = idx < learningPath.length - 1;
                 return (
                   <div key={(session.id as string | undefined) ?? idx} className="flex items-start gap-4">
                     <div className="flex flex-col items-center">
@@ -292,7 +297,7 @@ export function LearningPathPage() {
                       >
                         {idx + 1}
                       </div>
-                      {idx < learningPath.length - 1 && <div className="w-0.5 h-6 bg-slate-200 mt-1" />}
+                      {showConnector && <div className="w-0.5 h-6 bg-slate-200 mt-1" />}
                     </div>
                     <div className="flex-1 pb-4">
                       <SessionCard
@@ -331,7 +336,8 @@ export function LearningPathPage() {
           <div className="bg-white rounded-xl border border-slate-200 p-5 sticky top-4 space-y-3">
             <h3 className="text-sm font-semibold text-slate-800 mb-1">Path Status</h3>
             <p className="text-xs text-slate-500">
-              Sessions: <span className="font-semibold text-slate-700">{learningPath.length}</span>
+              Sessions:{' '}
+              <span className="font-semibold text-slate-700">{learningPath.length}</span>
             </p>
             {runtimeState && (
               <p className="text-xs text-slate-500">
