@@ -186,7 +186,9 @@ def render_bias_ethics_review(user_id, goal_id):
     st.markdown("#### Bias & Ethics Review")
     st.write("Track bias audit results across your learning journey.")
 
-    data = get_bias_audit_history(user_id, goal_id) if user_id else None
+    # Don't filter by goal_id — audits run before the goal is persisted,
+    # so entries are stored with goal_id=None. Show all audits instead.
+    data = get_bias_audit_history(user_id) if user_id else None
     if not data or not data.get("entries"):
         st.info("No bias audits recorded yet.")
         return
