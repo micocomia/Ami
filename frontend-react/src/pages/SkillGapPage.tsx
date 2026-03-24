@@ -670,137 +670,37 @@ export function SkillGapPage() {
     // sessionStorage: after navigating away and back, component remounts with empty state,
     // so we must call the API again to get skill gaps for the current goal.
     hasFiredRef.current = true;
-    setIsLoading(true);
-    setError(null);
-
-    pushAppState('SkillGap → Received state', {
-      goal: state.goal,
-      personaKey: state.personaKey,
-      learnerInformationLength: state.learnerInformation.length,
-      learnerInformation: state.learnerInformation,
-      isGoalManagementFlow: state.isGoalManagementFlow,
-    });
-
-    (async () => {
-      try {
-        const resp = (await identifySkillGapApi({
-          learning_goal: state.goal,
-          learner_information: state.learnerInformation,
-        })) as unknown as Record<string, unknown>;
-
-        setIdentifyResponse(resp);
-        let rawGaps = (resp as any).skill_gaps;
-        /* API may return { skill_gaps: [ ... ] } nested once */
-        if (
-          rawGaps &&
-          typeof rawGaps === 'object' &&
-          !Array.isArray(rawGaps) &&
-          Array.isArray((rawGaps as Record<string, unknown>).skill_gaps)
-        ) {
-          rawGaps = (rawGaps as { skill_gaps: SkillGapItem[] }).skill_gaps;
-        }
-        const gapArray: SkillGapItem[] = Array.isArray(rawGaps)
-          ? (rawGaps as SkillGapItem[])
-          : rawGaps && typeof rawGaps === 'object'
-          ? Object.values(rawGaps as Record<string, SkillGapItem>)
-          : [];
-
-        const normalizedGaps: SkillGapItem[] = gapArray.map((sg) => ({
-          ...sg,
-          skill_name: (sg.skill_name ?? sg.name ?? '').toString(),
-        }));
-
-        const targetLevels = levelsWithoutUnlearned(levels);
-        const defaultRequired = targetLevels[0] ?? levels[1] ?? levels[0];
-
-        const targetSources: Array<'backend' | 'default'> = [];
-
-        const mapped = normalizedGaps.map((sg) => {
-          const sgRec = sg as Record<string, unknown>;
-          const rawCurrent = coerceLevelFromGap(sgRec, [
-            'current_level',
-            'observed_level',
-            'current',
-            'learner_level',
-          ]);
-          const rawRequired = coerceLevelFromGap(sgRec, [
-            'required_level',
-            'expected_level',
-            'target_level',
-          ]);
-          const hasBackendTarget =
-            Boolean(rawRequired && String(rawRequired).trim()) ||
-            Boolean(sg.required_level && String(sg.required_level).trim());
-          let required_level = normalizeLevel(rawRequired || sg.required_level || defaultRequired, levels);
-          if (String(required_level).toLowerCase() === 'unlearned')
-            required_level = normalizeLevel(defaultRequired, levels);
-          targetSources.push(hasBackendTarget ? 'backend' : 'default');
-          /* Only fall back to levels[0] when backend sent no usable current — keeps bars valid */
-          const current_level = rawCurrent
-            ? normalizeLevel(rawCurrent, levels)
-            : normalizeLevel(sg.current_level ?? levels[0], levels);
-          return {
-            original: { ...sg, current_level: rawCurrent || sg.current_level, required_level: rawRequired || sg.required_level },
-            current_level,
-            required_level,
-            addToPlan: sg.is_gap !== false,
-          };
-        });
-
-        try {
-          if (state?.goal && state?.learnerInformation) {
-            pushAppState('SkillGap → Required level source', {
-              goal: state.goal,
-              learnerInformationLength: state.learnerInformation.length,
-              levelsConfig: levels,
-              skills: mapped.map((m, idx) => ({
-                name:
-                  (m.original.skill_name as string | undefined) ||
-                  (m.original.name as string | undefined) ||
-                  `Skill ${idx + 1}`,
-                required_level: m.required_level,
-                source: targetSources[idx] ?? 'default',
-              })),
-            });
-          }
-        } catch {
-          // debug-only; ignore
-        }
-
-        /* Re-apply saved adjust by skill name (order-safe) */
-        try {
-          if (state?.goal && state?.learnerInformation) {
-            const key = skillGapStorageKey(state.goal, state.learnerInformation);
-            const raw = sessionStorage.getItem(key);
-            if (raw) {
-              const parsed = JSON.parse(raw) as { goal?: string; skills?: SavedSkill[] };
-              if (parsed.goal === state.goal && Array.isArray(parsed.skills)) {
-                applySavedSkillsToMapped(mapped, parsed.skills, levels);
-              }
-            }
-          }
-        } catch {
-          // ignore bad JSON
-        }
-
-        setLocalSkills(mapped);
-
-        try {
-          const biasData = (await auditSkillGapBiasApi({
-            // Backend expects JSON string under `skill_gaps`
-            skill_gaps: JSON.stringify({ skill_gaps: normalizedGaps }),
-            learner_information: state.learnerInformation,
-          })) as Record<string, unknown>;
-          setBiasAudit(biasData);
-        } catch {
-          // ignore bias audit errors
-        }
-      } catch {
-        setError('Failed to identify skill gaps. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    })();
+    identifyMutation.mutate(
+      { learning_goal: state.goal, learner_information: state.learnerInformation },
+      {
+        onSuccess: (data) => {
+          const resp = data as Record<string, unknown>;
+          setIdentifyResponse(resp);
+          const rawGaps = resp.skill_gaps;
+          const gapArray: SkillGapItem[] = Array.isArray(rawGaps)
+            ? (rawGaps as SkillGapItem[])
+            : rawGaps && typeof rawGaps === 'object'
+            ? Object.values(rawGaps as Record<string, SkillGapItem>)
+            : [];
+          setLocalSkills(
+            gapArray.map((sg) => ({
+              original: sg,
+              current_level: sg.current_level ?? levels[0],
+              required_level: sg.required_level ?? (levels[1] ?? levels[0]),
+              addToPlan: sg.is_gap !== false,
+            })),
+          );
+          auditMutation.mutate(
+            { skill_gaps: JSON.stringify(gapArray), learner_information: state.learnerInformation, user_id: userId ?? undefined },
+            {
+              onSuccess: (biasData) => setBiasAudit(biasData as Record<string, unknown>),
+              onError: () => {},
+            },
+          );
+        },
+        onError: () => setError('Failed to identify skill gaps. Please try again.'),
+      },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config]);
 
@@ -897,6 +797,7 @@ export function SkillGapPage() {
             learner_profile: JSON.stringify(learnerProfile),
             learner_information: state.learnerInformation,
             persona_name: state.personaKey ?? '',
+            user_id: userId ?? undefined,
           })) as Record<string, unknown>;
         } catch {
           profileFairness = null;
