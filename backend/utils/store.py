@@ -433,20 +433,45 @@ def append_bias_audit_log(
     audit_result: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     """Append a compact bias audit entry. Retains last 200 per user (Cosmos DB)."""
-    flags = audit_result.get("flags") or audit_result.get("flagged_items") or []
+    # Each auditor uses different key names — check all variants
+    flags = (
+        audit_result.get("bias_flags")
+        or audit_result.get("fairness_flags")
+        or audit_result.get("flags")
+        or audit_result.get("flagged_items")
+        or []
+    )
     flagged = [f for f in flags if isinstance(f, dict)]
-    audited_items = audit_result.get("audited_items") or audit_result.get("items_audited")
+
+    audited_items = (
+        audit_result.get("audited_skill_count")
+        or audit_result.get("checked_fields_count")
+        or audit_result.get("audited_section_count")
+        or audit_result.get("audited_message_count")
+        or audit_result.get("audited_items")
+        or audit_result.get("items_audited")
+    )
     audited_count = int(audited_items) if audited_items is not None else len(flagged)
+
+    overall_risk = (
+        audit_result.get("overall_bias_risk")
+        or audit_result.get("overall_fairness_risk")
+        or audit_result.get("overall_risk")
+        or "low"
+    )
 
     entry: Dict[str, Any] = {
         "timestamp": _now_iso(),
         "goal_id": goal_id,
         "audit_type": audit_type,
-        "overall_risk": str(audit_result.get("overall_risk", "low")).lower(),
+        "overall_risk": str(overall_risk).lower(),
         "flagged_count": len(flagged),
         "audited_count": audited_count,
         "flags_summary": [
-            {"category": f.get("category", "unknown"), "severity": f.get("severity", "low")}
+            {
+                "category": f.get("bias_category") or f.get("fairness_category") or f.get("category", "unknown"),
+                "severity": f.get("severity", "low"),
+            }
             for f in flagged[:20]
         ],
     }
