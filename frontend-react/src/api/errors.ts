@@ -1,8 +1,21 @@
-import type { AxiosInstance, AxiosError } from 'axios';
+import type { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { showError } from './toast';
 
 const AUTH_TOKEN_KEY = 'auth_token';
-const LOGIN_PATH = '/login';
+
+/** Login URL including Vite base (e.g. /Ami-React/login) so GitHub Pages full reload lands in SPA */
+function getLoginHref(): string {
+  if (typeof window === 'undefined') return '/login';
+  const base = import.meta.env.BASE_URL || '/';
+  const path = base.endsWith('/') ? `${base}login` : `${base}/login`;
+  return `${window.location.origin}${path}`;
+}
+
+function isAuthLoginOrRegisterRequest(config?: InternalAxiosRequestConfig): boolean {
+  const url = config?.url ?? '';
+  // baseURL already has /v1/; url is relative e.g. auth/login
+  return /auth\/(login|register)\/?$/i.test(url) || url.includes('auth/login') || url.includes('auth/register');
+}
 
 function clearTokenAndRedirectToLogin(): void {
   try {
@@ -10,11 +23,11 @@ function clearTokenAndRedirectToLogin(): void {
   } catch {
     // ignore
   }
-  const base = typeof window !== 'undefined' ? window.location.origin : '';
-  const path = base + LOGIN_PATH;
-  if (typeof window !== 'undefined' && window.location.pathname !== LOGIN_PATH) {
-    window.location.href = path;
-  }
+  if (typeof window === 'undefined') return;
+  const loginHref = getLoginHref();
+  // Avoid reload loop when already on login page (pathname may include basename, e.g. /Ami-React/login)
+  if (window.location.pathname.endsWith('/login')) return;
+  window.location.href = loginHref;
 }
 
 function getDetailFromError(
@@ -34,6 +47,10 @@ export function setupResponseErrorHandling(client: AxiosInstance): void {
       const detail = getDetailFromError(err);
 
       if (status === 401) {
+        // Wrong password on login/register returns 401 too — do not redirect (would hit GitHub 404 without basename)
+        if (isAuthLoginOrRegisterRequest(err.config)) {
+          return Promise.reject(err);
+        }
         clearTokenAndRedirectToLogin();
         showError('Session expired. Please log in again.');
         return Promise.reject(err);

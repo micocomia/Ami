@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import re
@@ -8,7 +9,14 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from pydantic import BaseModel, ValidationError, field_validator
 
 from base import BaseAgent
-from ..prompts.learning_document_integrator import integrated_document_generator_system_prompt, integrated_document_generator_task_prompt
+from ..prompts.learning_document_integrator import (
+    document_wrapper_system_prompt,
+    document_wrapper_task_prompt,
+    integrated_document_generator_system_prompt,
+    integrated_document_generator_task_prompt,
+    section_synthesis_system_prompt,
+    section_synthesis_task_prompt,
+)
 from ..schemas import DocumentStructure
 from ..utils import build_session_adaptation_contract, format_session_adaptation_contract
 
@@ -118,6 +126,152 @@ def integrate_learning_document_with_llm(
     if not output_markdown:
         return document_structure
     logger.info('Preparing markdown document...')
+    return prepare_markdown_document(
+        document_structure,
+        knowledge_points,
+        knowledge_drafts,
+        media_resources=media_resources,
+        narrative_resources=narrative_resources,
+        inline_assets_plan=inline_assets_plan,
+    )
+
+
+# ─── Parallel integration classes + function ──────────────────────────────────
+
+class SectionSynthesizer(BaseAgent):
+    """Polishes a single knowledge draft into a `##` section using a fast LLM."""
+
+    name: str = "SectionSynthesizer"
+
+    def __init__(self, model: Any):
+        super().__init__(model=model, system_prompt=section_synthesis_system_prompt, jsonalize_output=False)
+
+    def synthesize(self, payload: dict) -> str:
+        result = self.invoke(payload, task_prompt=section_synthesis_task_prompt)
+        if isinstance(result, str):
+            return result.strip()
+        if isinstance(result, dict):
+            return str(result.get("content", "")).strip()
+        return str(result).strip()
+
+
+class DocumentWrapper(BaseAgent):
+    """Generates title, overview, and summary from assembled sections using a fast LLM."""
+
+    name: str = "DocumentWrapper"
+
+    def __init__(self, model: Any):
+        super().__init__(model=model, system_prompt=document_wrapper_system_prompt, jsonalize_output=True)
+
+    def wrap(self, payload: dict) -> dict:
+        result = self.invoke(payload, task_prompt=document_wrapper_task_prompt)
+        if isinstance(result, dict):
+            return result
+        return {"title": "", "overview": "", "summary": ""}
+
+
+def integrate_learning_document_parallel(
+    fast_llm,
+    learner_profile,
+    learning_path,
+    learning_session,
+    knowledge_points,
+    knowledge_drafts,
+    output_markdown: bool = True,
+    media_resources: Optional[List[dict]] = None,
+    narrative_resources: Optional[List[dict]] = None,
+    inline_assets_plan: Optional[List[dict]] = None,
+    session_adaptation_contract: Optional[Mapping[str, Any]] = None,
+    understanding_hints: str = "",
+    integration_feedback: str = "",
+):
+    """Parallel integration: N per-section synthesis calls + 1 wrapper call.
+
+    Each knowledge draft is synthesized independently by a fast LLM (gpt-4o-mini).
+    Sections are assembled in order, then a single wrapper call adds title/overview/summary.
+    Expected wall-clock: ~40 s for 4 sections vs ~160 s for the monolithic path.
+    """
+    logger.info(
+        "Parallel integration: %d knowledge points, %d drafts",
+        len(knowledge_points),
+        len(knowledge_drafts),
+    )
+    if session_adaptation_contract is None:
+        session_adaptation_contract = build_session_adaptation_contract(learning_session, learner_profile)
+    formatted_contract = format_session_adaptation_contract(session_adaptation_contract)
+
+    pairs = list(zip(knowledge_points, knowledge_drafts))
+    n = len(pairs)
+
+    def _synthesize_section(idx_pair: tuple) -> tuple[int, str]:
+        idx, (kp, draft) = idx_pair
+        kp_name = kp.get("name", f"Section {idx + 1}") if isinstance(kp, dict) else str(kp)
+        draft_content = draft.get("content", "") if isinstance(draft, dict) else str(draft)
+        payload = {
+            "learner_profile": learner_profile,
+            "learning_session": learning_session,
+            "session_adaptation_contract": formatted_contract,
+            "knowledge_point_name": kp_name,
+            "draft_content": draft_content,
+            "integration_feedback": integration_feedback,
+        }
+        try:
+            synthesizer = SectionSynthesizer(fast_llm)
+            section_text = synthesizer.synthesize(payload)
+            if not section_text.strip().startswith("##"):
+                section_text = f"## {kp_name}\n\n{section_text}"
+            return idx, section_text
+        except Exception as exc:
+            logger.warning("Section synthesis failed for '%s': %s", kp_name, exc)
+            return idx, f"## {kp_name}\n\n{draft_content}"
+
+    section_results: list[tuple[int, str]] = []
+    if n <= 1:
+        for item in enumerate(pairs):
+            section_results.append(_synthesize_section(item))
+    else:
+        max_workers = min(8, n)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futs = [pool.submit(_synthesize_section, (i, p)) for i, p in enumerate(pairs)]
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    section_results.append(fut.result())
+                except Exception as exc:
+                    logger.warning("Section synthesis future failed: %s", exc)
+
+    # Restore pedagogical order (futures complete out-of-order)
+    section_results.sort(key=lambda t: t[0])
+    assembled_content = "\n\n".join(text for _, text in section_results)
+
+    # Generate title, overview, summary with one lightweight call
+    try:
+        wrapper = DocumentWrapper(fast_llm)
+        wrapper_payload = {
+            "learner_profile": learner_profile,
+            "learning_session": learning_session,
+            "assembled_content": assembled_content[:8000],  # cap to avoid context overflow
+        }
+        metadata = wrapper.wrap(wrapper_payload)
+    except Exception as exc:
+        logger.warning("Document wrapper failed: %s", exc)
+        session_title = (
+            learning_session.get("title", "Learning Session")
+            if isinstance(learning_session, dict)
+            else "Learning Session"
+        )
+        metadata = {"title": session_title, "overview": "", "summary": ""}
+
+    document_structure = {
+        "title": str(metadata.get("title", "") or ""),
+        "overview": str(metadata.get("overview", "") or ""),
+        "content": assembled_content,
+        "summary": str(metadata.get("summary", "") or ""),
+    }
+
+    if not output_markdown:
+        return document_structure
+
+    logger.info("Preparing markdown document (parallel path)...")
     return prepare_markdown_document(
         document_structure,
         knowledge_points,

@@ -1,201 +1,513 @@
-import { useRef, useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, InputField } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { useHasEnteredGoal } from '@/context/HasEnteredGoalContext';
 import { usePersonas } from '@/api/endpoints/config';
 import { useExtractPdfText } from '@/api/endpoints/pdf';
+import { pushAppState } from '@/components/DebugPanel';
+import LogoBlack from '@/assets/Logo_black.png';
+import {
+  setLearningStylePreference,
+  withLearningStyleInLearnerInformation,
+  type LearningStyleOption,
+} from '@/lib/learningStylePreference';
+import { clearStoredResume, setStoredResume } from '@/lib/resumeStorage';
+import { OnboardingDataUseCollapsible } from '@/components/ethics';
+
+/* ------------------------------------------------------------------ */
+/*  Mock data                                                         */
+/* ------------------------------------------------------------------ */
+
+interface Category {
+  id: string;
+  label: string;
+}
+
+const CATEGORIES: Category[] = [
+  { id: 'language', label: 'Language learning' },
+  { id: 'coding', label: 'Coding & tech' },
+  { id: 'career', label: 'Career growth' },
+  { id: 'design', label: 'Design & creativity' },
+];
+
+interface LearningPreference {
+  id: string;
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+const LEARNING_PREFERENCES: LearningPreference[] = [
+  {
+    id: 'hands-on',
+    title: 'Interactive',
+    description: 'You learn fastest by trying things directly: short exercises, guided practice, and immediate feedback.',
+    tags: ['Active', 'Visual', 'Step-by-step'],
+  },
+  {
+    id: 'reflective',
+    title: 'Textual',
+    description: 'You prefer reading clear explanations first, then reflecting before applying what you learned.',
+    tags: ['Reading', 'Reflection'],
+  },
+  {
+    id: 'visual',
+    title: 'Visual',
+    description: 'You understand ideas better with diagrams, examples, and visual breakdowns instead of long text.',
+    tags: ['Visual', 'Diagrams'],
+  },
+  {
+    id: 'conceptual',
+    title: 'Concise',
+    description: 'You prefer key concepts and big-picture structure first, then only the most important details.',
+    tags: ['Theory', 'Analysis', 'Big-picture'],
+  },
+  {
+    id: 'balanced',
+    title: 'Balanced',
+    description: 'You want a mix: concise explanations, practical exercises, and visuals depending on the topic.',
+    tags: ['Flexible', 'Neutral'],
+  },
+];
+
+/** Map frontend preference id → backend persona key (GET /personas returns full names) */
+const PREFERENCE_TO_PERSONA: Record<string, string> = {
+  'hands-on': 'Hands-on Explorer',
+  reflective: 'Reflective Reader',
+  visual: 'Visual Learner',
+  conceptual: 'Conceptual Thinker',
+  balanced: 'Balanced Learner',
+};
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                         */
+/* ------------------------------------------------------------------ */
 
 export function OnboardingPage() {
   const navigate = useNavigate();
-  const { data: personasData, isLoading: personasLoading } = usePersonas();
+  const { setHasEnteredGoal } = useHasEnteredGoal();
+  const { data: personasData } = usePersonas();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const extractPdf = useExtractPdfText();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
 
-  const [learningGoal, setLearningGoal] = useState('');
-  const [selectedPersonaKey, setSelectedPersonaKey] = useState<string | null>(null);
+  // Step 1: goal category + input description can be used together.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [goalDetails, setGoalDetails] = useState('');
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Step 2: learning style selection (5 options).
+  /** Default to balanced for faster course load than visual. */
+  const [selectedPreferenceId, setSelectedPreferenceId] = useState<string | null>('balanced');
+
+  // Step 3: optional resume upload.
   const [resumeText, setResumeText] = useState('');
-  const [pdfFilename, setPdfFilename] = useState<string | null>(null);
-
+  const [resumeFileName, setResumeFileName] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const personas = personasData?.personas ?? {};
-  const personaKeys = Object.keys(personas);
 
-  function buildLearnerInformation(personaKey: string | null, resumeTxt: string): string {
-    let prefix = '';
-    if (personaKey && personas[personaKey]) {
+  const CATEGORY_TO_PREFIX: Record<string, string> = useMemo(
+    () => ({
+      language: 'I want to learn a new language：',
+      coding: 'I want to learn Python for beginners：',
+      career: 'I want to prepare for interviews：',
+      design: 'I want to improve my design skills：',
+    }),
+    [],
+  );
+
+  const composedLearningGoal = useMemo(() => {
+    const details = goalDetails.trim();
+    if (!selectedCategory) return details;
+    const prefix = CATEGORY_TO_PREFIX[selectedCategory] ?? '';
+    if (!prefix) return details;
+    if (!details) return prefix;
+    return `${prefix}${details}`;
+  }, [CATEGORY_TO_PREFIX, goalDetails, selectedCategory]);
+
+  const canContinueStep1 = Boolean(goalDetails.trim()) || selectedCategory !== null;
+
+  const handleSelectCategory = useCallback(
+    (id: string) => {
+      const next = selectedCategory === id ? null : id;
+      setSelectedCategory(next);
+      if (!next) {
+        setGoalDetails('');
+        return;
+      }
+      setGoalDetails(CATEGORY_TO_PREFIX[next] ?? '');
+    },
+    [CATEGORY_TO_PREFIX, selectedCategory],
+  );
+
+  const handleBeginLearning = useCallback(() => {
+    const trimmed = composedLearningGoal.trim();
+    if (!trimmed) return;
+    const prefId = selectedPreferenceId ?? 'balanced';
+    const personaKey = PREFERENCE_TO_PERSONA[prefId] ?? prefId;
+    // Build learnerInformation similar to old frontend: persona + optional resume summary
+    let learnerInformation = resumeText;
+    if (personas[personaKey]) {
       const dims = personas[personaKey].fslsm_dimensions;
       const dimStr = Object.entries(dims)
         .map(([k, v]) => `${k}=${v}`)
         .join(', ');
-      prefix = `Learning Persona: ${personaKey} (initial FSLSM: ${dimStr}). `;
+      learnerInformation = `Learning Persona: ${personaKey} (initial FSLSM: ${dimStr}). ${learnerInformation}`;
     }
-    return prefix + resumeTxt;
-  }
-
-  const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      setPdfFilename(file.name);
-      try {
-        const result = await extractPdf.mutateAsync(file);
-        setResumeText((result as { text?: string }).text ?? '');
-      } catch {
-        setResumeText('');
-      }
-    },
-    [extractPdf],
-  );
-
-  const canBeginLearning = learningGoal.trim().length > 0 && selectedPersonaKey !== null;
-
-  const handleBeginLearning = useCallback(() => {
-    if (!canBeginLearning) return;
-    const learnerInformation = buildLearnerInformation(selectedPersonaKey, resumeText);
+    // Ensure learnerInformation is never empty so SkillGapPage's guard passes
+    if (!learnerInformation) {
+      learnerInformation = `Learning goal: ${trimmed}.`;
+    }
+    // Sync onboarding persona choice → Profile "Learning style" localStorage
+    const selectedTitle =
+      LEARNING_PREFERENCES.find((p) => p.id === prefId)?.title ?? 'Balanced';
+    setLearningStylePreference(selectedTitle as LearningStyleOption);
+    // Persisted Profile learning style → included for create-learner-profile / path pipeline
+    learnerInformation = withLearningStyleInLearnerInformation(learnerInformation);
+    pushAppState('Onboarding → Submit', {
+      goal: trimmed,
+      personaKey,
+      learningStyle: selectedTitle,
+      hasResume: Boolean(resumeText),
+      resumeTextLength: resumeText.length,
+      learnerInformation,
+    });
+    setIsSubmitting(true);
+    setHasEnteredGoal(true);
     navigate('/skill-gap', {
       state: {
-        goal: learningGoal.trim(),
-        personaKey: selectedPersonaKey,
+        goal: trimmed,
+        personaKey,
         learnerInformation,
         isGoalManagementFlow: false,
       },
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canBeginLearning, learningGoal, selectedPersonaKey, resumeText, navigate]);
+  }, [
+    composedLearningGoal,
+    selectedPreferenceId,
+    personas,
+    resumeText,
+    navigate,
+    setHasEnteredGoal,
+  ]);
+
+  const handleSkipResume = useCallback(() => {
+    setResumeError(null);
+    setResumeText('');
+    setResumeFileName(null);
+    clearStoredResume();
+  }, []);
+
+  const stepItems = [
+    { n: 1, label: 'What do you want to learn?' },
+    { n: 2, label: 'How do you learn best?' },
+    { n: 3, label: 'Upload resume' },
+  ] as const;
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
+      {/* ── Scrollable content ── */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {/* Hero */}
-        <section className="text-center pt-8 pb-6 px-4">
-          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">
-            Welcome to <span className="text-primary-600">Ami</span>
-          </h1>
-          <p className="mt-3 text-lg text-slate-500 max-w-lg mx-auto leading-relaxed">
-            Your personal adaptive learning companion.
-            <br />
-            No setup required — we&apos;ll adapt to you as we go.
+        {/* ── Hero ── */}
+        <section className="text-center pt-12 pb-6 px-4">
+          <div className="flex justify-center">
+            <img
+              src={LogoBlack}
+              alt="Ami"
+              className="h-14 sm:h-16 md:h-20 w-auto max-w-full object-contain"
+            />
+          </div>
+          <p className="mt-3 text-lg text-slate-400 font-medium">
+            Your Adaptive Learning Companion
           </p>
         </section>
+        {/* ── 3-step wizard ── */}
+        <section className="max-w-5xl w-full mx-auto px-4 space-y-8 pb-12">
+          {/* Top steps indicator */}
+          <div className="pt-2">
+            <div className="flex items-center justify-center gap-0">
+              {stepItems.map((s, idx) => {
+                const state = s.n < step ? 'done' : s.n === step ? 'active' : 'todo';
+                const isDone = state === 'done';
+                const isActive = state === 'active';
+                const circleClass = cn(
+                  'flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold border',
+                  isDone
+                    ? 'bg-[#78B3BA] border-[#78B3BA] text-white'
+                    : isActive
+                      ? 'bg-white border-[#78B3BA] text-[#78B3BA]'
+                      : 'bg-slate-100 border-slate-200 text-slate-400',
+                );
+                const labelClass = cn(
+                  'hidden sm:block text-xs font-medium',
+                  isDone ? 'text-slate-600' : isActive ? 'text-[#78B3BA]' : 'text-slate-400',
+                );
 
-        <section className="max-w-2xl w-full mx-auto px-4 space-y-6 pb-8">
-          {/* Goal input */}
-          <div>
-            <p className="text-center text-sm font-medium text-slate-700 mb-2">
-              What would you like to learn today?
-            </p>
-            <InputField
-              placeholder="eg: learn english, python, data ..."
-              value={learningGoal}
-              onChange={(e) => setLearningGoal(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              Enter any topic you want to learn. The system will automatically refine your goal if
-              needed and generate personalised content for you.
-            </p>
+                return (
+                  <div key={s.n} className="flex items-center gap-3">
+                    <div className={circleClass} aria-current={isActive ? 'step' : undefined}>
+                      {isDone ? (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
+                        </svg>
+                      ) : (
+                        s.n
+                      )}
+                    </div>
+                    <div className={labelClass}>{s.label}</div>
+                    {idx < stepItems.length - 1 && (
+                      <div
+                        className={cn(
+                          'h-[2px] w-10',
+                          isDone ? 'bg-[#78B3BA]' : 'bg-slate-200',
+                        )}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Persona cards */}
-          <div>
-            <p className="text-sm font-medium text-slate-700 mb-3">Select your learning persona</p>
-            {personasLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-24 bg-slate-100 rounded-xl animate-pulse" />
-                ))}
+          {/* Step 1 */}
+          {step === 1 && (
+            <div className="space-y-8">
+              <p className="text-center text-sm font-medium text-slate-700">What do you want to learn?</p>
+
+              <div className="w-full max-w-4xl mx-auto">
+                <InputField
+                  placeholder="What do you want to learn? e.g. conversational English, Python, interview skills, UX design"
+                  value={goalDetails}
+                  onChange={(e) => setGoalDetails(e.target.value)}
+                  disabled={isSubmitting}
+                  className="custom-input w-full h-[56px]"
+                />
               </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {personaKeys.map((key) => {
-                  const persona = personas[key];
-                  const isSelected = selectedPersonaKey === key;
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {CATEGORIES.map((cat) => {
+                    const isSelected = selectedCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => handleSelectCategory(cat.id)}
+                        disabled={isSubmitting}
+                        className={cn(
+                          'suggestion-card py-4 px-3 rounded-xl flex items-center justify-center text-center disabled:opacity-50 disabled:cursor-not-allowed',
+                          isSelected && 'active',
+                        )}
+                      >
+                        <span className="text-[12px] font-bold leading-tight">{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-center pt-2">
+                <Button
+                  size="lg"
+                  onClick={() => setStep(2)}
+                  disabled={!canContinueStep1 || isSubmitting}
+                  className="w-full sm:w-auto rounded-full !bg-[#78B3BA] hover:!bg-[#6aa3aa] !text-white px-10 py-4 text-lg font-semibold shadow-xl shadow-teal-500/20"
+                >
+                  Continue
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2 */}
+          {step === 2 && (
+            <div className="space-y-8">
+              <p className="text-center text-sm font-medium text-slate-700">How do you learn best?</p>
+
+              <div
+                role="radiogroup"
+                aria-label="Learning style options"
+                className="max-w-3xl mx-auto overflow-hidden rounded-2xl border border-slate-200 bg-white"
+              >
+                {LEARNING_PREFERENCES.map((pref) => {
+                  const selected = selectedPreferenceId === pref.id;
                   return (
                     <button
-                      key={key}
+                      key={pref.id}
                       type="button"
-                      onClick={() => setSelectedPersonaKey(isSelected ? null : key)}
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setSelectedPreferenceId(pref.id)}
+                      disabled={isSubmitting}
                       className={cn(
-                        'text-left rounded-xl border-2 p-4 transition-all text-sm',
-                        'hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
-                        isSelected
-                          ? 'border-primary-500 bg-primary-50 text-primary-800'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                        'w-full border-b border-slate-200 px-5 py-4 text-left transition-colors last:border-b-0',
+                        selected
+                          ? 'bg-[#f0f9fa]'
+                          : 'bg-white hover:bg-slate-50',
                       )}
                     >
-                      <span className="font-semibold block mb-1">{key}</span>
-                      <span className="text-xs text-slate-500 leading-snug">{persona.description}</span>
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={cn(
+                            'mt-1 inline-flex h-4 w-4 items-center justify-center rounded-full border',
+                            selected ? 'border-[#78B3BA]' : 'border-slate-300',
+                          )}
+                        >
+                          {selected && (
+                            <span className="block h-2 w-2 rounded-full bg-[#78B3BA]" />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-slate-900">{pref.title}</p>
+                          </div>
+                          <p className="mt-1 text-sm text-slate-500 leading-relaxed">{pref.description}</p>
+                        </div>
+                      </div>
                     </button>
                   );
                 })}
               </div>
-            )}
-          </div>
 
-          {/* Resume upload */}
-          <div>
-            <p className="text-sm font-medium text-slate-700 mb-2">
-              Upload your resume for a more personalised experience{' '}
-              <span className="text-slate-400 font-normal">(optional)</span>
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center gap-3 text-left px-4 py-3 rounded-lg border border-dashed border-slate-300 bg-white hover:bg-slate-50 transition-colors"
-            >
-              <svg className="w-5 h-5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
-              <span className="text-sm text-slate-600">
-                {extractPdf.isPending
-                  ? 'Extracting text…'
-                  : pdfFilename
-                  ? pdfFilename
-                  : 'Click to upload PDF resume'}
-              </span>
-            </button>
-            {resumeText && (
-              <p className="mt-1 text-xs text-green-600">Resume text extracted successfully.</p>
-            )}
-          </div>
-
-          {/* Data transparency */}
-          <details className="text-sm border border-slate-200 rounded-lg">
-            <summary className="px-4 py-3 cursor-pointer text-slate-600 font-medium select-none">
-              How your data is used
-            </summary>
-            <div className="px-4 pb-4 pt-2 text-xs text-slate-500 space-y-2">
-              <p><strong>What we collect:</strong> Your learning goal, selected persona, and optionally your resume text. During learning, we also record quiz scores and session timing.</p>
-              <p><strong>AI-generated assessments:</strong> Skill levels, learner profiles, and learning content are generated by AI. They are estimates and may not fully reflect your actual abilities.</p>
-              <p><strong>External services:</strong> Your learning goal and background are sent to an LLM provider to generate personalised content.</p>
-              <p><strong>Your control:</strong> You can delete your account and all associated data at any time from the My Profile page.</p>
+              <div className="flex flex-row flex-wrap justify-center items-center gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => setStep(1)}
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto min-w-[8rem] rounded-full px-10 py-4 text-lg font-semibold border-slate-200"
+                >
+                  Back
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setStep(3)}
+                  disabled={!selectedPreferenceId || isSubmitting}
+                  className="w-full sm:w-auto rounded-full !bg-[#78B3BA] hover:!bg-[#6aa3aa] !text-white px-10 py-4 text-lg font-semibold shadow-xl shadow-teal-500/20"
+                >
+                  Continue
+                </Button>
+              </div>
             </div>
-          </details>
-        </section>
-      </div>
-
-      {/* Bottom action bar */}
-      <div className="border-t border-slate-100 px-4 py-4 bg-white">
-        <div className="max-w-2xl mx-auto">
-          <Button
-            size="lg"
-            onClick={handleBeginLearning}
-            disabled={!canBeginLearning}
-            className="w-full"
-          >
-            Begin Learning
-          </Button>
-          {!canBeginLearning && (
-            <p className="mt-2 text-center text-xs text-slate-400">
-              Please enter a learning goal and select a learning persona to continue.
-            </p>
           )}
-        </div>
+
+          {/* Step 3 */}
+          {step === 3 && (
+            <div className="space-y-6">
+              <div className="space-y-2 text-center">
+                <p className="text-sm font-medium text-slate-700">Upload resume</p>
+                <p className="text-xs text-slate-500">
+                  Upload your resume so Ami can identify your skill gaps and tailor your learning path.
+                </p>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file) return;
+                  setResumeError(null);
+                  setResumeFileName(file.name);
+                  try {
+                    const result = await extractPdf.mutateAsync(file);
+                    const pdfText = (result as { text?: string }).text ?? '';
+                    if (!pdfText) {
+                      setResumeError('Could not read PDF. Please try another file.');
+                      setResumeFileName(null);
+                      return;
+                    }
+                    const resumeContent = `Resume summary: ${pdfText}`;
+                    setResumeText(resumeContent);
+                    setStoredResume(file.name, resumeContent);
+                  } catch {
+                    setResumeError('Upload failed. Please try again.');
+                    setResumeFileName(null);
+                    setResumeText('');
+                  }
+                }}
+              />
+
+              <div className="max-w-3xl mx-auto">
+                {!resumeFileName ? (
+                  <button
+                    type="button"
+                    disabled={isSubmitting || extractPdf.isPending}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={cn(
+                      'w-full rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors',
+                      'border-slate-200 hover:border-[#78B3BA] hover:bg-[#f0f9fa]',
+                    )}
+                  >
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                      {extractPdf.isPending ? 'Reading resume…' : 'Click to upload your resume (.pdf)'}
+                    </p>
+                  </button>
+                ) : (
+                  <div className="rounded-2xl border border-[#BFE7D3] bg-[#E8F8F1] px-6 py-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#78B3BA]/15">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#78B3BA" strokeWidth="3">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 truncate">{resumeFileName}</p>
+                        <p className="text-sm text-slate-600">Ready to personalise your path</p>
+                      </div>
+                    </div>
+                    {resumeError && <p className="text-xs text-red-500 mt-2">{resumeError}</p>}
+                  </div>
+                )}
+                {resumeError && !resumeFileName && (
+                  <p className="text-xs text-red-500 mt-2 text-center">{resumeError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  className="text-sm font-medium text-[#5F7486] underline decoration-[#DCE7EA] underline-offset-2 hover:text-[#3AA6B9]"
+                  onClick={handleSkipResume}
+                  disabled={isSubmitting || extractPdf.isPending}
+                >
+                  Skip for now
+                </button>
+              </div>
+
+              <div className="max-w-md mx-auto w-full space-y-3 pt-0.5">
+                <div className="flex flex-row flex-wrap justify-center items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    onClick={() => setStep(2)}
+                    disabled={isSubmitting}
+                    className="w-full sm:w-auto min-w-[8rem] rounded-full px-8 py-3 text-base font-semibold border-slate-200"
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={handleBeginLearning}
+                    loading={false}
+                    disabled={isSubmitting || !composedLearningGoal.trim()}
+                    className="w-full sm:w-auto rounded-full !bg-[#78B3BA] hover:!bg-[#6aa3aa] !text-white px-8 py-3 text-base font-semibold shadow-md shadow-teal-500/15"
+                  >
+                    Begin learning
+                  </Button>
+                </div>
+                <OnboardingDataUseCollapsible className="max-w-full" />
+              </div>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

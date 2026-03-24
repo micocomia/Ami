@@ -11,6 +11,7 @@ class ChatWithAutorRequest(BaseRequest):
 
     messages: str
     learner_profile: str = ""
+    goal_context: Optional[Any] = None
     user_id: Optional[str] = None
     goal_id: Optional[int] = None
     session_index: Optional[int] = None
@@ -40,8 +41,10 @@ class SkillGapIdentificationRequest(BaseRequest):
 class LearnerProfileInitializationWithInfoRequest(BaseRequest):
 
     learning_goal: str
-    learner_information: str
+    learner_information: str = ""
     skill_gaps: str
+    persona_name: Optional[str] = None
+    fslsm_baseline: Optional[Dict[str, Any]] = None
     user_id: Optional[str] = None
     goal_id: Optional[int] = None
 
@@ -203,6 +206,12 @@ class MasteryEvaluationRequest(BaseModel):
     goal_id: int
     session_index: int
     quiz_answers: Dict[str, Any]
+
+
+class ResetMasteryAttemptRequest(BaseModel):
+    user_id: str
+    goal_id: int
+    session_index: int
 
 
 class BehavioralMetricsResponse(BaseModel):

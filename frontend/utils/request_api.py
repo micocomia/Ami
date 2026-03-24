@@ -1,4 +1,5 @@
 import json
+import os
 import httpx
 import streamlit as st
 from typing import Optional
@@ -160,6 +161,7 @@ API_NAMES = {
     "validate_profile_fairness": "validate-profile-fairness",
     "audit_content_bias": "audit-content-bias",
     "audit_chatbot_bias": "audit-chatbot-bias",
+    "reset_mastery_attempt": "reset-mastery-attempt",
     "bias_audit_history": "bias-audit-history",
 }
 
@@ -258,6 +260,7 @@ def chat_with_tutor(
     chat_messages,
     learner_profile,
     *,
+    goal_context=None,
     user_id=None,
     goal_id=None,
     session_index=None,
@@ -272,6 +275,7 @@ def chat_with_tutor(
         "use_media_search": True,
         "allow_preference_updates": True,
         "return_metadata": bool(return_metadata),
+        "goal_context": _coerce_jsonable(goal_context),
     }
     if user_id is not None:
         data["user_id"] = user_id
@@ -282,7 +286,8 @@ def chat_with_tutor(
     if learner_information is not None:
         data["learner_information"] = _normalize_learner_information(learner_information)
 
-    response = make_post_request(API_NAMES["chat_with_tutor"], data, "./assets/data_example/ai)tutor_chat.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/ai)tutor_chat.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["chat_with_tutor"], data, mock_path)
     if not response:
         return None
     if return_metadata:
@@ -312,7 +317,8 @@ def identify_skill_gap(
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["identify_skill_gap"], data, "./assets/data_example/skill_gap.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/skill_gap.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["identify_skill_gap"], data, mock_path)
     if not response:
         return None, None, None, None
     return (
@@ -396,17 +402,22 @@ def create_learner_profile(
     skill_gaps,
     user_id=None,
     goal_id=None,
+    persona_name="",
+    fslsm_baseline=None,
 ):
     data = {
         "learning_goal": str(learning_goal),
         "learner_information": _normalize_learner_information(learner_information),
         "skill_gaps": _normalize_skill_gaps(skill_gaps),
+        "persona_name": persona_name or "",
+        "fslsm_baseline": fslsm_baseline or {},
     }
     if user_id is not None:
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["create_profile"], data, "./assets/data_example/learner_profile.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learner_profile.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["create_profile"], data, mock_path)
     return response.get("learner_profile") if response else None
 
 def update_learner_profile(learner_profile, learner_interactions, learner_information="", session_information="", user_id=None, goal_id=None):
@@ -420,7 +431,8 @@ def update_learner_profile(learner_profile, learner_interactions, learner_inform
         data["user_id"] = user_id
     if goal_id is not None:
         data["goal_id"] = goal_id
-    response = make_post_request(API_NAMES["update_profile"], data, "./assets/data_example/learner_profile.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learner_profile.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["update_profile"], data, mock_path)
     return response.get("learner_profile") if response else None
 
 
@@ -562,7 +574,8 @@ def generate_learning_content(
         data["goal_id"] = int(goal_id)
     if session_index is not None:
         data["session_index"] = int(session_index)
-    response = make_post_request(API_NAMES["generate_learning_content"], data, "./assets/data_example/learning_document.json")
+    mock_path = os.path.join(os.path.dirname(__file__), "../assets/data_example/learning_document.json") if use_mock_data else None
+    response = make_post_request(API_NAMES["generate_learning_content"], data, mock_path)
     if not response:
         return None
     if isinstance(response, dict) and isinstance(response.get("learning_content"), dict):
@@ -704,6 +717,17 @@ def evaluate_mastery(user_id, goal_id, session_index, quiz_answers):
         "quiz_answers": quiz_answers,
     }
     response = make_post_request("evaluate-mastery", data)
+    return response if response else None
+
+
+def reset_mastery_attempt(user_id, goal_id, session_index):
+    """Clear persisted mastery attempt for one session."""
+    data = {
+        "user_id": str(user_id),
+        "goal_id": int(goal_id),
+        "session_index": int(session_index),
+    }
+    response = make_post_request(API_NAMES["reset_mastery_attempt"], data)
     return response if response else None
 
 
@@ -857,12 +881,17 @@ def save_learner_profile(user_id, goal_id, learner_profile):
         return False
 
 
+@st.cache_resource
 def get_personas():
-    """GET /personas → dict of personas. Falls back to local data on failure."""
+    """GET /personas → dict of personas. Falls back to local data on failure.
+
+    Cached at the process level — personas are static data that never change
+    per user or session, so one fetch per server process is sufficient.
+    """
     from utils.personas import PERSONAS as LOCAL_PERSONAS
     if use_mock_data:
         return LOCAL_PERSONAS
-    url = f"{_get_backend_endpoint()}personas"
+    url = f"{backend_endpoint}personas"
     try:
         resp = httpx.get(url, timeout=30)
         if resp.status_code == 200:

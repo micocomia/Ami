@@ -25,6 +25,61 @@ If the user already has goals, the app routes directly into post-onboarding page
 
 ---
 
+
+## Interface Walkthrough
+
+### 1. Register
+
+New learners land on the registration form to create a username and password. After a successful sign-up, they are redirected to the login screen.
+
+![Register page](./docs/images/register.png)
+
+### 2. Login
+Existing users authenticate with their Ami account and are taken either to onboarding (no goals yet) or directly into their current learning experience.
+
+![Login page](./docs/images/login.png)
+
+### 3. Onbording
+During onboarding, learners select a persona, provide a learning goal, and can optionally upload a resume PDF to enrich skill-gap analysis.
+
+![Onbording page](./docs/images/onboarding.png)
+
+### 3. Skill Gap
+The skill-gap page shows the AI-refined learning goal, proposed skills, and lets the learner confirm which skills should drive the learning path.
+
+![Skill gap page](./docs/images/skill-gap.png)
+
+### 4. Learning Path
+Once skills are confirmed, Ami schedules a sequential learning path. Sessions beyond the current one are visually and functionally locked until prerequisites are mastered.
+
+![Learning path page](./docs/images/learning-path.png)
+
+### 5. Learning Session
+The learning session view presents paginated lesson content, embedded quizzes, optional audio, and completion and feedback actions for each session.
+
+![Learning session page](./docs/images/learning-session.png)
+
+### 6. Dashboard
+The home dashboard provides a landing view into the learner's active goal, current progress, and quick access to the next recommended action.
+
+![Dashboard page](./docs/images/dashboard.png)
+
+### 7. Goal Management
+The goal management page allows learners to create, edit, delete, and switch between multiple learning goals.
+
+![Goal Management page](./docs/images/goals-management.png)
+
+### 8. Analytics
+The analytics views surface goal-level progress, skill mastery, session time, and quiz performance for the active goal.
+
+![Analytics overview](./docs/images/Analytics-overview.png)
+![Analytics active goal](./docs/images/Analytics-active-goal.png)
+
+
+
+
+
+
 ## How the Frontend Uses the Backend Pipelines
 
 The React pages are thin orchestration and UI layers on top of backend pipelines:
@@ -171,7 +226,7 @@ frontend-react/
   package.json              # Dependencies and npm scripts
   vite.config.ts            # Vite + React plugin config
   tsconfig.json             # TypeScript config
-  tailwind.config.js        # Tailwind CSS config
+  tailwind.config.ts        # Tailwind CSS config (with @tailwindcss/typography)
 
   src/
     main.tsx                # App entry point; provider composition
@@ -212,16 +267,17 @@ frontend-react/
       useAuth.ts            # thin wrapper around AuthContext
 
     pages/
-      LoginPage.tsx            # wired to useLogin()
-      RegisterPage.tsx         # wired to useRegister()
-      OnboardingPage.tsx       # persona selection, PDF upload, goal input
-      SkillGapPage.tsx         # skill gap analysis, schedule learning path
-      LearningPathPage.tsx     # session list, agentic scheduling, FSLSM module map
-      LearningSessionPage.tsx  # paginated content, quiz, heartbeat, complete, feedback, inline chat
-      GoalsPage.tsx            # goal CRUD, switch active goal
-      ProfilePage.tsx          # behavioral metrics, FSLSM sliders, edit modal
-      AnalyticsPage.tsx        # dashboard metrics, skill radar, session time, mastery charts
-      HomePage.tsx             # dashboard landing
+      LoginPage.tsx              # wired to useLogin()
+      RegisterPage.tsx           # wired to useRegister()
+      OnboardingPage.tsx         # persona selection, PDF upload, goal input
+      SkillGapPage.tsx           # skill gap analysis, schedule learning path
+      LearningPathPage.tsx       # sequential, locked learning path with runtime adaptation banners
+      LearningSessionPage.tsx    # paginated markdown content (Tailwind prose), quiz, heartbeat, completion, inline chat
+      KnowledgePage.tsx          # read-only view of drafted knowledge documents
+      GoalsPage.tsx              # goal CRUD, switch active goal
+      ProfilePage.tsx            # behavioral metrics, learner information, FSLSM learning preferences edit modal
+      AnalyticsPage.tsx          # dashboard metrics, skill radar, session time, mastery charts
+      HomePage.tsx               # dashboard landing / entry to current goal
 
     types/
       api-types.ts          # All API TypeScript interfaces (source of truth for types)

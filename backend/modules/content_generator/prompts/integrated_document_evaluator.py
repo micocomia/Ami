@@ -25,12 +25,12 @@ Evaluation criteria:
      * `audio_mode = "podcast"` or `"narration"`: prose must be TTS-friendly throughout — no visual-only references; narrative inserts should be present if the learner profile indicates `fslsm_input >= 0.3`.
    - Understanding (`contract.understanding`):
      * `mode = "sequential"`: verify no forward references; check that section transitions are explicit (e.g., "Building on...").
-     * `mode = "global"`: verify a Big Picture or overview section exists and that cross-references between sections are present.
+     * `mode = "global"`: verify exactly one wrapper section titled `Big Picture` or an equivalent overview section exists before the core draft-aligned sections, and that cross-references between sections are present.
    - SOLO: including `knowledge_point.role` and `knowledge_point.solo_level`.
 4. Internal consistency and factual caution (avoid unsupported claims).
 5. Structural integrity:
    - Core top-level `##` sections should align to the pedagogical order of `knowledge_points`.
-   - Flag excess top-level `##` sections that look like scaffolding noise (unless they are explicit optional wrappers like `Summary` or `Additional Learning Resources`).
+   - Flag excess top-level `##` sections that look like scaffolding noise (unless they are explicit optional wrappers like `Big Picture`, `Summary`, or `Additional Learning Resources`).
    - Flag generic scaffolding-only section titles such as `Introduction`, `Conclusion`, `Overview`, `Recap` when they do not teach session-specific content.
 
 Repair scope rules:

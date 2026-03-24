@@ -1,64 +1,75 @@
-"""JSON file-backed persistence for user credentials."""
+"""Azure Cosmos DB-backed persistence for user credentials.
 
-import json
-import threading
-from pathlib import Path
+Replaces the previous JSON file-backed implementation. All public function
+signatures are preserved so callers in main.py require no changes.
+"""
+
+import logging
 from typing import Any, Dict, Optional
 
 import bcrypt
 
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "users"
-_USERS_PATH = _DATA_DIR / "users.json"
+logger = logging.getLogger(__name__)
 
-_lock = threading.Lock()
-_users: Dict[str, Dict[str, Any]] = {}
-
-
-def load():
-    """Read persisted user data from disk into memory. Call once at startup."""
-    global _users
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if _USERS_PATH.exists():
-        try:
-            _users = json.loads(_USERS_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            _users = {}
+# Module-level Cosmos DB client. Initialised by load() at FastAPI startup.
+_cosmos: Optional[Any] = None  # CosmosUserStore
 
 
-def _flush():
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _USERS_PATH.write_text(
-        json.dumps(_users, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def load() -> None:
+    """Initialise the Cosmos DB connection. Called once at FastAPI startup."""
+    global _cosmos
+    from base.cosmos_client import CosmosUserStore
+    try:
+        _cosmos = CosmosUserStore.from_env()
+    except ValueError as exc:
+        logger.warning("Cosmos DB not configured for auth_store: %s. Auth unavailable.", exc)
+        _cosmos = None
+
+
+def _get_cosmos():
+    """Return the Cosmos DB client, raising RuntimeError if not initialised."""
+    if _cosmos is None:
+        raise RuntimeError(
+            "Cosmos DB client not initialised. "
+            "Ensure AZURE_COSMOS_CONNECTION_STRING is set and auth_store.load() was called."
+        )
+    return _cosmos
 
 
 def create_user(username: str, password: str) -> Dict[str, Any]:
-    """Hash password with bcrypt and store. Raises ValueError if user exists."""
-    with _lock:
-        if username in _users:
-            raise ValueError("User already exists")
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        _users[username] = {"username": username, "password_hash": hashed.decode("utf-8")}
-        _flush()
-        return _users[username]
+    """Hash password with bcrypt and store. Raises ValueError if user already exists."""
+    db = _get_cosmos()
+    if db.get("users", username, username) is not None:
+        raise ValueError("User already exists")
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    user = {
+        "id": username,
+        "username": username,
+        "password_hash": hashed.decode("utf-8"),
+    }
+    db.upsert("users", user)
+    return {"username": username, "password_hash": user["password_hash"]}
 
 
 def verify_password(username: str, password: str) -> bool:
-    """Check password against stored bcrypt hash."""
-    user = _users.get(username)
-    if not user:
+    """Check *password* against the stored bcrypt hash for *username*."""
+    item = _get_cosmos().get("users", username, username)
+    if not item:
         return False
     return bcrypt.checkpw(
-        password.encode("utf-8"), user["password_hash"].encode("utf-8")
+        password.encode("utf-8"),
+        item["password_hash"].encode("utf-8"),
     )
 
 
 def get_user(username: str) -> Optional[Dict[str, Any]]:
-    return _users.get(username)
+    """Return the user record for *username*, or None if not found."""
+    item = _get_cosmos().get("users", username, username)
+    if not item:
+        return None
+    return {"username": item["username"], "password_hash": item["password_hash"]}
 
 
 def delete_user(username: str) -> bool:
-    with _lock:
-        removed = _users.pop(username, None)
-        _flush()
-        return removed is not None
+    """Delete the user record. Returns True if the user existed, False otherwise."""
+    return _get_cosmos().delete("users", username, username)

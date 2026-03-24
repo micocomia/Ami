@@ -8,7 +8,3 @@ export * from './mastery';
 export * from './learningPath';
 export * from './pdf';
 export * from './refineLearningGoal';
-export * from './goals';
-export * from './skillGap';
-export * from './content';
-export * from './chat';

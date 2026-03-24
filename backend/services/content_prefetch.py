@@ -63,6 +63,9 @@ class ContentPrefetchService:
     def prefetch_cooldown_secs(self) -> float:
         return float(self._app_config.get("prefetch_cooldown_secs", 20))
 
+    def prefetch_start_delay_secs(self) -> float:
+        return float(self._app_config.get("prefetch_start_delay_secs", 30))
+
     @staticmethod
     def content_cache_key(user_id: str, goal_id: int, session_index: int) -> str:
         return f"{user_id}:{goal_id}:{session_index}"

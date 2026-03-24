@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, MutableMapping, Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -11,6 +11,7 @@ from modules.content_generator.agents.media_relevance_evaluator import (
     filter_media_resources_with_llm,
 )
 from modules.content_generator.utils import find_media_resources
+from .common import _record_tool_call
 
 
 class SearchMediaResourcesInput(BaseModel):
@@ -26,6 +27,7 @@ def create_search_media_resources_tool(
     search_rag_manager: Optional[SearchRagManager],
     llm: Any = None,
     enable_llm_filter: bool = True,
+    sink: Optional[MutableMapping[str, Any]] = None,
 ):
     @tool("search_media_resources", args_schema=SearchMediaResourcesInput)
     def search_media_resources(
@@ -37,6 +39,18 @@ def create_search_media_resources_tool(
     ) -> str:
         """Search media resources (video/image/audio) relevant to a tutoring topic."""
         if search_rag_manager is None or search_rag_manager.search_runner is None:
+            _record_tool_call(
+                sink,
+                tool_name="search_media_resources",
+                query=query,
+                status="unavailable",
+                extra={
+                    "session_title": session_title,
+                    "max_videos": max_videos,
+                    "max_images": max_images,
+                    "max_audio": max_audio,
+                },
+            )
             return json.dumps({"media_resources": [], "message": "Media search unavailable."})
 
         knowledge_points = [{"name": query}]
@@ -51,6 +65,19 @@ def create_search_media_resources_tool(
                 video_focus="visual",
             )
         except Exception as exc:
+            _record_tool_call(
+                sink,
+                tool_name="search_media_resources",
+                query=query,
+                status="error",
+                extra={
+                    "session_title": session_title,
+                    "max_videos": max_videos,
+                    "max_images": max_images,
+                    "max_audio": max_audio,
+                    "error": str(exc),
+                },
+            )
             return json.dumps({"media_resources": [], "message": f"Media search failed: {exc}"})
 
         if resources and enable_llm_filter and llm is not None:
@@ -78,6 +105,19 @@ def create_search_media_resources_tool(
                 "audio_url": str(item.get("audio_url", "")),
                 "source": str(item.get("source", "")),
             })
+        _record_tool_call(
+            sink,
+            tool_name="search_media_resources",
+            query=query,
+            status="ok" if normalized else "empty",
+            result_count=len(normalized),
+            extra={
+                "session_title": session_title,
+                "max_videos": max_videos,
+                "max_images": max_images,
+                "max_audio": max_audio,
+            },
+        )
         return json.dumps({"media_resources": normalized}, ensure_ascii=False)
 
     return search_media_resources

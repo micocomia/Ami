@@ -31,6 +31,105 @@ The frontend pages are thin orchestration/UI layers on top of backend pipelines:
 - **Chatbot** calls `/chat-with-tutor`, where the backend assembles runtime tools per request (session content retrieval, vector retrieval, web-ephemeral retrieval, media search, optional signal-gated FSLSM preference update).
 - **Learner Profile** uses separate scoped update endpoints: `/update-learning-preferences` for FSLSM dimensions and `/update-learner-information` for personal/background details.
 
+## Interface Walkthrough
+
+The screenshots below show the Streamlit interface, which includes all features — including some that are still being ported to the React frontend.
+
+### 1. Login
+
+![Login](../assets/Beta/0%20-%20Login.png)
+
+Returning learners sign in to access their personalized learning sessions and pick up where they left off.
+
+### 2. Onboarding
+
+![Onboarding](../assets/Beta/1%20-%20Onboarding.png)
+
+During onboarding, learners choose a learning persona, describe their goal, and optionally upload a résumé so Ami can tailor the experience from the start.
+
+### 3. Skill Gap Identification
+
+![Skill gap analysis](../assets/Beta/2A%20-%20Skill%20Gap.png)
+
+Ami analyzes the learner's goal and background to identify exactly which skills need to be built to reach it.
+
+| Verified Course Content | Fairness Check |
+|---|---|
+| ![Skill gap with verified content](../assets/Beta/2C%20-%20Skill%20Gap%20%28Verified%20Content%29.png) | ![Skill gap bias audit](../assets/Beta/2B%20-%20Skill%20Gap%20%28Bias%29.png) |
+
+Left: skill gap output grounded in indexed course materials.
+Right: a built-in fairness review flags any assumptions in the analysis that could disadvantage certain learners.
+
+### 4. Learning Path Personalization
+
+| Active / Visual Learner | Reflective / Verbal Learner |
+|---|---|
+| ![Learning path visual persona](../assets/Beta/3A%20-%20Learning%20Path%20%28Active-Sensing-Visual-Sequential%29.png) | ![Learning path verbal persona](../assets/Beta/3B%20-%20Learning%20Path%20%28Reflective-Intuitive-Verbal-Global%29.png) |
+
+Ami generates a personalized sequence of sessions adapted to each learner's style and knowledge level. The same goal produces a different path depending on how the learner thinks and learns.
+
+### 5. Learning Session and Content Delivery
+
+![Learning session visual persona](../assets/Beta/4A.I%20-%20Learning%20Session%20%28Active-Sensing-Visual-Sequential%29.png)
+
+![Learning session verbal](../assets/Beta/4B.I%20-%20Learning%20Session%20%28Reflective-Intuitive-Verbal-Global%29.png)
+
+Session content is adapted to the learner's preferred style — diagrams and worked examples for visual learners; narrative explanations and structured outlines for verbal learners.
+
+![Plan quality](../assets/Beta/4C%20-%20Plan%20Quality.png)
+
+Before delivering a learning path, Ami runs a self-evaluation loop to confirm the plan is coherent, well-sequenced, and appropriate for the learner's current level.
+
+### 6. Adaptive Quizzes and Knowledge Checks
+
+| Foundational-Level Quiz | Intermediate-Level Quiz |
+|---|---|
+| ![Beginner quiz](../assets/Beta/5A%20-%20Quiz%20%28Beginner%29.png) | ![Intermediate quiz](../assets/Beta/5B%20-%20Quiz%20%28Intermediate%29.png) |
+
+Left: quiz questions calibrated for learners building foundational understanding.
+Right: quiz questions for learners ready to apply and connect concepts across topics.
+
+![SOLO-based open-ended assessment](../assets/Beta/5C.%20Quiz%20-%20Assessment%20using%20SOLO.png)
+
+Open-ended responses are evaluated by an AI grader aligned with the SOLO Taxonomy — a research-backed framework that measures depth of understanding.
+
+### 7. Ami Chatbot Tutor
+
+![Ami chatbot](../assets/Beta/6%20-%20Chatbot.png)
+
+Ami is available throughout the learning experience as a conversational tutor. Learners can ask follow-up questions, request clarifications, or dig deeper into any topic.
+
+### 8. Learner Profile
+
+| Learner Information and Cognitive Status | Learning Preferences and Patterns |
+|---|---|
+| ![Learner profile info and cognitive status](../assets/Beta/7%20-%20Learner%20Profile%20%28Learner%20Information%20and%20Cognitive%20Status%29.png) | ![Learner profile preferences and patterns](../assets/Beta/7B%20-%20Learner%20Profile%20%28Preferences%20and%20Patterns%29.png) |
+
+Left: cognitive progress and learner background.
+Right: learning style preferences and behavioral patterns accumulated across sessions.
+
+### 9. Edit Profile
+
+| Learning Style Preferences | Personal Information |
+|---|---|
+| ![Edit FSLSM profile](../assets/Beta/8A%20-%20Edit%20Profile%20%28FSLSM%29.png) | ![Edit learner information](../assets/Beta/8B%20-%20Edit%20Profile%20%28Learner%20Information%29.png) |
+
+Learners can update their learning style preferences and personal background independently, so changes in one area do not affect the other.
+
+### 10. Goal Management
+
+![Goal management page](../assets/Beta/9%20-%20Goal%20Management.png)
+
+Learners can create, switch between, and manage multiple learning goals — making it easy to pursue different topics or return to something set aside earlier.
+
+### 11. Learning Analytics
+
+![Learning analytics dashboard](../assets/Beta/10%20-%20Analytics%20Dashboard.png)
+
+The analytics dashboard surfaces progress, skill mastery, session time, and quiz performance — helping learners understand how they are advancing and where to focus next.
+
+---
+
 ## Quickstart
 
 ### Option A: Docker (Recommended)

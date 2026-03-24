@@ -341,33 +341,28 @@ class TestParseDialogueTurns:
 class TestGenerateTtsAudio:
 
     def test_generate_audio_inside_running_loop(self):
-        from pathlib import Path
-        import tempfile
-        import shutil
-
         from modules.content_generator.agents import tts_generator
         from modules.content_generator.agents.tts_generator import generate_tts_audio
+        from unittest.mock import MagicMock
 
         async def _fake_generate_segments(turns, tmp_dir, voice_map):
             seg = tmp_dir / "turn_0000.mp3"
             seg.write_bytes(b"audio-bytes")
             return [seg]
 
-        async def _run_in_async_context(out_dir: Path):
-            with patch.object(tts_generator, "AUDIO_DIR", out_dir), \
+        fake_blob_url = "https://test.blob.core.windows.net/ami-audio/fake.mp3"
+        mock_blob = MagicMock()
+        mock_blob.upload.return_value = fake_blob_url
+
+        async def _run_in_async_context():
+            with patch.object(tts_generator, "_blob_client", mock_blob), \
                  patch.object(tts_generator, "_generate_segments", side_effect=_fake_generate_segments):
                 return generate_tts_audio("Plain narration content")
 
-        out_dir = Path(tempfile.mkdtemp())
-        try:
-            url = asyncio.run(_run_in_async_context(out_dir))
-            assert url.startswith("/static/audio/")
-            out_name = url.rsplit("/", 1)[-1]
-            out_file = out_dir / out_name
-            assert out_file.exists()
-            assert out_file.read_bytes() == b"audio-bytes"
-        finally:
-            shutil.rmtree(out_dir, ignore_errors=True)
+        url = asyncio.run(_run_in_async_context())
+        assert url.startswith("https://")
+        assert "ami-audio" in url
+        mock_blob.upload.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

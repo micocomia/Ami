@@ -112,8 +112,20 @@ def render_onboard():
         except Exception:
             pass
 
-        # --- Persona Selection Cards ---
+        # --- Learning Style Baseline ---
         st.write("")  # spacing
+        st.markdown(
+            '<p class="section-label">'
+            "Help us personalize your experience — pick a persona, upload your resume, or both."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
+        # --- Persona Selection Cards ---
+        st.markdown(
+            '<p class="hint-text">Option 1 — Select a learning persona as your style baseline:</p>',
+            unsafe_allow_html=True,
+        )
         persona_names = list(PERSONAS.keys())
         current_persona = st.session_state.get("learner_persona", "")
         cols = st.columns(len(persona_names))
@@ -129,27 +141,34 @@ def render_onboard():
                     type="primary" if is_selected else "secondary",
                 ):
                     _select_persona(name)
-
-        # Build learner_information from persona
-        persona_name = st.session_state.get("learner_persona", "")
-        if persona_name and persona_name in PERSONAS:
-            dims = PERSONAS[persona_name]["fslsm_dimensions"]
-            persona_prefix = (
-                f"Learning Persona: {persona_name} "
-                f"(initial FSLSM: processing={dims['fslsm_processing']}, "
-                f"perception={dims['fslsm_perception']}, "
-                f"input={dims['fslsm_input']}, "
-                f"understanding={dims['fslsm_understanding']}). "
+        if current_persona:
+            st.markdown(
+                f'<p class="hint-text">✓ Selected: <strong>{current_persona}</strong></p>',
+                unsafe_allow_html=True,
             )
-        else:
-            persona_prefix = ""
+
+        # --- OR Divider ---
+        st.write("")
+        left_div, mid_div, right_div = st.columns([2, 1, 2])
+        with left_div:
+            st.divider()
+        with mid_div:
+            st.markdown(
+                '<p style="text-align:center;color:#9ca3af;margin-top:8px;">OR</p>',
+                unsafe_allow_html=True,
+            )
+        with right_div:
+            st.divider()
 
         # --- Upload Resume ---
-        st.write("")  # spacing
+        st.markdown(
+            '<p class="hint-text">Option 2 — Upload your resume to infer your learning style:</p>',
+            unsafe_allow_html=True,
+        )
         uploaded_file = st.file_uploader(
-            "Upload your resume for a more personalized experience",
+            "Upload resume (PDF)",
             type="pdf",
-            label_visibility="visible",
+            label_visibility="collapsed",
         )
         if uploaded_file is not None:
             with st.spinner("Extracting text from PDF..."):
@@ -159,8 +178,9 @@ def render_onboard():
         else:
             learner_information_pdf = st.session_state.get("learner_information_pdf", "")
 
-        # Combine learner information
-        st.session_state["learner_information"] = persona_prefix + learner_information_pdf
+        # learner_information is biographical text only (resume); FSLSM baseline
+        # is carried separately via learner_persona + PERSONAS lookup in skill_gap.py
+        st.session_state["learner_information"] = learner_information_pdf
         try:
             save_persistent_state()
         except Exception:
@@ -171,8 +191,13 @@ def render_onboard():
         _, btn_col, _ = st.columns([2, 1, 2])
         with btn_col:
             if st.button("Begin Learning", type="primary", use_container_width=True):
-                if not goal["learning_goal"] or not st.session_state.get("learner_persona"):
-                    st.warning("Please provide both a learning goal and select a learning persona before continuing.")
+                has_persona = bool(st.session_state.get("learner_persona"))
+                has_resume = bool(st.session_state.get("learner_information_pdf", ""))
+                if not goal["learning_goal"] or not (has_persona or has_resume):
+                    st.warning(
+                        "Please provide a learning goal and either select a learning persona "
+                        "or upload a resume (or both)."
+                    )
                 else:
                     # Clear stale skill gaps if the learning goal changed
                     previous_goal = goal.get("_last_identified_goal", "")
@@ -190,7 +215,7 @@ def render_onboard():
         st.write("")  # spacing
         with st.expander("How your data is used"):
             st.markdown(
-                "**What we collect:** Your learning goal, selected persona, and optionally your "
+                "**What we collect:** Your learning goal, and optionally a selected persona and/or "
                 "resume text. During learning, we also record quiz scores and session timing.\n\n"
                 "**AI-generated assessments:** Skill levels, learner profiles, and learning content "
                 "are generated by AI based on the information you provide. They are estimates and "

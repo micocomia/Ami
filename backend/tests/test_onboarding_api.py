@@ -34,36 +34,6 @@ from utils import store, auth_store
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
-def _isolate_store(tmp_path, monkeypatch):
-    data_dir = tmp_path / "store_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(store, "_PROFILES_PATH", data_dir / "profiles.json")
-    monkeypatch.setattr(store, "_EVENTS_PATH", data_dir / "events.json")
-    monkeypatch.setattr(store, "_PROFILE_SNAPSHOTS_PATH", data_dir / "profile_snapshots.json")
-    monkeypatch.setattr(store, "_GOALS_PATH", data_dir / "goals.json")
-    monkeypatch.setattr(store, "_LEARNING_CONTENT_PATH", data_dir / "learning_content.json")
-    monkeypatch.setattr(store, "_SESSION_ACTIVITY_PATH", data_dir / "session_activity.json")
-    monkeypatch.setattr(store, "_MASTERY_HISTORY_PATH", data_dir / "mastery_history.json")
-    monkeypatch.setattr(store, "_profiles", {})
-    monkeypatch.setattr(store, "_events", {})
-    monkeypatch.setattr(store, "_profile_snapshots", {})
-    monkeypatch.setattr(store, "_goals", {})
-    monkeypatch.setattr(store, "_learning_content_cache", {})
-    monkeypatch.setattr(store, "_session_activity", {})
-    monkeypatch.setattr(store, "_mastery_history", {})
-
-
-@pytest.fixture(autouse=True)
-def _isolate_auth_store(tmp_path, monkeypatch):
-    data_dir = tmp_path / "auth_data"
-    data_dir.mkdir()
-    monkeypatch.setattr(auth_store, "_DATA_DIR", data_dir)
-    monkeypatch.setattr(auth_store, "_USERS_PATH", data_dir / "users.json")
-    monkeypatch.setattr(auth_store, "_users", {})
-
-
 @pytest.fixture()
 def client():
     from main import app
@@ -418,6 +388,48 @@ class TestCreateLearnerProfileEndpoint:
         assert resp.status_code == 200
         # No user_id/goal_id => not stored
         assert store.get_profile("alice", 0) is None
+
+    @patch("main.initialize_learner_profile_with_llm")
+    @patch("main.get_llm")
+    def test_create_profile_forwards_persona_and_fslsm_baseline(self, mock_get_llm, mock_init, client):
+        """Verify persona_name and fslsm_baseline are forwarded to the LLM function."""
+        mock_get_llm.return_value = MagicMock()
+        mock_init.return_value = MOCK_LEARNER_PROFILE
+
+        fslsm = {"fslsm_processing": -0.7, "fslsm_perception": -0.5,
+                  "fslsm_input": -0.5, "fslsm_understanding": -0.5}
+        resp = client.post("/v1/create-learner-profile-with-info", json={
+            "learning_goal": "Learn Python",
+            "learner_information": "",
+            "skill_gaps": json.dumps([]),
+            "persona_name": "Hands-on Explorer",
+            "fslsm_baseline": fslsm,
+        })
+        assert resp.status_code == 200
+        # Verify persona fields were forwarded as keyword args to the LLM function
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("persona_name") == "Hands-on Explorer"
+        assert call_kwargs.get("fslsm_baseline", {}).get("fslsm_processing") == -0.7
+
+    @patch("main.initialize_learner_profile_with_llm")
+    @patch("main.get_llm")
+    def test_create_profile_resume_only_no_persona(self, mock_get_llm, mock_init, client):
+        """Verify resume-only path succeeds when no persona is provided."""
+        mock_get_llm.return_value = MagicMock()
+        mock_init.return_value = MOCK_LEARNER_PROFILE
+
+        resp = client.post("/v1/create-learner-profile-with-info", json={
+            "learning_goal": "Learn Python",
+            "learner_information": "Software engineer with 5 years of Python experience",
+            "skill_gaps": json.dumps([]),
+            # persona_name and fslsm_baseline intentionally omitted
+        })
+        assert resp.status_code == 200
+        assert "learner_profile" in resp.json()
+        # Verify empty defaults were forwarded
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("persona_name") == ""
+        assert call_kwargs.get("fslsm_baseline") == {}
 
 
 # ===================================================================

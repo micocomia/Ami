@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
@@ -46,10 +46,14 @@ class VectorStoreFactory:
 
     @staticmethod
     def create(
-        vectorstore_type: str = "chroma",
+        vectorstore_type: str = "azure_ai_search",
         collection_name: str = "default",
         persist_directory: str = "./data/vectorstore",
         embedder: Optional[Embeddings] = None,
+        azure_endpoint: Optional[str] = None,
+        azure_key: Optional[str] = None,
+        azure_fields: Optional[List[Any]] = None,
+        azure_vector_dimensions: Optional[int] = None,
     ) -> VectorStore:
         vectorstore_type = vectorstore_type.lower()
         if vectorstore_type in ["chroma"]:
@@ -60,7 +64,24 @@ class VectorStoreFactory:
                 persist_directory=persist_directory,
             )
             logger.info(f'There are {vectorstore._collection.count()} records in the collection')
+        elif vectorstore_type in ["azure_ai_search", "azure_search"]:
+            from langchain_community.vectorstores import AzureSearch
+            endpoint = azure_endpoint or os.environ.get("AZURE_SEARCH_ENDPOINT", "")
+            key = azure_key or os.environ.get("AZURE_SEARCH_KEY", "")
+            if not endpoint or not key:
+                raise ValueError(
+                    "Azure AI Search requires AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_KEY. "
+                    "Set them in backend/.env or as environment variables."
+                )
+            vectorstore = AzureSearch(
+                azure_search_endpoint=endpoint,
+                azure_search_key=key,
+                index_name=collection_name,
+                embedding_function=embedder.embed_query,
+                fields=azure_fields,
+                vector_search_dimensions=azure_vector_dimensions,
+            )
+            logger.info(f"Azure AI Search vectorstore connected to index '{collection_name}'")
         else:
             raise ValueError(f"Unsupported vectorstore type: {vectorstore_type}")
         return vectorstore
-

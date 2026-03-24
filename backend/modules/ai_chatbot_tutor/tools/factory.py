@@ -32,15 +32,16 @@ def create_ai_tutor_tools(
     if enable_session_content:
         tools.append(create_retrieve_session_learning_content_tool())
     if enable_vector_retrieval:
-        tools.append(create_retrieve_vector_context_tool(search_rag_manager))
+        tools.append(create_retrieve_vector_context_tool(search_rag_manager, sink=preference_update_sink))
     if enable_web_search:
-        tools.append(create_search_web_context_ephemeral_tool(search_rag_manager))
+        tools.append(create_search_web_context_ephemeral_tool(search_rag_manager, sink=preference_update_sink))
     if enable_media_search:
         tools.append(
             create_search_media_resources_tool(
                 search_rag_manager=search_rag_manager,
                 llm=llm,
                 enable_llm_filter=True,
+                sink=preference_update_sink,
             )
         )
     if enable_preference_updates:

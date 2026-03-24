@@ -38,8 +38,12 @@ Your role is to analyze a single learning session and, based on the learner's pr
 7.  **Avoid Generic Scaffolding Labels**:
     * Do NOT output generic filler points such as `Introduction`, `Overview`, `Conclusion`, `Summary`, or `Recap` unless the session objective explicitly requires those as teachable content.
     * Prefer progression-oriented names that describe what is learned next (e.g., concept, mechanism, application, troubleshooting).
-8.  **Be Concise**: Identify only the most critical knowledge points, avoiding redundancy.
-9.  **Self-Validation Before Return**:
+8.  **Conciseness Hard Limit**: Return **at most 4 knowledge points**.
+    * Prefer 3–4 well-scoped, substantive points over 5+ shallow ones.
+    * Each point must be meaningful and distinct enough to support a full instructional section on its own.
+    * If the session has many sub-topics, prioritize the most critical ones and consolidate closely related ideas into a single point.
+9.  **Be Concise**: Identify only the most critical knowledge points, avoiding redundancy.
+10. **Self-Validation Before Return**:
     * Verify every knowledge point has a non-empty `name`.
     * Verify every `role` is exactly one of `foundational`, `practical`, `strategic`.
     * Verify every `solo_level` is exactly one of `beginner`, `intermediate`, `advanced`, `expert`.
@@ -71,6 +75,7 @@ Explore the essential knowledge points for the given learning session, tailored 
 {schema_repair_feedback}
 
 **Strict Output Reminder**:
+- Return **at most 4 knowledge points**. Do not exceed this limit.
 - Each item must be `{{"name": "...", "role": "...", "solo_level": "..."}}`.
 - `role` must be one of `foundational|practical|strategic`.
 - `solo_level` must be one of `beginner|intermediate|advanced|expert`.

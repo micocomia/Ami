@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from utils.request_api import auth_login, auth_register
 from utils.state import clear_user_state, load_persistent_state, save_persistent_state
@@ -22,11 +23,13 @@ section[data-testid="stSidebar"] { display: none !important; }
     box-shadow: 0 4px 24px rgba(0,0,0,0.12) !important;
     padding: 16px 20px !important;
 }
+
 </style>""", unsafe_allow_html=True)
 
 _, logo_col, _ = st.columns([1, 2, 1])
 with logo_col:
-    st.image("./assets/Logo_black.png", use_container_width=True)
+    logo_path = os.path.join(os.path.dirname(__file__), "../assets/Logo_black.png")
+    st.image(logo_path, use_container_width=True)
 
 login_tab, register_tab = st.tabs(["Sign in", "Register"])
 

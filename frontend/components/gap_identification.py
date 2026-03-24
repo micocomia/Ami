@@ -96,6 +96,11 @@ def render_identifying_skill_gap(goal):
         skill_gaps, goal_assessment, retrieved_sources, goal_context = identify_skill_gap(
             learning_goal, learner_information
         )
+        if skill_gaps is None:
+            raise RuntimeError(
+                "The backend failed to identify skill gaps. "
+                "Please try again or check server logs for details."
+            )
     goal["skill_gaps"] = skill_gaps
     goal["goal_assessment"] = goal_assessment
     goal["retrieved_sources"] = retrieved_sources or []

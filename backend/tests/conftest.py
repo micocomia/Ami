@@ -45,6 +45,7 @@ class FakeCosmosUserStore:
         parameters: List[Dict[str, Any]],
         partition_key_value: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        # Extract @uid parameter value for filtering by user_id / username
         uid = next((p["value"] for p in parameters if p["name"] == "@uid"), None)
         items = list(self._cdata(container).values())
         if uid is not None:
@@ -52,6 +53,7 @@ class FakeCosmosUserStore:
                 i for i in items
                 if i.get("user_id") == uid or i.get("username") == uid
             ]
+        # Handle is_deleted filter used in get_all_goals_for_user
         if "c.is_deleted = false" in query:
             items = [i for i in items if not i.get("is_deleted", False)]
         return [dict(i) for i in items]
@@ -83,11 +85,14 @@ class FakeCosmosUserStore:
 def _isolate_cosmos_stores(monkeypatch):
     """Replace Cosmos DB clients with in-memory fakes for every test.
 
-    Each test gets a fresh instance so state is isolated.
+    A single FakeCosmosUserStore instance is shared by both store and auth_store
+    so cross-module interactions (e.g., register user then access profile) work
+    correctly within a test. Each test gets a fresh instance so state is isolated.
     """
-    from utils import store
+    from utils import store, auth_store
     fake = FakeCosmosUserStore()
     monkeypatch.setattr(store, "_cosmos", fake)
+    monkeypatch.setattr(auth_store, "_cosmos", fake)
 
 
 @pytest.fixture(autouse=True)
