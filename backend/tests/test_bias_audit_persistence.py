@@ -25,11 +25,11 @@ from utils import store
 # ---------------------------------------------------------------------------
 
 def _make_audit_result(overall_risk="low", flags=None):
-    """Build a minimal audit result dict."""
+    """Build a minimal audit result dict using real auditor key names."""
     return {
-        "overall_risk": overall_risk,
-        "flags": flags or [],
-        "audited_items": 5,
+        "overall_bias_risk": overall_risk,
+        "bias_flags": flags or [],
+        "audited_skill_count": 5,
     }
 
 
@@ -40,7 +40,7 @@ def _make_audit_result(overall_risk="low", flags=None):
 class TestAppendBiasAuditLog:
     def test_basic_append_and_retrieve(self):
         result = _make_audit_result("medium", [
-            {"category": "gender", "severity": "medium"},
+            {"bias_category": "gender", "severity": "medium"},
         ])
         store.append_bias_audit_log("alice", 0, "skill_gap_bias", result)
 
@@ -117,7 +117,7 @@ class TestAppendBiasAuditLog:
         assert len(item["entries"]) == 1
 
     def test_flags_summary_capped_at_20(self):
-        flags = [{"category": f"cat_{i}", "severity": "low"} for i in range(30)]
+        flags = [{"bias_category": f"cat_{i}", "severity": "low"} for i in range(30)]
         result = _make_audit_result("high", flags)
         store.append_bias_audit_log("alice", 0, "content_bias", result)
 
@@ -155,8 +155,8 @@ def client():
 class TestBiasAuditHistoryEndpoint:
     def test_returns_entries_and_summary(self, client):
         result = _make_audit_result("medium", [
-            {"category": "gender", "severity": "medium"},
-            {"category": "cultural", "severity": "low"},
+            {"bias_category": "gender", "severity": "medium"},
+            {"bias_category": "cultural", "severity": "low"},
         ])
         store.append_bias_audit_log("alice", 0, "skill_gap_bias", result)
         store.append_bias_audit_log("alice", 0, "content_bias", _make_audit_result("low"))
