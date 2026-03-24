@@ -227,7 +227,7 @@ export function SkillGapPage() {
             })),
           );
           auditMutation.mutate(
-            { skill_gaps: JSON.stringify(gapArray), learner_information: state.learnerInformation },
+            { skill_gaps: JSON.stringify(gapArray), learner_information: state.learnerInformation, user_id: userId ?? undefined },
             {
               onSuccess: (biasData) => setBiasAudit(biasData as Record<string, unknown>),
               onError: () => {},
@@ -289,6 +289,7 @@ export function SkillGapPage() {
             learner_profile: JSON.stringify(learnerProfile),
             learner_information: state.learnerInformation,
             persona_name: state.personaKey ?? '',
+            user_id: userId ?? undefined,
           })) as Record<string, unknown>;
         } catch {
           profileFairness = null;
