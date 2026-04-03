@@ -27,3 +27,8 @@ docs/diagrams/
 .idea/
 .claude/
 CLAUDE.md
+
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/node_modules/.vite/
+.venv/

@@ -283,6 +283,8 @@ export interface IdentifySkillGapResponse {
 export interface BiasAuditRequest extends BaseRequest {
   skill_gaps: string;
   learner_information: string;
+  user_id?: string;
+  goal_id?: number;
 }
 
 export interface CreateLearnerProfileRequest extends BaseRequest {
@@ -301,6 +303,8 @@ export interface ValidateProfileFairnessRequest extends BaseRequest {
   learner_profile: string;
   learner_information: string;
   persona_name?: string;
+  user_id?: string;
+  goal_id?: number;
 }
 
 export interface UpdateLearnerProfileRequest extends BaseRequest {
@@ -646,7 +650,8 @@ export interface DashboardMetricsResponse {
 
 export interface LearnerInformationUpdateRequest extends BaseRequest {
   learner_profile: string;
-  updated_learner_information: string;
+  /** Matches backend `LearnerInformationUpdateRequest.edited_learner_information`. */
+  edited_learner_information: string;
   resume_text?: string;
   user_id?: string;
   goal_id?: number;

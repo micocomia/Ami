@@ -10,8 +10,11 @@ interface SessionCardProps {
 }
 
 export function SessionCard({ index, pathSession, runtimeSession, onLaunch, disabled }: SessionCardProps) {
-  const isLocked = runtimeSession?.is_locked ?? false;
-  const canOpen = runtimeSession?.can_open ?? true;
+  // Pessimistic until goal-runtime-state loads: only session 1 (index 0) looks open; avoids all sessions unlocked.
+  const isLocked =
+    runtimeSession === undefined ? index > 0 : (runtimeSession.is_locked ?? false);
+  const canOpen =
+    runtimeSession === undefined ? index === 0 : (runtimeSession.can_open ?? false);
   const ifLearned = runtimeSession?.if_learned ?? false;
   const isMastered = runtimeSession?.is_mastered ?? false;
   // Backend stores mastery_score as 0–100 (score_percentage). Older data may be 0–1.

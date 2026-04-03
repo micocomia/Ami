@@ -242,7 +242,6 @@ def render_learning_path():
         if adaptation.get("suggested", False):
             st.info("Learning path update in progress. This can take up to 2 minutes.")
         _auto_adapt_if_needed(goal, runtime_state)
-        runtime_state = _get_runtime_state(goal.get("id"))
         render_overall_information(goal, runtime_state)
         render_plan_quality_section(goal)
         render_module_map(goal, runtime_state)

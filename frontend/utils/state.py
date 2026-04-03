@@ -334,6 +334,7 @@ def add_new_goal(learning_goal="", skill_gaps=[], goal_assessment=None, learner_
         goal_uid = get_new_goal_uid()
         created = {"id": goal_uid, **goal_info}
     st.session_state.goals.append(created)
+    st.session_state["goals_dirty"] = True
     reset_to_add_goal()
     return created["id"]
 

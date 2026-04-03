@@ -217,6 +217,10 @@ def _handle_session_completion(goal, selected_sid, session_info):
     if isinstance(updated_goal, dict):
         _replace_current_goal(updated_goal)
     st.session_state["if_updating_learner_profile"] = False
+    # Invalidate per-goal metric caches so dashboard and profile reload fresh data
+    goal_id = st.session_state.get("selected_goal_id")
+    st.session_state.pop(f"dashboard_metrics_{goal_id}", None)
+    st.session_state.pop(f"behavioral_metrics_{goal_id}", None)
     try:
         save_persistent_state()
     except Exception:
@@ -340,7 +344,11 @@ def render_content_preparation(goal):
     try:
         learner_information = st.session_state.get("learner_information", "")
         learning_document = learning_content.get("content", "")
-        content_bias_result = audit_content_bias(learning_document, learner_information)
+        content_bias_result = audit_content_bias(
+            learning_document, learner_information,
+            user_id=st.session_state.get("userId"),
+            goal_id=goal.get("id") if isinstance(goal, dict) else None,
+        )
         goal["content_bias_audit"] = content_bias_result
     except Exception:
         goal["content_bias_audit"] = None

@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 @layer base {
+  .custom-cursor-enabled,
+  .custom-cursor-enabled * {
+    cursor: none !important;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'],
+  [contenteditable=''] {
+    cursor: text !important;
+  }
+
   body {
     @apply font-sans text-slate-700 bg-surface antialiased;
     margin: 0;

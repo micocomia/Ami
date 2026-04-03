@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/context/AuthContext';
 import { listGoalsApi, goalsKeys } from '@/api/endpoints/goals';
 import { syncProfileApi } from '@/api/endpoints/profile';
-import type { GoalAggregate } from '@/types';
+import type { GoalAggregate, LearnerProfile } from '@/types';
 
 const SELECTED_GOAL_KEY = 'ami_selected_goal_id';
 
@@ -20,8 +20,11 @@ interface GoalsContextValue {
   goals: GoalAggregate[];
   selectedGoalId: number | null;
   setSelectedGoalId(id: number): void;
-  refreshGoals(): void;
+  /** Refetch goals from the server; resolves when state has been updated (or request failed). */
+  refreshGoals(): Promise<void>;
   updateGoal(goalId: number, goal: GoalAggregate): void;
+  /** Replace `learner_profile` for one goal — use after refresh to re-apply a mutation response if the list payload lags. */
+  mergeLearnerProfile(goalId: number, learnerProfile: LearnerProfile): void;
   isLoading: boolean;
 }
 
@@ -66,11 +69,11 @@ export function GoalsProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setIsLoading(false));
   }, [userId, isAuthenticated]);
 
-  const refreshGoals = useCallback(() => {
-    if (!userId) return;
+  const refreshGoals = useCallback((): Promise<void> => {
+    if (!userId) return Promise.resolve();
     queryClient.invalidateQueries({ queryKey: goalsKeys.list(userId) });
     setIsLoading(true);
-    listGoalsApi(userId)
+    return listGoalsApi(userId)
       .then((res) => {
         const active = res.goals.filter((g) => !g.is_deleted);
         setGoals(active);
@@ -107,9 +110,23 @@ export function GoalsProvider({ children }: { children: React.ReactNode }) {
     setGoals((prev) => prev.map((g) => (g.id === goalId ? updatedGoal : g)));
   }, []);
 
+  const mergeLearnerProfile = useCallback((goalId: number, learnerProfile: LearnerProfile) => {
+    setGoals((prev) =>
+      prev.map((g) => (g.id === goalId ? { ...g, learner_profile: learnerProfile } : g)),
+    );
+  }, []);
+
   return (
     <GoalsContext.Provider
-      value={{ goals, selectedGoalId, setSelectedGoalId, refreshGoals, updateGoal, isLoading }}
+      value={{
+        goals,
+        selectedGoalId,
+        setSelectedGoalId,
+        refreshGoals,
+        updateGoal,
+        mergeLearnerProfile,
+        isLoading,
+      }}
     >
       {children}
     </GoalsContext.Provider>

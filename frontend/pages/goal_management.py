@@ -15,10 +15,11 @@ from components.skill_info import render_skill_info
 
 def render_goal_management():
     user_id = st.session_state.get("userId")
-    if user_id:
+    if user_id and st.session_state.get("goals_dirty", True):
         fresh_goals = list_goals(user_id)
         if fresh_goals:
             st.session_state["goals"] = fresh_goals
+        st.session_state["goals_dirty"] = False
 
     st.title("Goal Management")
     st.write("Manage your learning goals: add new ones, edit or delete existing ones.")
@@ -169,6 +170,7 @@ def render_existing_goals():
                     goal_index = index_goal_by_id(goal["id"])
                     delete_goal(st.session_state.get("userId"), goal["id"])
                     st.session_state.goals[goal_index]["is_deleted"] = True
+                    st.session_state["goals_dirty"] = True
                     try:
                         save_persistent_state()
                     except Exception:

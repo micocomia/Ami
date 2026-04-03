@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button, Toggle } from '@/components/ui';
+import { SkillGapBiasAuditPanel, FALLBACK_SKILL_GAP_BIAS_DISCLAIMER } from '@/components/ethics';
 import { cn } from '@/lib/cn';
 import { useAuthContext } from '@/context/AuthContext';
 import { useGoalsContext } from '@/context/GoalsContext';
@@ -669,137 +670,37 @@ export function SkillGapPage() {
     // sessionStorage: after navigating away and back, component remounts with empty state,
     // so we must call the API again to get skill gaps for the current goal.
     hasFiredRef.current = true;
-    setIsLoading(true);
-    setError(null);
-
-    pushAppState('SkillGap → Received state', {
-      goal: state.goal,
-      personaKey: state.personaKey,
-      learnerInformationLength: state.learnerInformation.length,
-      learnerInformation: state.learnerInformation,
-      isGoalManagementFlow: state.isGoalManagementFlow,
-    });
-
-    (async () => {
-      try {
-        const resp = (await identifySkillGapApi({
-          learning_goal: state.goal,
-          learner_information: state.learnerInformation,
-        })) as unknown as Record<string, unknown>;
-
-        setIdentifyResponse(resp);
-        let rawGaps = (resp as any).skill_gaps;
-        /* API may return { skill_gaps: [ ... ] } nested once */
-        if (
-          rawGaps &&
-          typeof rawGaps === 'object' &&
-          !Array.isArray(rawGaps) &&
-          Array.isArray((rawGaps as Record<string, unknown>).skill_gaps)
-        ) {
-          rawGaps = (rawGaps as { skill_gaps: SkillGapItem[] }).skill_gaps;
-        }
-        const gapArray: SkillGapItem[] = Array.isArray(rawGaps)
-          ? (rawGaps as SkillGapItem[])
-          : rawGaps && typeof rawGaps === 'object'
-          ? Object.values(rawGaps as Record<string, SkillGapItem>)
-          : [];
-
-        const normalizedGaps: SkillGapItem[] = gapArray.map((sg) => ({
-          ...sg,
-          skill_name: (sg.skill_name ?? sg.name ?? '').toString(),
-        }));
-
-        const targetLevels = levelsWithoutUnlearned(levels);
-        const defaultRequired = targetLevels[0] ?? levels[1] ?? levels[0];
-
-        const targetSources: Array<'backend' | 'default'> = [];
-
-        const mapped = normalizedGaps.map((sg) => {
-          const sgRec = sg as Record<string, unknown>;
-          const rawCurrent = coerceLevelFromGap(sgRec, [
-            'current_level',
-            'observed_level',
-            'current',
-            'learner_level',
-          ]);
-          const rawRequired = coerceLevelFromGap(sgRec, [
-            'required_level',
-            'expected_level',
-            'target_level',
-          ]);
-          const hasBackendTarget =
-            Boolean(rawRequired && String(rawRequired).trim()) ||
-            Boolean(sg.required_level && String(sg.required_level).trim());
-          let required_level = normalizeLevel(rawRequired || sg.required_level || defaultRequired, levels);
-          if (String(required_level).toLowerCase() === 'unlearned')
-            required_level = normalizeLevel(defaultRequired, levels);
-          targetSources.push(hasBackendTarget ? 'backend' : 'default');
-          /* Only fall back to levels[0] when backend sent no usable current — keeps bars valid */
-          const current_level = rawCurrent
-            ? normalizeLevel(rawCurrent, levels)
-            : normalizeLevel(sg.current_level ?? levels[0], levels);
-          return {
-            original: { ...sg, current_level: rawCurrent || sg.current_level, required_level: rawRequired || sg.required_level },
-            current_level,
-            required_level,
-            addToPlan: sg.is_gap !== false,
-          };
-        });
-
-        try {
-          if (state?.goal && state?.learnerInformation) {
-            pushAppState('SkillGap → Required level source', {
-              goal: state.goal,
-              learnerInformationLength: state.learnerInformation.length,
-              levelsConfig: levels,
-              skills: mapped.map((m, idx) => ({
-                name:
-                  (m.original.skill_name as string | undefined) ||
-                  (m.original.name as string | undefined) ||
-                  `Skill ${idx + 1}`,
-                required_level: m.required_level,
-                source: targetSources[idx] ?? 'default',
-              })),
-            });
-          }
-        } catch {
-          // debug-only; ignore
-        }
-
-        /* Re-apply saved adjust by skill name (order-safe) */
-        try {
-          if (state?.goal && state?.learnerInformation) {
-            const key = skillGapStorageKey(state.goal, state.learnerInformation);
-            const raw = sessionStorage.getItem(key);
-            if (raw) {
-              const parsed = JSON.parse(raw) as { goal?: string; skills?: SavedSkill[] };
-              if (parsed.goal === state.goal && Array.isArray(parsed.skills)) {
-                applySavedSkillsToMapped(mapped, parsed.skills, levels);
-              }
-            }
-          }
-        } catch {
-          // ignore bad JSON
-        }
-
-        setLocalSkills(mapped);
-
-        try {
-          const biasData = (await auditSkillGapBiasApi({
-            // Backend expects JSON string under `skill_gaps`
-            skill_gaps: JSON.stringify({ skill_gaps: normalizedGaps }),
-            learner_information: state.learnerInformation,
-          })) as Record<string, unknown>;
-          setBiasAudit(biasData);
-        } catch {
-          // ignore bias audit errors
-        }
-      } catch {
-        setError('Failed to identify skill gaps. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    })();
+    identifyMutation.mutate(
+      { learning_goal: state.goal, learner_information: state.learnerInformation },
+      {
+        onSuccess: (data) => {
+          const resp = data as Record<string, unknown>;
+          setIdentifyResponse(resp);
+          const rawGaps = resp.skill_gaps;
+          const gapArray: SkillGapItem[] = Array.isArray(rawGaps)
+            ? (rawGaps as SkillGapItem[])
+            : rawGaps && typeof rawGaps === 'object'
+            ? Object.values(rawGaps as Record<string, SkillGapItem>)
+            : [];
+          setLocalSkills(
+            gapArray.map((sg) => ({
+              original: sg,
+              current_level: sg.current_level ?? levels[0],
+              required_level: sg.required_level ?? (levels[1] ?? levels[0]),
+              addToPlan: sg.is_gap !== false,
+            })),
+          );
+          auditMutation.mutate(
+            { skill_gaps: JSON.stringify(gapArray), learner_information: state.learnerInformation, user_id: userId ?? undefined },
+            {
+              onSuccess: (biasData) => setBiasAudit(biasData as Record<string, unknown>),
+              onError: () => {},
+            },
+          );
+        },
+        onError: () => setError('Failed to identify skill gaps. Please try again.'),
+      },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config]);
 
@@ -830,29 +731,21 @@ export function SkillGapPage() {
     [levels],
   );
 
-  const handleCurrentChange = useCallback(
-    (idx: number, level: string) => {
-      setLocalSkills((prev) =>
-        prev.map((s, i) => {
-          if (i !== idx) return s;
-          const normalized = normalizeLevel(level, levels);
-          const curIdx = levelIndex(normalized, levels);
-          const reqIdx = levelIndex(s.required_level, levels);
-          return {
-            ...s,
-            current_level: normalized,
-            addToPlan: curIdx >= reqIdx ? false : s.addToPlan,
-          };
-        }),
-      );
-    },
-    [levels],
-  );
+  const handleCurrentChange = useCallback((idx: number, level: string) => {
+    setLocalSkills((prev) =>
+      prev.map((s, i) => {
+        if (i !== idx) return s;
+        const normalized = normalizeLevel(level, levels);
+        return {
+          ...s,
+          current_level: normalized,
+          // Keep inclusion in plan unless the user turns "Gap" off — adjusting levels must not drop the skill from scheduling.
+        };
+      }),
+    );
+  }, [levels]);
 
   const plannedSkills = localSkills.filter((s) => s.addToPlan);
-  const hasGaps = plannedSkills.some(
-    (s) => levelIndex(s.required_level, levels) > levelIndex(s.current_level, levels),
-  );
   const selectedCount = plannedSkills.length;
   const identifiedCount = localSkills.length;
 
@@ -860,18 +753,26 @@ export function SkillGapPage() {
   const refinedGoal = (goalAssessment?.refined_goal as string | undefined) ?? state?.goal ?? '';
   const retrievedSources = (identifyResponse?.retrieved_sources as unknown[] | undefined) ?? [];
   void goalAssessment?.auto_refined;
-  void biasAudit;
 
   const handleSchedule = useCallback(async () => {
     if (!userId || !state) return;
     setIsScheduling(true);
     setError(null);
     try {
-      const filteredGaps = plannedSkills.map((s) => ({
-        ...s.original,
-        current_level: s.current_level,
-        required_level: s.required_level,
-      }));
+      const filteredGaps = plannedSkills.map((s) => {
+        const cur = normalizeLevel(s.current_level, levels);
+        const req = normalizeLevel(s.required_level, levels);
+        const isGap = levelIndex(cur, levels) < levelIndex(req, levels);
+        const skillName = String(s.original.skill_name ?? s.original.name ?? '').trim() || 'Skill';
+        return {
+          ...s.original,
+          name: skillName,
+          skill_name: skillName,
+          current_level: cur,
+          required_level: req,
+          is_gap: isGap,
+        };
+      });
 
       pushAppState('SkillGap → Create profile', {
         userId,
@@ -896,6 +797,7 @@ export function SkillGapPage() {
             learner_profile: JSON.stringify(learnerProfile),
             learner_information: state.learnerInformation,
             persona_name: state.personaKey ?? '',
+            user_id: userId ?? undefined,
           })) as Record<string, unknown>;
         } catch {
           profileFairness = null;
@@ -939,6 +841,7 @@ export function SkillGapPage() {
     userId,
     state,
     plannedSkills,
+    levels,
     refinedGoal,
     goalAssessment,
     identifyResponse,
@@ -1053,6 +956,72 @@ export function SkillGapPage() {
             )}
           </p>
         </header>
+
+        <div className="mb-4 space-y-3">
+          <details className="group rounded-xl border border-sky-200 bg-sky-50 shadow-sm open:border-sky-300/90 open:shadow-md">
+            <summary
+              className={cn(
+                'flex cursor-pointer list-none items-start gap-3 px-4 py-3.5 sm:gap-4 sm:px-5 sm:py-4',
+                'rounded-xl transition-colors hover:bg-sky-100/40',
+                '[&::-webkit-details-marker]:hidden',
+              )}
+            >
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100/90 text-sky-600 ring-1 ring-inset ring-sky-200/70"
+                aria-hidden
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+                  />
+                </svg>
+              </div>
+              <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
+                <div className="min-w-0 text-left">
+                  <p className="text-xs leading-relaxed text-slate-800">
+                    Review each skill below. Adjust the{' '}
+                    <strong className="font-semibold text-[#16324A]">Current Level</strong> if it doesn&apos;t match
+                    your actual knowledge, and toggle{' '}
+                    <strong className="font-semibold text-[#16324A]">Gap</strong> to correct any mis-classifications.
+                    Only skills marked as gaps will be included in your learning path.
+                  </p>
+                  <p className="mt-2 text-[11px] text-[#5F7486]">Click to read AI disclaimer</p>
+                </div>
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sky-600/90 group-open:bg-sky-100/80"
+                  aria-hidden
+                >
+                  <svg
+                    className="h-4 w-4 transition-transform duration-200 group-open:rotate-180"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </span>
+              </div>
+            </summary>
+            <div
+              className="border-t border-sky-200/80 bg-white/35 px-4 pb-4 pt-3 text-[#16324A] sm:px-5"
+              role="region"
+              aria-label="AI disclaimer"
+            >
+              <div className="ml-[52px] min-w-0 sm:ml-14">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-900/85">AI disclaimer</p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-800">
+                  {typeof biasAudit?.ethical_disclaimer === 'string' && biasAudit.ethical_disclaimer.trim()
+                    ? biasAudit.ethical_disclaimer
+                    : FALLBACK_SKILL_GAP_BIAS_DISCLAIMER}
+                </p>
+              </div>
+            </div>
+          </details>
+          <SkillGapBiasAuditPanel audit={biasAudit} />
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 lg:pb-2">
           {/* ---------- Left: skill gap analysis list ---------- */}
@@ -1204,7 +1173,7 @@ export function SkillGapPage() {
                 className="relative z-10 w-full justify-center gap-2 bg-[#63B3C1] text-white hover:bg-[#529EAC] active:bg-[#4A8F9C] focus-visible:ring-[#3AA6B9]"
                 onClick={handleSchedule}
                 loading={isScheduling}
-                disabled={plannedSkills.length === 0 || !hasGaps || isScheduling}
+                disabled={plannedSkills.length === 0 || isScheduling}
               >
                 {isScheduling ? 'Creating…' : 'Generate learning path'}
               </Button>

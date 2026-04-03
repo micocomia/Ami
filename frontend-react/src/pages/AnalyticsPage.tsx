@@ -7,7 +7,8 @@ import { useGoalsContext } from '@/context/GoalsContext';
 import { useActiveGoal } from '@/context/GoalsContext';
 import { useDashboardMetrics } from '@/api/endpoints/content';
 import { useBehavioralMetrics } from '@/api/endpoints/metrics';
-import { SkillRadarChart, SessionTimeChart, MasteryChart } from '@/components/analytics';
+import { useBiasAuditHistory } from '@/api/endpoints/skillGap';
+import { SkillRadarChart, SessionTimeChart, MasteryChart, BiasRiskTrendChart, RecentAuditsTable, HighRiskBanner } from '@/components/analytics';
 
 const TIME_OPTIONS = ['Last 7 days', 'Last 30 days', 'All time'] as const;
 type TimeRange = (typeof TIME_OPTIONS)[number];
@@ -388,6 +389,8 @@ function AnalyticsActiveGoal() {
   const { goals, selectedGoalId, setSelectedGoalId } = useGoalsContext();
   const { activeGoal } = useActiveGoal();
 
+  const { data: biasHistory } = useBiasAuditHistory(userId ?? undefined, activeGoal?.id);
+
   const goalOptions = goals.map((g) => ({
     value: String(g.id),
     label: ((g.learner_profile?.goal_display_name as string | undefined) ?? g.learning_goal).slice(0, 50),
@@ -398,8 +401,7 @@ function AnalyticsActiveGoal() {
   const isLoading = dashLoading || behavLoading;
 
   const overallProgress = metrics?.overall_progress ?? 0;
-  const goalProgressPct = Math.round((overallProgress ?? 0) * 100);
-
+  const goalProgressPct = Math.round(overallProgress);
   const sessionsCompleted = behavMetrics?.sessions_completed
     ?? (activeGoal?.learning_path ?? []).filter(
       (s: { if_learned?: boolean }) => s.if_learned,
@@ -407,7 +409,8 @@ function AnalyticsActiveGoal() {
   const masterySeries = metrics?.mastery_time_series ?? [];
   const sessionSeries = metrics?.session_time_series ?? [];
 
-  const quizAvgPct =
+  // This metric is mastery-derived (not a standalone quiz average endpoint).
+  const masteryRatePct =
     behavMetrics?.latest_mastery_rate != null
       ? Math.round(behavMetrics.latest_mastery_rate * 100)
       : masterySeries.length > 0
@@ -454,6 +457,9 @@ function AnalyticsActiveGoal() {
 
   return (
     <div className="space-y-6">
+      {/* High-risk bias warning */}
+      <HighRiskBanner entries={biasHistory?.entries ?? []} />
+
       {/* Header: title + goal dropdown + time filter */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -496,7 +502,7 @@ function AnalyticsActiveGoal() {
         {/* Goal progress */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Goal progress</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Path completed</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
@@ -504,29 +510,29 @@ function AnalyticsActiveGoal() {
               `${goalProgressPct}%`
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">How far you are in this learning path.</p>
+          <p className="text-xs text-slate-500 mt-1">How much of your learning path you have finished.</p>
         </div>
 
-        {/* Quiz score avg */}
+        {/* Mastery rate */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Quiz score avg</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Current understanding</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
-            ) : quizAvgPct != null ? (
-              `${quizAvgPct}%`
+            ) : masteryRatePct != null ? (
+              `${masteryRatePct}%`
             ) : (
               '—'
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Average mastery percentage across sessions.</p>
+          <p className="text-xs text-slate-500 mt-1">How well you understand your recent sessions.</p>
         </div>
 
         {/* Study time */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Study time</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Time spent learning</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-20 rounded bg-slate-100 animate-pulse" />
@@ -536,21 +542,21 @@ function AnalyticsActiveGoal() {
               '0h'
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Total time recorded for this goal.</p>
+          <p className="text-xs text-slate-500 mt-1">Total time you have spent on this goal.</p>
         </div>
 
         {/* Streak */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <ClockIcon />
-          <p className="text-sm font-semibold text-slate-800 mt-2">Streak</p>
+          <p className="text-sm font-semibold text-slate-800 mt-2">Sessions completed</p>
           <p className="text-xl font-bold text-slate-900 mt-0.5">
             {isLoading ? (
               <span className="inline-flex h-6 w-16 rounded bg-slate-100 animate-pulse" />
             ) : (
-              `${streakDays} days`
+              String(streakDays)
             )}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Number of sessions logged for this goal.</p>
+          <p className="text-xs text-slate-500 mt-1">How many sessions you have completed for this goal.</p>
         </div>
       </div>
 
@@ -770,6 +776,55 @@ function AnalyticsActiveGoal() {
           </div>
         </div>
       </section>
+
+      {/* Bias & Ethics Review */}
+      {biasHistory && biasHistory.entries.length > 0 && (
+        <section>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Bias & Ethics Review</h3>
+
+          {/* Bias KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Total Audits</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{biasHistory.summary.total_audits}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Total Flags</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{biasHistory.summary.total_flags}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-medium text-slate-500">Current Risk</p>
+              <p className={`text-2xl font-bold mt-1 capitalize ${
+                biasHistory.summary.current_risk === 'low' ? 'text-green-600' :
+                biasHistory.summary.current_risk === 'medium' ? 'text-amber-600' :
+                'text-red-600'
+              }`}>
+                {biasHistory.summary.current_risk}
+              </p>
+            </div>
+          </div>
+
+          {/* Trend chart + Recent Audits table */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <h4 className="font-semibold text-slate-700 mb-4">Risk Level Over Time</h4>
+              <BiasRiskTrendChart entries={biasHistory.entries} />
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <h4 className="font-semibold text-slate-700 mb-4">Recent Audits</h4>
+              <RecentAuditsTable entries={biasHistory.entries} />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!isLoading && !metrics && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <p className="text-slate-400 text-sm">
+            No analytics data yet. Complete some sessions to see your progress.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
